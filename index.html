@@ -1,1 +1,829 @@
 
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parser Transaksi QRIS — Sort by Application Time</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f2ec;
+    --bg-card: #ffffff;
+    --ink: #1a1814;
+    --ink-soft: #625c54;
+    --accent: #c8553d;
+    --accent-soft: #e8d5c4;
+    --line: #d9d3c7;
+    --success: #3d7a5c;
+    --warning: #b8862b;
+    --highlight: #fff4a3;
+  }
+
+  body {
+    font-family: 'Instrument Sans', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 32px 24px;
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(200, 85, 61, 0.06) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(184, 134, 43, 0.05) 0%, transparent 50%);
+  }
+
+  .container { max-width: 1280px; margin: 0 auto; }
+
+  header {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 24px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  h1 em {
+    font-style: italic;
+    color: var(--accent);
+    font-weight: 400;
+  }
+
+  .subtitle {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  @media (min-width: 1024px) {
+    .grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 24px;
+  }
+
+  .card-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .card-desc {
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+    margin-bottom: 16px;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 320px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--ink);
+    background: #faf8f3;
+    resize: vertical;
+    transition: border-color 0.2s;
+  }
+
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+    align-items: center;
+  }
+
+  button, select {
+    font-family: 'Instrument Sans', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 500;
+    padding: 10px 18px;
+    border: 1px solid var(--ink);
+    border-radius: 3px;
+    background: var(--bg-card);
+    color: var(--ink);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  button:hover { background: var(--ink); color: var(--bg-card); }
+
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+  button.primary:hover { background: #a8432f; border-color: #a8432f; }
+
+  button.success { background: var(--success); border-color: var(--success); color: white; }
+  button.success:hover { background: #2d5d44; border-color: #2d5d44; }
+
+  button.ghost { border-color: var(--line); color: var(--ink-soft); }
+  button.ghost:hover { background: var(--bg); color: var(--ink); border-color: var(--ink); }
+
+  select {
+    padding-right: 36px;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231a1814' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .stat {
+    padding: 14px 16px;
+    background: #faf8f3;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 2px;
+  }
+
+  .stat-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 4px;
+  }
+
+  .stat-value {
+    font-family: 'Fraunces', serif;
+    font-size: 1.4rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    max-height: 600px;
+    overflow-y: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  thead {
+    position: sticky;
+    top: 0;
+    background: var(--ink);
+    color: var(--bg);
+    z-index: 1;
+  }
+
+  th {
+    text-align: left;
+    padding: 12px 14px;
+    font-weight: 500;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  th.num, td.num { text-align: right; font-family: 'JetBrains Mono', monospace; }
+
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: middle;
+  }
+
+  tbody tr:hover { background: #faf8f3; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .idx {
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+  }
+
+  .user-id { font-weight: 600; }
+  .nama { color: var(--ink-soft); }
+
+  .time-cell {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+  }
+
+  .empty {
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--ink-soft);
+    font-style: italic;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 14px 22px;
+    background: var(--ink);
+    color: var(--bg);
+    border-radius: 3px;
+    font-size: 0.9rem;
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.25s;
+    pointer-events: none;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .toast.success { background: var(--success); }
+  .toast.error { background: var(--accent); }
+
+  .options {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px dashed var(--line);
+    font-size: 0.85rem;
+  }
+
+  .options label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    color: var(--ink-soft);
+  }
+
+  .options input[type="checkbox"] { accent-color: var(--accent); }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    text-align: center;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .hint {
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    margin-top: 8px;
+    line-height: 1.5;
+    padding: 10px 12px;
+    background: #faf8f3;
+    border-left: 3px solid var(--warning);
+    border-radius: 2px;
+  }
+
+  .hint strong { color: var(--ink); }
+
+  .warning-row { background: #fff4a3 !important; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1>Parser Transaksi <em>QRIS</em></h1>
+        <div class="subtitle">Sort & Extract · By Application Time</div>
+      </div>
+      <div class="subtitle" id="dateDisplay"></div>
+    </header>
+
+    <div class="grid">
+      <!-- INPUT -->
+      <section class="card">
+        <div class="card-title">Input Raw Data</div>
+        <div class="card-desc">Paste raw data dari web (Ctrl+V). Setiap transaksi terdiri dari 20 baris.</div>
+        <textarea id="input" placeholder="Paste raw data di sini...&#10;&#10;Contoh:&#10;MAGNUM188 (G156)&#10;MAGNUM188 (229)&#10;164911@229&#10;Dukunmaxwin&#10;UTEP SOLIH NURJAMAN&#10;..."></textarea>
+
+        <div class="controls">
+          <button id="parseBtn" class="primary">Parse &amp; Urutkan</button>
+          <select id="sortOrder">
+            <option value="asc">↑ Lama → Terbaru</option>
+            <option value="desc">↓ Terbaru → Lama</option>
+          </select>
+          <button id="clearBtn" class="ghost">Bersihkan</button>
+          <button id="sampleBtn" class="ghost">Contoh Data</button>
+        </div>
+
+        <div class="hint">
+          <strong>Tip:</strong> Parser otomatis mendeteksi transaksi valid dan mengabaikan baris sampah (seperti baris MAGNUM188 atau data yang tidak lengkap). Tidak masalah jika ada baris tambahan/tidak konsisten.
+        </div>
+      </section>
+
+      <!-- OUTPUT -->
+      <section class="card">
+        <div class="card-title">Hasil Terurut</div>
+        <div class="card-desc" id="resultDesc">Belum ada data. Paste raw data di kiri lalu klik "Parse &amp; Urutkan".</div>
+
+        <div class="stats" id="stats" style="display:none;">
+          <div class="stat">
+            <div class="stat-label">Total Transaksi</div>
+            <div class="stat-value" id="statCount">0</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Grand Total</div>
+            <div class="stat-value" id="statTotal">0</div>
+          </div>
+        </div>
+
+        <div class="controls" id="outputControls" style="display:none;">
+          <button id="copyBtn" class="success">📋 Copy untuk Excel (Tab-Separated)</button>
+          <button id="copyCsvBtn">Copy CSV</button>
+        </div>
+
+        <div class="options" id="options" style="display:none;">
+          <label><input type="checkbox" id="optHeader" checked> Sertakan Header</label>
+          <label><input type="checkbox" id="optTime"> Sertakan Application Time</label>
+          <label><input type="checkbox" id="optIndex"> Sertakan No. Urut</label>
+        </div>
+      </section>
+    </div>
+
+    <!-- TABLE -->
+    <section class="card" style="margin-top:24px;">
+      <div class="card-title">Tabel Hasil</div>
+      <div class="card-desc">Data yang sudah di-extract dan diurutkan berdasarkan Application Time.</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:50px;">#</th>
+              <th>Application Time</th>
+              <th>Login ID</th>
+              <th>Nama Rekening</th>
+              <th class="num">Nominal</th>
+              <th class="num">Potongan QRIS</th>
+              <th class="num">Total (×1000)</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="7" class="empty">Belum ada data untuk ditampilkan</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>
+      Tool lokal · Semua proses dilakukan di browser Anda · Tidak ada data yang dikirim ke server
+    </footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  // ======= DATA PARSING =======
+  const FIELDS_PER_RECORD = 20;
+  // Indices (0-based) after splitting input by line, stripping empty lines:
+  // 0: Brand (G156)
+  // 1: Sub-brand
+  // 2: Agent ID (xxxxx@229)
+  // 3: USER ID         <-- we want
+  // 4: NAMA REKENING   <-- we want
+  // 5: Status (NORMAL)
+  // 6: Transaction ID
+  // 7: Transaction ID (duplicate)
+  // 8: APPLICATION TIME  <-- we want (for sorting)
+  // 9: Channel (QRIS IM)
+  // 10: Method (QRis)
+  // 11: Currency (IDR)
+  // 12: NOMINAL        <-- we want
+  // 13: POTONGAN QRIS  <-- we want
+  // 14: Status (Approved)
+  // 15: Processor (system)
+  // 16: Processed time
+  // 17: Date
+  // 18: Account name (duplicate)
+  // 19: Method (QRis, duplicate)
+
+  let transactions = [];
+
+  function parseInput(raw) {
+    const lines = raw.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const records = [];
+    const errors = [];
+    let skippedBlocks = 0;
+
+    if (lines.length === 0) return { records, errors, skippedBlocks };
+
+    const datePattern = /^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}$/;
+    const numPattern = /^[\d,]+\.\d{1,2}$/;
+
+    // Anchor-based parsing: find Application Time (date-time) followed by
+    // QRIS IM / QRis / IDR / nominal / potongan structure.
+    // This is robust to records of varying length or junk lines in between.
+    for (let i = 5; i < lines.length - 5; i++) {
+      // Application Time: MM/DD/YYYY HH:MM:SS
+      if (!datePattern.test(lines[i])) continue;
+
+      // Verify structure: position i+3 must be "IDR"
+      // (Application Time is followed by QRIS IM, QRis, IDR)
+      if (lines[i+3] !== 'IDR') continue;
+
+      // Position i+4 (nominal) and i+5 (potongan) must be numeric
+      if (!numPattern.test(lines[i+4])) continue;
+      if (!numPattern.test(lines[i+5])) continue;
+
+      // Extract fields based on anchor offsets:
+      // LOGIN ID   at i-5
+      // NAMA REK   at i-4
+      // APP TIME   at i
+      // NOMINAL    at i+4
+      // POTONGAN   at i+5
+      const loginId = lines[i-5];
+      const namaRekening = lines[i-4];
+
+      // Sanity check: LOGIN ID should not be MAGNUM188/empty/agent id pattern
+      if (/^MAGNUM188/i.test(loginId) || /@\d+$/.test(loginId)) {
+        skippedBlocks++;
+        continue;
+      }
+
+      records.push({
+        userId: loginId,
+        namaRekening: namaRekening,
+        applicationTime: lines[i],
+        nominal: lines[i+4],
+        potonganQris: lines[i+5],
+        _timestamp: parseDate(lines[i])
+      });
+    }
+
+    if (records.length === 0) {
+      errors.push('Tidak ada transaksi valid ditemukan. Pastikan data dipaste lengkap dan benar.');
+    }
+
+    return { records, errors, skippedBlocks };
+  }
+
+  function parseDate(str) {
+    // Format: MM/DD/YYYY HH:MM:SS
+    const m = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+    if (!m) return new Date(0);
+    return new Date(+m[3], +m[1]-1, +m[2], +m[4], +m[5], +m[6]);
+  }
+
+  function parseNumber(str) {
+    // Handle "9,865.00" → 9865.00
+    return parseFloat(String(str).replace(/,/g, '')) || 0;
+  }
+
+  function formatNumber(num) {
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function formatInt(num) {
+    return Math.round(num).toLocaleString('en-US');
+  }
+
+  // ======= RENDERING =======
+  function render() {
+    const tbody = document.getElementById('tbody');
+    const desc = document.getElementById('resultDesc');
+    const stats = document.getElementById('stats');
+    const outputControls = document.getElementById('outputControls');
+    const options = document.getElementById('options');
+
+    if (transactions.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">Belum ada data untuk ditampilkan</td></tr>';
+      desc.textContent = 'Belum ada data. Paste raw data di kiri lalu klik "Parse & Urutkan".';
+      stats.style.display = 'none';
+      outputControls.style.display = 'none';
+      options.style.display = 'none';
+      return;
+    }
+
+    // Stats
+    const grandTotal = transactions.reduce((s, t) => s + (parseNumber(t.nominal) + parseNumber(t.potonganQris)) * 1000, 0);
+
+    document.getElementById('statCount').textContent = transactions.length;
+    document.getElementById('statTotal').textContent = formatInt(grandTotal);
+    stats.style.display = 'grid';
+    outputControls.style.display = 'flex';
+    options.style.display = 'flex';
+
+    desc.textContent = `${transactions.length} transaksi berhasil di-parse dan diurutkan.`;
+
+    // Table rows
+    tbody.innerHTML = transactions.map((t, i) => {
+      const total = (parseNumber(t.nominal) + parseNumber(t.potonganQris)) * 1000;
+      return `
+      <tr>
+        <td class="idx">${i + 1}</td>
+        <td class="time-cell">${escapeHtml(t.applicationTime)}</td>
+        <td class="user-id">${escapeHtml(t.userId)}</td>
+        <td class="nama">${escapeHtml(t.namaRekening)}</td>
+        <td class="num">${escapeHtml(t.nominal)}</td>
+        <td class="num">${escapeHtml(t.potonganQris)}</td>
+        <td class="num"><strong>${formatInt(total)}</strong></td>
+      </tr>`;
+    }).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ======= COPY =======
+  function buildCopyText(separator) {
+    const includeHeader = document.getElementById('optHeader').checked;
+    const includeTime = document.getElementById('optTime').checked;
+    const includeIndex = document.getElementById('optIndex').checked;
+
+    const rows = [];
+
+    if (includeHeader) {
+      const header = [];
+      if (includeIndex) header.push('No');
+      if (includeTime) header.push('Application Time');
+      header.push('LOGIN ID', 'NAMA REKENING', 'NOMINAL', 'POTONGAN QRIS', 'TOTAL');
+      rows.push(header.join(separator));
+    }
+
+    transactions.forEach((t, i) => {
+      const row = [];
+      if (includeIndex) row.push(i + 1);
+      if (includeTime) row.push(t.applicationTime);
+      const total = Math.round((parseNumber(t.nominal) + parseNumber(t.potonganQris)) * 1000);
+      row.push(t.userId, t.namaRekening, t.nominal, t.potonganQris, total);
+      rows.push(row.join(separator));
+    });
+
+    return rows.join('\n');
+  }
+
+  async function copyToClipboard(text, label) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`✓ ${label} berhasil disalin ke clipboard`, 'success');
+    } catch (e) {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        showToast(`✓ ${label} berhasil disalin`, 'success');
+      } catch (err) {
+        showToast('✗ Gagal menyalin. Coba lagi.', 'error');
+      }
+      document.body.removeChild(ta);
+    }
+  }
+
+  // ======= TOAST =======
+  let toastTimer;
+  function showToast(msg, type = '') {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.className = 'toast show ' + type;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.className = 'toast ' + type, 2500);
+  }
+
+  // ======= EVENTS =======
+  document.getElementById('parseBtn').addEventListener('click', () => {
+    const raw = document.getElementById('input').value;
+    if (!raw.trim()) {
+      showToast('Paste raw data terlebih dahulu', 'error');
+      return;
+    }
+
+    const { records, errors, skippedBlocks } = parseInput(raw);
+
+    if (records.length === 0) {
+      showToast('Tidak ada transaksi valid ditemukan. Cek format data.', 'error');
+      return;
+    }
+
+    // Sort
+    const order = document.getElementById('sortOrder').value;
+    records.sort((a, b) => order === 'asc'
+      ? a._timestamp - b._timestamp
+      : b._timestamp - a._timestamp);
+
+    transactions = records;
+    render();
+
+    let msg = `✓ ${records.length} transaksi berhasil diurutkan`;
+    if (skippedBlocks > 0) msg += ` (${skippedBlocks} baris sampah diabaikan)`;
+    showToast(msg, 'success');
+
+    if (errors.length > 0) {
+      console.warn('Peringatan parsing:', errors);
+    }
+  });
+
+  document.getElementById('sortOrder').addEventListener('change', () => {
+    if (transactions.length === 0) return;
+    const order = document.getElementById('sortOrder').value;
+    transactions.sort((a, b) => order === 'asc'
+      ? a._timestamp - b._timestamp
+      : b._timestamp - a._timestamp);
+    render();
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    document.getElementById('input').value = '';
+    transactions = [];
+    render();
+    showToast('Dibersihkan');
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', () => {
+    const text = buildCopyText('\t');
+    copyToClipboard(text, 'Data (tab-separated)');
+  });
+
+  document.getElementById('copyCsvBtn').addEventListener('click', () => {
+    // CSV with quotes for safety
+    const includeHeader = document.getElementById('optHeader').checked;
+    const includeTime = document.getElementById('optTime').checked;
+    const includeIndex = document.getElementById('optIndex').checked;
+
+    const escCsv = (v) => {
+      const s = String(v);
+      if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    };
+
+    const rows = [];
+    if (includeHeader) {
+      const header = [];
+      if (includeIndex) header.push('No');
+      if (includeTime) header.push('Application Time');
+      header.push('LOGIN ID', 'NAMA REKENING', 'NOMINAL', 'POTONGAN QRIS', 'TOTAL');
+      rows.push(header.map(escCsv).join(','));
+    }
+    transactions.forEach((t, i) => {
+      const row = [];
+      if (includeIndex) row.push(i + 1);
+      if (includeTime) row.push(t.applicationTime);
+      const total = Math.round((parseNumber(t.nominal) + parseNumber(t.potonganQris)) * 1000);
+      row.push(t.userId, t.namaRekening, t.nominal, t.potonganQris, total);
+      rows.push(row.map(escCsv).join(','));
+    });
+
+    copyToClipboard(rows.join('\n'), 'Data (CSV)');
+  });
+
+  // Sample data (untuk testing)
+  document.getElementById('sampleBtn').addEventListener('click', () => {
+    const sample = `MAGNUM188 (G156)
+MAGNUM188 (229)
+164911@229
+Dukunmaxwin
+UTEP SOLIH NURJAMAN
+NORMAL
+792187922
+792187922
+04/22/2026 06:51:17
+QRIS IM
+QRis
+IDR
+12.82
+0.18
+Approved
+system
+04/22/2026 06:51:50
+04/22/2026
+UTEP SOLIH NURJAMAN
+QRis
+MAGNUM188 (G156)
+MAGNUM188 (229)
+195034@229
+Bejo5999
+Suwarno
+NORMAL
+792187915
+792187915
+04/22/2026 06:51:13
+QRIS IM
+QRis
+IDR
+88.78
+1.22
+Approved
+system
+04/22/2026 06:52:01
+04/22/2026
+Suwarno
+QRis
+MAGNUM188 (G156)
+MAGNUM188 (229)
+215032@229
+HBB324
+DIMAS AGUNG PRAYUDA
+NORMAL
+792187765
+792187765
+04/22/2026 06:50:21
+QRIS IM
+QRis
+IDR
+59.19
+0.81
+Approved
+system
+04/22/2026 06:51:01
+04/22/2026
+DIMAS AGUNG PRAYUDA
+QRis`;
+    document.getElementById('input').value = sample;
+    showToast('Contoh data dimuat. Klik "Parse & Urutkan"');
+  });
+
+  // Date display
+  const now = new Date();
+  document.getElementById('dateDisplay').textContent = now.toLocaleDateString('id-ID', {
+    day: '2-digit', month: 'short', year: 'numeric'
+  }).toUpperCase();
+
+  // Allow Ctrl+Enter to parse
+  document.getElementById('input').addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      document.getElementById('parseBtn').click();
+    }
+  });
+</script>
+<!-- ===== ANTI INSPECT / ANTI VIEW SOURCE ===== -->
+<script>
+(function(){
+  document.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+  document.addEventListener('keydown', function(e){
+    if(e.keyCode===123) e.preventDefault();
+    if(e.ctrlKey && e.shiftKey && (e.keyCode===73||e.keyCode===74||e.keyCode===67)) e.preventDefault();
+    if(e.ctrlKey && e.keyCode===85) e.preventDefault();
+    if(e.ctrlKey && e.keyCode===83) e.preventDefault();
+    if(e.ctrlKey && e.keyCode===65) e.preventDefault();
+  });
+  var devOpen=false;
+  var threshold=160;
+  setInterval(function(){
+    var w=window.outerWidth-window.innerWidth>threshold;
+    var h=window.outerHeight-window.innerHeight>threshold;
+    if((w||h)&&!devOpen){
+      devOpen=true;
+      document.body.innerHTML='';
+      window.location.replace('https://pasticuan.me/login-magnum188');
+    }
+    if(!w&&!h) devOpen=false;
+  },800);
+})();
+</script>
+</body>
+</html>
