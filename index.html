@@ -358,7 +358,7 @@
         </div>
 
         <div class="hint">
-          <strong>Tip:</strong> Parser otomatis mendeteksi transaksi valid dan mengabaikan baris sampah (seperti baris GROUP atau data yang tidak lengkap). Tidak masalah jika ada baris tambahan/tidak konsisten.
+          <strong>Tip:</strong> Parser otomatis mendeteksi transaksi valid dan mengabaikan baris sampah (seperti baris MAGNUM188 atau data yang tidak lengkap). Tidak masalah jika ada baris tambahan/tidak konsisten.
         </div>
       </section>
 
@@ -379,14 +379,21 @@
         </div>
 
         <div class="controls" id="outputControls" style="display:none;">
-          <button id="copyBtn" class="success">📋 Copy untuk Excel (Tab-Separated)</button>
+          <button id="copyBtn" class="success">📋 Copy untuk Excel (Tab)</button>
           <button id="copyCsvBtn">Copy CSV</button>
+          <button id="selectAllBtn" class="ghost">Select All Output</button>
         </div>
 
         <div class="options" id="options" style="display:none;">
           <label><input type="checkbox" id="optHeader" checked> Sertakan Header</label>
           <label><input type="checkbox" id="optTime"> Sertakan Application Time</label>
           <label><input type="checkbox" id="optIndex"> Sertakan No. Urut</label>
+          <label><input type="checkbox" id="optDedup"> Hapus Duplikat (LoginID+Amount)</label>
+        </div>
+
+        <div id="outputTextWrap" style="display:none; margin-top:12px;">
+          <div style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:6px; font-family:'JetBrains Mono',monospace;">▼ Output teks (bisa juga Ctrl+A lalu Ctrl+C di sini, lalu paste ke Excel)</div>
+          <textarea id="outputText" style="min-height:200px; background:#f0fff0;" readonly></textarea>
         </div>
       </section>
     </div>
@@ -542,22 +549,37 @@
       stats.style.display = 'none';
       outputControls.style.display = 'none';
       options.style.display = 'none';
+      document.getElementById('outputTextWrap').style.display = 'none';
       return;
     }
 
-    // Stats
-    const grandTotal = transactions.reduce((s, t) => s + (parseNumber(t.nominal) + parseNumber(t.potonganQris)) * 1000, 0);
+    // Dedup filter
+    const dedupActive = document.getElementById('optDedup') && document.getElementById('optDedup').checked;
+    let displayTx = transactions;
+    if (dedupActive) {
+      const seen = new Set();
+      displayTx = transactions.filter(t => {
+        const key = t.userId + '|' + t.nominal + '|' + t.potonganQris;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
 
-    document.getElementById('statCount').textContent = transactions.length;
+    // Stats
+    const grandTotal = displayTx.reduce((s, t) => s + (parseNumber(t.nominal) + parseNumber(t.potonganQris)) * 1000, 0);
+
+    document.getElementById('statCount').textContent = displayTx.length + (dedupActive && displayTx.length < transactions.length ? ` (dari ${transactions.length})` : '');
     document.getElementById('statTotal').textContent = formatInt(grandTotal);
     stats.style.display = 'grid';
     outputControls.style.display = 'flex';
     options.style.display = 'flex';
+    document.getElementById('outputTextWrap').style.display = 'block';
 
-    desc.textContent = `${transactions.length} transaksi berhasil di-parse dan diurutkan.`;
+    desc.textContent = `${displayTx.length} transaksi berhasil di-parse dan diurutkan.`;
 
     // Table rows
-    tbody.innerHTML = transactions.map((t, i) => {
+    tbody.innerHTML = displayTx.map((t, i) => {
       const total = (parseNumber(t.nominal) + parseNumber(t.potonganQris)) * 1000;
       return `
       <tr>
@@ -570,14 +592,35 @@
         <td class="num"><strong>${formatInt(total)}</strong></td>
       </tr>`;
     }).join('');
+
+    // Refresh output text area
+    refreshOutputText(displayTx);
   }
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  function getDisplayTx() {
+    const dedupActive = document.getElementById('optDedup') && document.getElementById('optDedup').checked;
+    if (!dedupActive) return transactions;
+    const seen = new Set();
+    return transactions.filter(t => {
+      const key = t.userId + '|' + t.nominal + '|' + t.potonganQris;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function refreshOutputText(txList) {
+    const text = buildCopyText('\t', txList);
+    document.getElementById('outputText').value = text;
+  }
+
   // ======= COPY =======
-  function buildCopyText(separator) {
+  function buildCopyText(separator, txList) {
+    txList = txList || getDisplayTx();
     const includeHeader = document.getElementById('optHeader').checked;
     const includeTime = document.getElementById('optTime').checked;
     const includeIndex = document.getElementById('optIndex').checked;
@@ -592,7 +635,7 @@
       rows.push(header.join(separator));
     }
 
-    transactions.forEach((t, i) => {
+    txList.forEach((t, i) => {
       const row = [];
       if (includeIndex) row.push(i + 1);
       if (includeTime) row.push(t.applicationTime);
@@ -689,7 +732,7 @@
   });
 
   document.getElementById('copyCsvBtn').addEventListener('click', () => {
-    // CSV with quotes for safety
+    const txList = getDisplayTx();
     const includeHeader = document.getElementById('optHeader').checked;
     const includeTime = document.getElementById('optTime').checked;
     const includeIndex = document.getElementById('optIndex').checked;
@@ -708,7 +751,7 @@
       header.push('LOGIN ID', 'NAMA REKENING', 'NOMINAL', 'POTONGAN QRIS', 'TOTAL');
       rows.push(header.map(escCsv).join(','));
     }
-    transactions.forEach((t, i) => {
+    txList.forEach((t, i) => {
       const row = [];
       if (includeIndex) row.push(i + 1);
       if (includeTime) row.push(t.applicationTime);
@@ -720,11 +763,17 @@
     copyToClipboard(rows.join('\n'), 'Data (CSV)');
   });
 
-  // Sample data (untuk testing)
-  document.getElementById('sampleBtn').addEventListener('click', () => {
-    const sample = ``;
-    document.getElementById('input').value = sample;
-    showToast('Contoh data dimuat. Klik "Parse & Urutkan"');
+  document.getElementById('selectAllBtn').addEventListener('click', () => {
+    const ta = document.getElementById('outputText');
+    ta.focus();
+    ta.select();
+    showToast('Teks dipilih. Tekan Ctrl+C untuk menyalin.');
+  });
+
+  // Re-render when options change
+  ['optHeader','optTime','optIndex','optDedup'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => { if (transactions.length > 0) render(); });
   });
 
   // Date display
@@ -741,30 +790,6 @@
     }
   });
 </script>
-<!-- ===== ANTI INSPECT / ANTI VIEW SOURCE ===== -->
-<script>
-(function(){
-  document.addEventListener('contextmenu', function(e){ e.preventDefault(); });
-  document.addEventListener('keydown', function(e){
-    if(e.keyCode===123) e.preventDefault();
-    if(e.ctrlKey && e.shiftKey && (e.keyCode===73||e.keyCode===74||e.keyCode===67)) e.preventDefault();
-    if(e.ctrlKey && e.keyCode===85) e.preventDefault();
-    if(e.ctrlKey && e.keyCode===83) e.preventDefault();
-    if(e.ctrlKey && e.keyCode===65) e.preventDefault();
-  });
-  var devOpen=false;
-  var threshold=160;
-  setInterval(function(){
-    var w=window.outerWidth-window.innerWidth>threshold;
-    var h=window.outerHeight-window.innerHeight>threshold;
-    if((w||h)&&!devOpen){
-      devOpen=true;
-      document.body.innerHTML='';
-      window.location.replace('https://pasticuan.me/');
-    }
-    if(!w&&!h) devOpen=false;
-  },800);
-})();
-</script>
+
 </body>
 </html>
