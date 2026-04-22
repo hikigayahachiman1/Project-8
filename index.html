@@ -358,7 +358,7 @@
         </div>
 
         <div class="hint">
-          <strong>Tip:</strong> Parser otomatis mendeteksi transaksi valid dan mengabaikan baris sampah (seperti baris GROUP atau data yang tidak lengkap). Tidak masalah jika ada baris tambahan/tidak konsisten.
+          <strong>Tip:</strong> Parser otomatis mendeteksi transaksi valid dan mengabaikan baris sampah (seperti baris MAGNUM188 atau data yang tidak lengkap). Tidak masalah jika ada baris tambahan/tidak konsisten.
         </div>
       </section>
 
@@ -388,7 +388,7 @@
           <label><input type="checkbox" id="optHeader" checked> Sertakan Header</label>
           <label><input type="checkbox" id="optTime"> Sertakan Application Time</label>
           <label><input type="checkbox" id="optIndex"> Sertakan No. Urut</label>
-          <label><input type="checkbox" id="optDedup"> Hapus Duplikat (LoginID+Amount)</label>
+
         </div>
 
         <div id="outputTextWrap" style="display:none; margin-top:12px;">
@@ -553,23 +553,12 @@
       return;
     }
 
-    // Dedup filter
-    const dedupActive = document.getElementById('optDedup') && document.getElementById('optDedup').checked;
     let displayTx = transactions;
-    if (dedupActive) {
-      const seen = new Set();
-      displayTx = transactions.filter(t => {
-        const key = t.userId + '|' + t.nominal + '|' + t.potonganQris;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-    }
 
     // Stats
     const grandTotal = displayTx.reduce((s, t) => s + (parseNumber(t.nominal) + parseNumber(t.potonganQris)) * 1000, 0);
 
-    document.getElementById('statCount').textContent = displayTx.length + (dedupActive && displayTx.length < transactions.length ? ` (dari ${transactions.length})` : '');
+    document.getElementById('statCount').textContent = displayTx.length;
     document.getElementById('statTotal').textContent = formatInt(grandTotal);
     stats.style.display = 'grid';
     outputControls.style.display = 'flex';
@@ -602,15 +591,7 @@
   }
 
   function getDisplayTx() {
-    const dedupActive = document.getElementById('optDedup') && document.getElementById('optDedup').checked;
-    if (!dedupActive) return transactions;
-    const seen = new Set();
-    return transactions.filter(t => {
-      const key = t.userId + '|' + t.nominal + '|' + t.potonganQris;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    return transactions;
   }
 
   function refreshOutputText(txList) {
@@ -771,7 +752,7 @@
   });
 
   // Re-render when options change
-  ['optHeader','optTime','optIndex','optDedup'].forEach(id => {
+  ['optHeader','optTime','optIndex'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', () => { if (transactions.length > 0) render(); });
   });
@@ -791,5 +772,22 @@
   });
 </script>
 
+<!-- ===== ANTI INSPECT (SAFE) ===== -->
+<script>
+(function(){
+  // Blokir klik kanan
+  document.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+  // Blokir shortcut inspect & view source
+  document.addEventListener('keydown', function(e){
+    // F12
+    if(e.keyCode === 123) { e.preventDefault(); return; }
+    // Ctrl+Shift+I / Ctrl+Shift+J / Ctrl+Shift+C
+    if(e.ctrlKey && e.shiftKey && [73,74,67].includes(e.keyCode)) { e.preventDefault(); return; }
+    // Ctrl+U (view source)
+    if(e.ctrlKey && e.keyCode === 85) { e.preventDefault(); return; }
+  });
+})();
+</script>
 </body>
 </html>
