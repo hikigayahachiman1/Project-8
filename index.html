@@ -1208,7 +1208,8 @@
         memberName: row.namaRekening,
         applicationTime: row.applicationTime,
         total: (parseNumber(row.nominal) + parseNumber(row.potonganQris)) * 1000,
-        timestamp: row._timestamp instanceof Date ? row._timestamp.getTime() : parseDate(row.applicationTime).getTime()
+        timestamp: row._timestamp instanceof Date ? row._timestamp.getTime() : parseDate(row.applicationTime).getTime(),
+        timeValue: getTimeOnlyTimestamp(row.applicationTime)
       }));
 
     if (deposits.length === 0) {
@@ -1230,7 +1231,8 @@
           transactions: [],
           maxDeposit: 0,
           time: '-',
-          timestamp: 0
+          timestamp: 0,
+          timeValue: 0
         };
       }
       byLogin[key].transactions.push(row.total);
@@ -1238,6 +1240,7 @@
         byLogin[key].maxDeposit = row.total;
         byLogin[key].time = bonusGetTime(row.applicationTime);
         byLogin[key].timestamp = row.timestamp;
+        byLogin[key].timeValue = row.timeValue;
         byLogin[key].memberName = row.memberName;
         byLogin[key].loginId = loginId;
       }
@@ -1254,13 +1257,18 @@
         maxDeposit: info.maxDeposit,
         time: info.time,
         timestamp: info.timestamp,
+        timeValue: info.timeValue,
         depositCount: info.transactions.length,
         bonus,
         remark: bonusRemark
       };
     }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !localDone.has(row.loginKey));
 
-    bonusRows.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0) || a.loginId.localeCompare(b.loginId));
+    bonusRows.sort((a, b) => {
+      const timeDiff = (b.timeValue || 0) - (a.timeValue || 0);
+      if (timeDiff !== 0) return timeDiff;
+      return a.loginId.localeCompare(b.loginId);
+    });
     bonusRender();
     renderBonusDoneInfo();
     showToast(`${bonusRows.length} data bonus harian berhasil diproses.`, 'success');
@@ -1460,10 +1468,16 @@
   }
 
   function parseDate(str) {
-    // Format: MM/DD/YYYY HH:MM:SS
-    const m = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+    const value = String(str || '').trim().replace(/\s+/g, ' ');
+    const m = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$/);
     if (!m) return new Date(0);
-    return new Date(+m[3], +m[1]-1, +m[2], +m[4], +m[5], +m[6]);
+    return new Date(+m[3], +m[1] - 1, +m[2], +m[4], +m[5], +m[6]);
+  }
+
+  function getTimeOnlyTimestamp(dateText) {
+    const d = parseDate(dateText);
+    if (!d || d.getTime() === 0) return 0;
+    return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
   }
 
   function parseNumber(str) {
@@ -1735,20 +1749,33 @@
   // Date & clock display
   function updateDateTimeDisplay() {
     const now = new Date();
+    const wibOptions = { timeZone: 'Asia/Jakarta' };
+
     document.getElementById('dateDisplay').textContent = now.toLocaleDateString('id-ID', {
-      day: '2-digit', month: 'short', year: 'numeric'
+      ...wibOptions,
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric'
     }).toUpperCase();
 
     document.getElementById('dayDisplay').textContent = now.toLocaleDateString('id-ID', {
+      ...wibOptions,
       weekday: 'long'
     }).toUpperCase();
 
     document.getElementById('clockDisplay').textContent = now.toLocaleTimeString('id-ID', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-    });
+      ...wibOptions,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }) + ' WIB';
 
     document.getElementById('fullDateDisplay').textContent = now.toLocaleDateString('id-ID', {
-      day: '2-digit', month: 'long', year: 'numeric'
+      ...wibOptions,
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric'
     }).toUpperCase();
   }
 
