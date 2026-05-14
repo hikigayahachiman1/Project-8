@@ -1253,13 +1253,14 @@
         memberName: info.memberName,
         maxDeposit: info.maxDeposit,
         time: info.time,
+        timestamp: info.timestamp,
         depositCount: info.transactions.length,
         bonus,
         remark: bonusRemark
       };
     }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !localDone.has(row.loginKey));
 
-    bonusRows.sort((a, b) => bonusTimeValue(b.time) - bonusTimeValue(a.time) || a.loginId.localeCompare(b.loginId));
+    bonusRows.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0) || a.loginId.localeCompare(b.loginId));
     bonusRender();
     renderBonusDoneInfo();
     showToast(`${bonusRows.length} data bonus harian berhasil diproses.`, 'success');
@@ -1316,6 +1317,7 @@
         bonus: row.bonus,
         maxDeposit: row.maxDeposit,
         time: row.time,
+        timestamp: row.timestamp || 0,
         remark: row.remark,
         savedAt: new Date().toISOString()
       };
