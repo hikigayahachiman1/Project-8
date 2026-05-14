@@ -151,7 +151,7 @@
   }
 
   .bonus-copy {
-    display: none;
+    display: flex;
     flex-wrap: wrap;
     gap: 10px;
     margin: 0 0 16px;
@@ -815,7 +815,10 @@
           </div>
           <div class="bonus-copy" id="bonusCopyActions">
             <button id="bonusCopyAllBtn" class="success">Copy Login ID + Bonus</button>
+            <button id="bonusMarkDoneBtn">Tandai Semua Sudah Dibonuskan</button>
+            <button id="bonusClearDoneBtn" class="ghost">Hapus Data Tersimpan Tanggal Ini</button>
           </div>
+          <div class="source-note" id="bonusDoneInfo">Data tersimpan lokal tanggal ini: 0 Login ID</div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -876,6 +879,7 @@
   let transactions = [];
   let bonusRows = [];
   let bonusRemark = '';
+  const BONUS_DONE_KEY = 'qris_bonus_done_v1';
 
   document.querySelectorAll('.tool-tab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -888,6 +892,33 @@
   });
 
   document.getElementById('bonusDate').value = new Date().toISOString().slice(0, 10);
+
+  function getBonusDoneStore() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(BONUS_DONE_KEY) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function saveBonusDoneStore(store) {
+    localStorage.setItem(BONUS_DONE_KEY, JSON.stringify(store || {}));
+  }
+
+  function getBonusDoneSet(dateValue) {
+    const store = getBonusDoneStore();
+    const rows = store[dateValue] || {};
+    return new Set(Object.keys(rows).map(login => String(login).toUpperCase()));
+  }
+
+  function renderBonusDoneInfo() {
+    const info = document.getElementById('bonusDoneInfo');
+    if (!info) return;
+    const dateValue = document.getElementById('bonusDate').value;
+    const count = dateValue ? getBonusDoneSet(dateValue).size : 0;
+    info.textContent = `Data tersimpan lokal tanggal ini: ${count} Login ID`;
+  }
 
   function cleanCell(value) {
     return String(value ?? '')
@@ -1095,8 +1126,9 @@
     if (bonusRows.length === 0) {
       tbody.innerHTML = '<tr><td colspan="9" class="empty">Tidak ada member yang perlu diberi bonus.</td></tr>';
       stats.style.display = 'none';
-      actions.style.display = 'none';
+      actions.style.display = 'flex';
       desc.textContent = 'Tidak ada output bonus untuk tanggal dan data yang diproses.';
+      renderBonusDoneInfo();
       return;
     }
 
@@ -1111,6 +1143,7 @@
     stats.style.display = 'grid';
     actions.style.display = 'flex';
     desc.textContent = `${bonusRows.length} member belum mendapatkan bonus harian dan siap dicopy.`;
+    renderBonusDoneInfo();
 
     tbody.innerHTML = bonusRows.map((row, index) => `
       <tr>
@@ -1211,6 +1244,7 @@
     });
 
     const already = bonusParseAlready(adjustRaw, Object.keys(byLogin), targetDate);
+    const localDone = getBonusDoneSet(dateValue);
     bonusRows = Object.entries(byLogin).map(([key, info]) => {
       const bonus = info.maxDeposit >= 100000 ? 10 : info.maxDeposit >= 50000 ? 5 : 0;
       return {
@@ -1223,10 +1257,11 @@
         bonus,
         remark: bonusRemark
       };
-    }).filter(row => row.bonus > 0 && !already.has(row.loginKey));
+    }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !localDone.has(row.loginKey));
 
     bonusRows.sort((a, b) => bonusTimeValue(b.time) - bonusTimeValue(a.time) || a.loginId.localeCompare(b.loginId));
     bonusRender();
+    renderBonusDoneInfo();
     showToast(`${bonusRows.length} data bonus harian berhasil diproses.`, 'success');
   }
 
@@ -1238,8 +1273,9 @@
     document.getElementById('bonusDesc').textContent = 'Hasil bonus akan muncul di sini setelah data deposit dan adjustment diproses.';
     document.getElementById('bonusTable').innerHTML = '<tr><td colspan="9" class="empty">Belum ada data bonus untuk ditampilkan</td></tr>';
     document.getElementById('bonusStats').style.display = 'none';
-    document.getElementById('bonusCopyActions').style.display = 'none';
+    document.getElementById('bonusCopyActions').style.display = 'flex';
     updateBonusSourceNote();
+    renderBonusDoneInfo();
     showToast('Data bonus dibersihkan.');
   }
 
@@ -1258,9 +1294,62 @@
     copyToClipboard(text, 'Login ID dan bonus');
   }
 
+  function markBonusRowsDone() {
+    const dateValue = document.getElementById('bonusDate').value;
+    if (!dateValue) {
+      showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
+      return;
+    }
+    if (bonusRows.length === 0) {
+      showToast('Tidak ada data bonus untuk ditandai.', 'error');
+      return;
+    }
+
+    const store = getBonusDoneStore();
+    if (!store[dateValue]) store[dateValue] = {};
+    bonusRows.forEach(row => {
+      const key = String(row.loginId || '').trim().toUpperCase();
+      if (!key) return;
+      store[dateValue][key] = {
+        loginId: key,
+        memberName: row.memberName || '',
+        bonus: row.bonus,
+        maxDeposit: row.maxDeposit,
+        time: row.time,
+        remark: row.remark,
+        savedAt: new Date().toISOString()
+      };
+    });
+
+    const savedCount = bonusRows.length;
+    saveBonusDoneStore(store);
+    bonusRows = [];
+    bonusRender();
+    renderBonusDoneInfo();
+    showToast(`${savedCount} data ditandai sudah dibonuskan.`, 'success');
+  }
+
+  function clearBonusDoneByDate() {
+    const dateValue = document.getElementById('bonusDate').value;
+    if (!dateValue) {
+      showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
+      return;
+    }
+    if (!window.confirm('Hapus data tersimpan lokal untuk tanggal ini saja?')) return;
+
+    const store = getBonusDoneStore();
+    delete store[dateValue];
+    saveBonusDoneStore(store);
+    renderBonusDoneInfo();
+    showToast('Data tersimpan lokal tanggal ini dihapus.', 'success');
+  }
+
   document.getElementById('bonusProcessBtn').addEventListener('click', bonusProcess);
   document.getElementById('bonusResetBtn').addEventListener('click', bonusReset);
   document.getElementById('bonusCopyAllBtn').addEventListener('click', bonusCopyAll);
+  document.getElementById('bonusMarkDoneBtn').addEventListener('click', markBonusRowsDone);
+  document.getElementById('bonusClearDoneBtn').addEventListener('click', clearBonusDoneByDate);
+  document.getElementById('bonusDate').addEventListener('change', renderBonusDoneInfo);
 
   function parseInput(raw) {
     if (looksLikeCsv(raw) && /Application Time/i.test(raw)) {
@@ -1663,6 +1752,7 @@
 
   updateDateTimeDisplay();
   setInterval(updateDateTimeDisplay, 1000);
+  renderBonusDoneInfo();
 
   // Allow Ctrl+Enter to parse
   document.getElementById('input').addEventListener('keydown', (e) => {
