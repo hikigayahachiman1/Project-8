@@ -1281,7 +1281,7 @@
     }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !localDone.has(row.loginKey));
 
     bonusRows.sort((a, b) => {
-      const timeDiff = (b.timeValue || 0) - (a.timeValue || 0);
+      const timeDiff = (a.timeValue || 0) - (b.timeValue || 0);
       if (timeDiff !== 0) return timeDiff;
       return a.loginId.localeCompare(b.loginId);
     });
