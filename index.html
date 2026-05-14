@@ -891,7 +891,23 @@
     });
   });
 
-  document.getElementById('bonusDate').value = new Date().toISOString().slice(0, 10);
+  function getTodayWibInputValue() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(new Date());
+
+    const map = {};
+    parts.forEach(part => {
+      if (part.type !== 'literal') map[part.type] = part.value;
+    });
+
+    return `${map.year}-${map.month}-${map.day}`;
+  }
+
+  document.getElementById('bonusDate').value = getTodayWibInputValue();
 
   function getBonusDoneStore() {
     try {
