@@ -676,6 +676,8 @@
     <div class="tool-tabs">
       <button class="tool-tab active" data-panel="parser">Parser QRIS</button>
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
+      <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
+      <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
     </div>
 
     <section class="tool-panel active" id="panel-parser">
@@ -843,6 +845,85 @@
       </div>
     </section>
 
+    <section class="tool-panel" id="panel-audit">
+      <div class="bonus-grid">
+        <section class="card">
+          <div class="card-title">Data Adjustment Audit</div>
+          <div class="card-desc">Paste/import Adjustment / Bonus History untuk mengecek double bonus/klaim berdasarkan nomor ticket. Fitur ini tidak membutuhkan data Parser QRIS.</div>
+          <div class="date-row">
+            <input type="date" id="auditStartDate" class="bonus-date">
+            <input type="date" id="auditEndDate" class="bonus-date">
+            <label class="source-note" style="margin-top:0;"><input type="checkbox" id="auditAllDates"> Cek semua tanggal dari file</label>
+          </div>
+          <div class="file-row">
+            <input type="file" id="auditAdjustFile" accept=".csv,.txt,.tsv">
+            <button id="importAuditAdjustBtn" class="ghost">Import Excel/CSV</button>
+          </div>
+          <textarea id="auditAdjustRaw" placeholder="Paste raw data Adjustment / Bonus History untuk audit di sini..."></textarea>
+          <div class="bonus-actions">
+            <button id="auditCheckTicketBtn" class="primary">Cek Audit Mistake</button>
+            <button id="auditResetBtn" class="ghost">Reset Audit</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-title">Data Deposit Audit Opsional</div>
+          <div class="card-desc">Upload / paste Deposit Report agar sistem bisa menghitung nominal bonus harian yang seharusnya. Jika deposit tidak diisi, audit tetap berjalan memakai estimasi dari adjustment.</div>
+          <div class="file-row">
+            <input type="file" id="auditDepositFile" accept=".csv,.txt,.tsv">
+            <button id="importAuditDepositBtn" class="ghost">Import Deposit Audit</button>
+          </div>
+          <textarea id="auditDepositRaw" placeholder="Paste raw Deposit Report untuk validasi bonus harian di sini..."></textarea>
+        </section>
+
+        <section class="card">
+          <div class="card-title">Hasil Audit Mistake Adjustment</div>
+          <div class="card-desc" id="auditDesc">Hasil audit akan muncul di sini setelah Adjustment History diproses.</div>
+          <div class="stats" id="auditStats" style="display:none;">
+            <div class="stat">
+              <div class="stat-label">Total Mistake</div>
+              <div class="stat-value" id="auditMistakeCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Double Ticket</div>
+              <div class="stat-value" id="auditDoubleTicketCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Double Bonus Harian</div>
+              <div class="stat-value" id="auditDoubleHarianCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Data Terkoreksi</div>
+              <div class="stat-value" id="auditCorrectedCount">0</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:50px;">#</th>
+                  <th>Status Audit</th>
+                  <th>Tipe Mistake</th>
+                  <th>Login ID</th>
+                  <th>No Ticket</th>
+                  <th>Jenis Bonus</th>
+                  <th class="num">Jumlah Approved</th>
+                  <th class="num">Total Approved</th>
+                  <th class="num">Seharusnya</th>
+                  <th class="num">Selisih</th>
+                  <th>Waktu</th>
+                  <th>Detail</th>
+                </tr>
+              </thead>
+              <tbody id="auditDoubleTicketTable">
+                <tr><td colspan="12" class="empty">Belum ada data audit untuk ditampilkan</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+
     <footer>
       Tool lokal · Semua proses dilakukan di browser Anda · Tidak ada data yang dikirim ke server !
       <p>By Hachiman</p>
@@ -878,18 +959,52 @@
 
   let transactions = [];
   let bonusRows = [];
+  let auditDoubleTicketRows = [];
+  let auditDepositRows = [];
   let bonusRemark = '';
   const BONUS_DONE_KEY = 'qris_bonus_done_v1';
 
   document.querySelectorAll('.tool-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = btn.dataset.panel;
+      if (!target) return;
       document.querySelectorAll('.tool-tab').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tool-panel').forEach(panel => panel.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('panel-' + target).classList.add('active');
     });
   });
+
+  function showAuditTab() {
+    const unlockBtn = document.getElementById('unlockAuditBtn');
+    const auditTab = document.getElementById('auditTab');
+    unlockBtn.style.display = 'none';
+    auditTab.style.display = '';
+    auditTab.click();
+  }
+
+  async function unlockAudit() {
+    const password = window.prompt('Masukkan password Audit Bonus:');
+    if (password === null) return;
+
+    try {
+      const response = await fetch('/api/unlock-audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (response.ok && result.success === true) {
+        showAuditTab();
+        showToast('Audit Bonus terbuka.', 'success');
+      } else {
+        showToast('Password salah.', 'error');
+      }
+    } catch (error) {
+      showToast('Gagal membuka Audit Bonus.', 'error');
+    }
+  }
 
   function getTodayWibInputValue() {
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -908,6 +1023,8 @@
   }
 
   document.getElementById('bonusDate').value = getTodayWibInputValue();
+  document.getElementById('auditStartDate').value = getTodayWibInputValue();
+  document.getElementById('auditEndDate').value = getTodayWibInputValue();
 
   function getBonusDoneStore() {
     try {
@@ -926,6 +1043,26 @@
     const store = getBonusDoneStore();
     const rows = store[dateValue] || {};
     return new Set(Object.keys(rows).map(login => String(login).toUpperCase()));
+  }
+
+  function getAuditDateRange() {
+    const start = document.getElementById('auditStartDate').value;
+    const end = document.getElementById('auditEndDate').value;
+
+    if (!start || !end) return [];
+
+    const dates = [];
+    const startDate = new Date(start + 'T00:00:00');
+    const endDate = new Date(end + 'T00:00:00');
+
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      dates.push(`${month}/${day}/${year}`);
+    }
+
+    return dates;
   }
 
   function renderBonusDoneInfo() {
@@ -1370,12 +1507,511 @@
     showToast('Data tersimpan lokal tanggal ini dihapus.', 'success');
   }
 
+  function extractTicketNumbers(text) {
+    const value = String(text || '').toUpperCase();
+    const tickets = [];
+
+    const patterns = [
+      /NO\s*TICKET\s*[:#-]?\s*(\d{8,30})/gi,
+      /NO\.?\s*TICKET\s*[:#-]?\s*(\d{8,30})/gi,
+      /TICKET\s*[:#-]?\s*(\d{8,30})/gi,
+      /TIKET\s*[:#-]?\s*(\d{8,30})/gi,
+      /NO\s*TIKET\s*[:#-]?\s*(\d{8,30})/gi
+    ];
+
+    patterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.exec(value)) !== null) {
+        if (match[1]) tickets.push(match[1]);
+      }
+    });
+
+    return [...new Set(tickets)];
+  }
+
+  function extractLoginCandidates(text) {
+    const value = String(text || '').toUpperCase();
+    const matches = value.match(/\b[A-Z][A-Z0-9_]{3,20}\b/g) || [];
+    const blacklist = new Set([
+      'BONUS', 'HARIAN', 'TICKET', 'TIKET', 'KLAIM', 'SCATTER',
+      'MAHJONG', 'BETT', 'NO', 'IDR', 'APPROVED', 'REJECTED',
+      'PENDING', 'TRANSACTION', 'NUMBER', 'REMARK', 'STATUS',
+      'DATE', 'CREATED', 'APPROVED'
+    ]);
+
+    return [...new Set(matches.filter(item => !blacklist.has(item)))];
+  }
+
+  function normalizeLoginId(value) {
+    return String(value || '').trim().toUpperCase();
+  }
+
+  function normalizeText(value) {
+    return String(value || '').trim().toUpperCase();
+  }
+
+  function getSignedAmount(row) {
+    const fields = ['Adjustment Amt', 'Adjustment Amount', 'Adj Amount', 'Amount'];
+    for (const field of fields) {
+      if (row[field] !== undefined && row[field] !== '') {
+        return parseNumber(row[field]);
+      }
+    }
+    return 0;
+  }
+
+  function isRejectedStatus(statusText) {
+    const status = normalizeText(statusText);
+    return status === 'REJECT' || status === 'REJECTED';
+  }
+
+  function isApprovedStatus(statusText) {
+    const status = normalizeText(statusText);
+    if (!status) return true;
+    return status === 'APPROVED';
+  }
+
+  function isPositiveAdjustment(amount) {
+    return Number(amount) > 0;
+  }
+
+  function isNegativeAdjustment(amount) {
+    return Number(amount) < 0;
+  }
+
+  function isSalahIdRemark(text) {
+    const value = normalizeText(text);
+    return /SALAH\s*ID|WRONG\s*ID/.test(value);
+  }
+
+  function isCorrectionRemark(text) {
+    const value = normalizeText(text);
+    return /\b(TARIK|TARI|KEMBALI|TARIK\s*KEMBALI|REVERSAL|REVERSE|CANCEL|CANCELLED|BATAL|VOID|KOREKSI|CORRECTION|REFUND)\b/.test(value)
+      || isSalahIdRemark(value);
+  }
+
+  function amountSame(a, b) {
+    return Math.abs(Math.abs(Number(a || 0)) - Math.abs(Number(b || 0))) < 0.001;
+  }
+
+  function isReversalRemark(text, amountText) {
+    const amount = parseNumber(amountText || '0');
+    if (amount < 0) return true;
+    return isCorrectionRemark(text);
+  }
+
+  function getBonusType(text) {
+    const value = normalizeText(text);
+
+    if (/LUCKY\s*SPIN|LUCKYSPIN/.test(value)) return 'LUCKYSPIN';
+    if (/FREESPIN|FREE\s*SPIN|FS\b/.test(value)) return 'FREESPIN';
+    if (/BUYSPIN|BUY\s*SPIN/.test(value)) return 'BUYSPIN';
+
+    const scatterMatch = value.match(/(?:CLAIM|KLAIM)?\s*(\d+)\s*SCATTER/);
+    if (scatterMatch && scatterMatch[1]) return `SCATTER_${scatterMatch[1]}`;
+
+    if (/SCATTER/.test(value)) return 'SCATTER';
+    if (/BONUS\s*HARIAN/.test(value)) return 'BONUS_HARIAN';
+    if (/JP|JACKPOT/.test(value)) return 'JACKPOT';
+    return 'OTHER';
+  }
+
+  function isTopupCorrectionRemark(text) {
+    const value = normalizeText(text);
+    return /\b(TAMBAHAN|KEKURANGAN|KURANG|SELISIH|PENYESUAIAN|ADJUST|TAMBAH)\b/.test(value)
+      && /BONUS\s*HARIAN/.test(value);
+  }
+
+  function hasTopupCorrection(rows) {
+    return rows.some(row => isTopupCorrectionRemark(row.combinedText));
+  }
+
+  function getFallbackExpectedBonusFromHarianRows(positives) {
+    if (!positives || positives.length === 0) return 0;
+
+    const amounts = positives
+      .map(row => row.absAmount)
+      .filter(amount => amount > 0)
+      .sort((a, b) => a - b);
+
+    if (amounts.length === 0) return 0;
+
+    const total = amounts.reduce((sum, amount) => sum + amount, 0);
+
+    if (hasTopupCorrection(positives)) return total;
+
+    return Math.min(...amounts);
+  }
+
+  function parseAuditDepositRows(raw) {
+    if (!raw || !raw.trim()) return [];
+
+    const parsed = parseInput(raw);
+    if (!parsed || !parsed.records) return [];
+
+    return parsed.records
+      .filter(row => !row.status || row.status === 'Approved')
+      .map(row => ({
+        loginId: normalizeLoginId(row.userId),
+        memberName: row.namaRekening,
+        applicationTime: row.applicationTime,
+        totalDeposit: (parseNumber(row.nominal) + parseNumber(row.potonganQris)) * 1000,
+        gmt7Date: bonusGmt7Date(row.applicationTime),
+        timestamp: parseDate(row.applicationTime).getTime()
+      }));
+  }
+
+  function getExpectedDailyBonusFromDeposit(loginId, targetDate) {
+    const rows = auditDepositRows.filter(row =>
+      row.loginId === normalizeLoginId(loginId) &&
+      row.gmt7Date === targetDate
+    );
+
+    if (rows.length === 0) return null;
+
+    const maxDeposit = Math.max(...rows.map(row => row.totalDeposit));
+
+    if (maxDeposit >= 100000) return 10;
+    if (maxDeposit >= 50000) return 5;
+    return 0;
+  }
+
+  function auditDateAllowed(dateText, targetDates, allDates) {
+    if (allDates) return true;
+    const parsedDate = parseDate(dateText);
+    if (!dateText || parsedDate.getTime() === 0) return false;
+    return targetDates.includes(bonusGmt7Date(dateText));
+  }
+
+  function makeAuditRecord(row, fallbackIndex, targetDates, allDates) {
+    const dateText = row['Approved Time'] || row['Date Created'] || '';
+    const parsedDate = parseDate(dateText);
+    if (!auditDateAllowed(dateText, targetDates, allDates)) return null;
+
+    const transactionNumber = row['Transaction Number'] || '';
+    const remark = row['Remark'] || '';
+    const combinedText = `${transactionNumber} ${remark}`.trim();
+    const status = row['Status'] || '';
+    const amount = getSignedAmount(row);
+    const tickets = extractTicketNumbers(combinedText);
+
+    return {
+      loginId: normalizeLoginId(row['Login ID']),
+      adjustmentId: String(row['Adjustment ID'] || fallbackIndex || '').trim(),
+      status,
+      isApproved: isApprovedStatus(status),
+      isRejected: isRejectedStatus(status),
+      amount,
+      absAmount: Math.abs(amount),
+      transactionNumber,
+      remark,
+      combinedText,
+      dateText,
+      auditDate: parsedDate.getTime() !== 0 ? bonusGmt7Date(dateText) : '',
+      timestamp: parsedDate.getTime(),
+      tickets,
+      bonusType: getBonusType(combinedText),
+      isPositive: isPositiveAdjustment(amount),
+      isNegative: isNegativeAdjustment(amount),
+      isCorrection: isCorrectionRemark(combinedText),
+      isSalahId: isSalahIdRemark(combinedText),
+      corrected: false,
+      correctedPair: false,
+      correctsAdjustmentId: ''
+    };
+  }
+
+  function parseAuditAdjustmentRecords(raw, targetDates, allDates) {
+    if (looksLikeCsv(raw)) {
+      return csvRecords(raw)
+        .map((row, index) => makeAuditRecord(row, index + 1, targetDates, allDates))
+        .filter(row => row && (row.isApproved || row.isRejected));
+    }
+
+    const lines = String(raw || '').split('\n').map(line => line.trim()).filter(Boolean);
+    const records = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const combined = lines.slice(i, Math.min(lines.length, i + 17)).join(' ');
+      if (!/BONUS|CLAIM|KLAIM|TICKET|TIKET|SCATTER|FREESPIN|BUYSPIN/i.test(combined)) continue;
+
+      const dateLine = lines.slice(i, Math.min(lines.length, i + 17)).find(line => parseDate(line).getTime() !== 0) || '';
+      const statusLine = lines.slice(i, Math.min(lines.length, i + 17)).find(line => /^(Approved|Reject|Rejected)$/i.test(line)) || '';
+      if (!auditDateAllowed(dateLine, targetDates, allDates)) continue;
+      if (statusLine && !isApprovedStatus(statusLine) && !isRejectedStatus(statusLine)) continue;
+
+      const loginCandidates = extractLoginCandidates(combined);
+      const amountMatch = combined.match(/(?:^|\s)(-?\d+(?:\.\d+)?)(?:\s+)(?:BONUS|CLAIM|KLAIM|TARI|TARIK)/i);
+      const amount = amountMatch ? parseNumber(amountMatch[1]) : 0;
+      records.push({
+        loginId: loginCandidates[0] || '',
+        adjustmentId: String(i + 1),
+        status: statusLine || 'Approved',
+        isApproved: isApprovedStatus(statusLine || 'Approved'),
+        isRejected: isRejectedStatus(statusLine),
+        amount,
+        absAmount: Math.abs(amount),
+        transactionNumber: combined,
+        remark: combined,
+        combinedText: combined,
+        dateText: dateLine,
+        auditDate: parseDate(dateLine).getTime() !== 0 ? bonusGmt7Date(dateLine) : '',
+        timestamp: parseDate(dateLine).getTime(),
+        tickets: extractTicketNumbers(combined),
+        bonusType: getBonusType(combined),
+        isPositive: amount > 0,
+        isNegative: amount < 0 || isCorrectionRemark(combined),
+        isCorrection: isCorrectionRemark(combined),
+        isSalahId: isSalahIdRemark(combined),
+        corrected: false,
+        correctedPair: false,
+        correctsAdjustmentId: ''
+      });
+    }
+
+    return records;
+  }
+
+  function markCorrectedAdjustments(records) {
+    const positives = records.filter(row => row.isApproved && row.isPositive && !row.corrected);
+    const negatives = records.filter(row => row.isApproved && row.isNegative && !row.correctedPair);
+
+    positives.forEach(positive => {
+      const pair = negatives
+        .filter(negative => !negative.correctedPair)
+        .filter(negative => negative.loginId === positive.loginId)
+        .filter(negative => amountSame(positive.amount, negative.amount))
+        .filter(negative => negative.bonusType === positive.bonusType || negative.isCorrection || isCorrectionRemark(`${positive.combinedText} ${negative.combinedText}`))
+        .filter(negative => positive.timestamp === 0 || negative.timestamp === 0 || negative.timestamp >= positive.timestamp - 3600000)
+        .sort((a, b) => (a.timestamp || Number.MAX_SAFE_INTEGER) - (b.timestamp || Number.MAX_SAFE_INTEGER))[0];
+
+      if (!pair) return;
+      positive.corrected = true;
+      pair.correctedPair = true;
+      pair.correctsAdjustmentId = positive.adjustmentId;
+    });
+  }
+
+  function buildMistakeRow({ mistakeType, loginId, ticket, bonusType, records, totalApproved, expectedAmount, explanation }) {
+    const mistakeAmount = Math.max(0, Number(totalApproved || 0) - Number(expectedAmount || 0));
+    return {
+      statusAudit: 'MISTAKE',
+      mistakeType,
+      loginId,
+      ticket: ticket || '-',
+      bonusType,
+      countApproved: records.length,
+      totalApproved,
+      expectedAmount,
+      mistakeAmount,
+      times: records.map(row => row.dateText).filter(Boolean),
+      remarks: records.map(row => row.combinedText).filter(Boolean),
+      explanation
+    };
+  }
+
+  function findDoubleTicketMistakes(records) {
+    const groups = {};
+    records
+      .filter(row => row.isApproved && row.isPositive && !row.corrected && row.tickets.length > 0)
+      .forEach(row => {
+        row.tickets.forEach(ticket => {
+          const key = `${ticket}|${row.bonusType}`;
+          if (!groups[key]) groups[key] = { ticket, bonusType: row.bonusType, records: [] };
+          groups[key].records.push(row);
+        });
+      });
+
+    return Object.values(groups)
+      .filter(group => group.records.length > 1)
+      .map(group => {
+        const totalApproved = group.records.reduce((sum, row) => sum + row.amount, 0);
+        const expectedAmount = Math.min(...group.records.map(row => row.absAmount).filter(amount => amount > 0));
+        return buildMistakeRow({
+          mistakeType: 'DOUBLE_TICKET',
+          loginId: [...new Set(group.records.map(row => row.loginId).filter(Boolean))].join(' | '),
+          ticket: group.ticket,
+          bonusType: group.bonusType,
+          records: group.records,
+          totalApproved,
+          expectedAmount,
+          explanation: `Ticket dan jenis bonus sama muncul ${group.records.length} kali tanpa koreksi/reversal yang membatalkan.`
+        });
+      });
+  }
+
+  function findBonusHarianMistakes(records) {
+    const groups = {};
+    records
+      .filter(row => row.bonusType === 'BONUS_HARIAN')
+      .forEach(row => {
+        if (!row.loginId) return;
+        const dateKey = row.auditDate || (row.dateText ? bonusGmt7Date(row.dateText) : '');
+        if (!dateKey) return;
+        const key = `${row.loginId}|${dateKey}`;
+        if (!groups[key]) groups[key] = { loginId: row.loginId, auditDate: dateKey, positives: [], negatives: [] };
+        if (row.isApproved && row.isPositive && !row.corrected) groups[key].positives.push(row);
+        if (row.isApproved && row.isNegative && !row.correctedPair) groups[key].negatives.push(row);
+      });
+
+    return Object.values(groups).flatMap(group => {
+      if (group.positives.length <= 1) return [];
+      const totalPositive = group.positives.reduce((sum, row) => sum + row.amount, 0);
+      const totalNegative = group.negatives.reduce((sum, row) => sum + Math.abs(row.amount), 0);
+      const netAmount = totalPositive - totalNegative;
+      const expectedFromDeposit = getExpectedDailyBonusFromDeposit(group.loginId, group.auditDate);
+      const expectedAmount = expectedFromDeposit !== null
+        ? expectedFromDeposit
+        : getFallbackExpectedBonusFromHarianRows(group.positives);
+      if (!(netAmount > expectedAmount)) return [];
+      return [buildMistakeRow({
+        mistakeType: 'DOUBLE_BONUS_HARIAN',
+        loginId: group.loginId,
+        ticket: '-',
+        bonusType: 'BONUS_HARIAN',
+        records: group.positives,
+        totalApproved: netAmount,
+        expectedAmount,
+        explanation: `Bonus harian approved masuk ${group.positives.length} kali. Reject tidak dihitung sebagai bonus masuk. Net approved ${netAmount}, estimasi seharusnya ${expectedAmount}.`
+      })];
+    });
+  }
+
+  function findAuditMistakes(raw, targetDates, allDates) {
+    const records = parseAuditAdjustmentRecords(raw, targetDates, allDates);
+    markCorrectedAdjustments(records);
+
+    const ticketMistakes = findDoubleTicketMistakes(records);
+    const harianMistakes = findBonusHarianMistakes(records);
+
+    return {
+      mistakes: [...ticketMistakes, ...harianMistakes],
+      correctedCount: records.filter(row => row.corrected || row.correctedPair).length
+    };
+  }
+
+  function renderAuditDoubleTicketRows() {
+    const table = document.getElementById('auditDoubleTicketTable');
+    const stats = document.getElementById('auditStats');
+    const desc = document.getElementById('auditDesc');
+
+    if (auditDoubleTicketRows.length === 0) {
+      table.innerHTML = '<tr><td colspan="12" class="empty">Tidak ditemukan mistake adjustment pada data audit ini.</td></tr>';
+      document.getElementById('auditMistakeCount').textContent = 0;
+      document.getElementById('auditDoubleTicketCount').textContent = 0;
+      document.getElementById('auditDoubleHarianCount').textContent = 0;
+      document.getElementById('auditCorrectedCount').textContent = renderAuditDoubleTicketRows.correctedCount || 0;
+      stats.style.display = 'grid';
+      desc.textContent = `Tidak ditemukan mistake adjustment. Data terkoreksi/aman: ${renderAuditDoubleTicketRows.correctedCount || 0}.`;
+      return;
+    }
+
+    const doubleTicketCount = auditDoubleTicketRows.filter(row => row.mistakeType === 'DOUBLE_TICKET').length;
+    const doubleHarianCount = auditDoubleTicketRows.filter(row => row.mistakeType === 'DOUBLE_BONUS_HARIAN').length;
+
+    document.getElementById('auditMistakeCount').textContent = auditDoubleTicketRows.length;
+    document.getElementById('auditDoubleTicketCount').textContent = doubleTicketCount;
+    document.getElementById('auditDoubleHarianCount').textContent = doubleHarianCount;
+    document.getElementById('auditCorrectedCount').textContent = renderAuditDoubleTicketRows.correctedCount || 0;
+    stats.style.display = 'grid';
+    desc.textContent = `Ditemukan ${auditDoubleTicketRows.length} mistake adjustment. Data terkoreksi/aman: ${renderAuditDoubleTicketRows.correctedCount || 0}.`;
+
+    table.innerHTML = auditDoubleTicketRows.map((row, index) => `
+      <tr class="warning-row">
+        <td class="idx">${index + 1}</td>
+        <td class="user-id">MISTAKE</td>
+        <td>${escapeHtml(row.mistakeType)}</td>
+        <td>${escapeHtml(row.loginId || '-')}</td>
+        <td>${escapeHtml(row.ticket || '-')}</td>
+        <td>${escapeHtml(row.bonusType || 'OTHER')}</td>
+        <td class="num">${row.countApproved}</td>
+        <td class="num">${row.totalApproved}</td>
+        <td class="num">${row.expectedAmount}</td>
+        <td class="num">${row.mistakeAmount}</td>
+        <td class="time-cell">${escapeHtml([...new Set(row.times)].join(' | ') || '-')}</td>
+        <td>${escapeHtml(`${row.explanation} | ${[...new Set(row.remarks)].join(' | ')}`)}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function auditCheckDoubleTicket() {
+    const allDates = document.getElementById('auditAllDates')?.checked;
+    const targetDates = allDates ? [] : getAuditDateRange();
+
+    if (!allDates && targetDates.length === 0) {
+      showToast('Pilih tanggal awal dan akhir audit.', 'error');
+      return;
+    }
+
+    let raw = document.getElementById('auditAdjustRaw').value;
+    if (!raw.trim()) {
+      raw = await readSelectedFile('auditAdjustFile');
+      if (raw.trim()) document.getElementById('auditAdjustRaw').value = raw;
+    }
+
+    if (!raw.trim()) {
+      showToast('Paste/import Adjustment History untuk audit terlebih dahulu.', 'error');
+      return;
+    }
+
+    let depositRaw = document.getElementById('auditDepositRaw')?.value || '';
+    if (!depositRaw.trim()) {
+      depositRaw = await readSelectedFile('auditDepositFile');
+      if (depositRaw.trim()) document.getElementById('auditDepositRaw').value = depositRaw;
+    }
+
+    auditDepositRows = depositRaw.trim() ? parseAuditDepositRows(depositRaw) : [];
+
+    const result = findAuditMistakes(raw, targetDates, allDates);
+    auditDoubleTicketRows = result.mistakes;
+    renderAuditDoubleTicketRows.correctedCount = result.correctedCount;
+    renderAuditDoubleTicketRows();
+    showToast(
+      auditDoubleTicketRows.length
+        ? `Ditemukan ${auditDoubleTicketRows.length} mistake adjustment.`
+        : 'Tidak ditemukan mistake adjustment.',
+      auditDoubleTicketRows.length ? 'error' : 'success'
+    );
+  }
+
+  function auditReset() {
+    auditDoubleTicketRows = [];
+    auditDepositRows = [];
+    renderAuditDoubleTicketRows.correctedCount = 0;
+    document.getElementById('auditAdjustRaw').value = '';
+    document.getElementById('auditAdjustFile').value = '';
+    document.getElementById('auditDepositRaw').value = '';
+    document.getElementById('auditDepositFile').value = '';
+    document.getElementById('auditDesc').textContent = 'Hasil audit akan muncul di sini setelah Adjustment History diproses.';
+    document.getElementById('auditDoubleTicketTable').innerHTML = '<tr><td colspan="12" class="empty">Belum ada data audit untuk ditampilkan</td></tr>';
+    document.getElementById('auditStats').style.display = 'none';
+    showToast('Data audit dibersihkan.');
+  }
   document.getElementById('bonusProcessBtn').addEventListener('click', bonusProcess);
   document.getElementById('bonusResetBtn').addEventListener('click', bonusReset);
   document.getElementById('bonusCopyAllBtn').addEventListener('click', bonusCopyAll);
   document.getElementById('bonusMarkDoneBtn').addEventListener('click', markBonusRowsDone);
   document.getElementById('bonusClearDoneBtn').addEventListener('click', clearBonusDoneByDate);
   document.getElementById('bonusDate').addEventListener('change', renderBonusDoneInfo);
+  document.getElementById('unlockAuditBtn').addEventListener('click', unlockAudit);
+  document.getElementById('importAuditAdjustBtn').addEventListener('click', () => {
+    readFileToTextarea('auditAdjustFile', 'auditAdjustRaw');
+  });
+  document.getElementById('auditAdjustFile').addEventListener('change', () => {
+    readFileToTextarea('auditAdjustFile', 'auditAdjustRaw');
+  });
+  document.getElementById('importAuditDepositBtn').addEventListener('click', () => {
+    readFileToTextarea('auditDepositFile', 'auditDepositRaw', () => {
+      auditDepositRows = parseAuditDepositRows(document.getElementById('auditDepositRaw').value);
+    });
+  });
+  document.getElementById('auditDepositFile').addEventListener('change', () => {
+    readFileToTextarea('auditDepositFile', 'auditDepositRaw', () => {
+      auditDepositRows = parseAuditDepositRows(document.getElementById('auditDepositRaw').value);
+    });
+  });
+  document.getElementById('auditCheckTicketBtn').addEventListener('click', auditCheckDoubleTicket);
+  document.getElementById('auditResetBtn').addEventListener('click', auditReset);
 
   function parseInput(raw) {
     if (looksLikeCsv(raw) && /Application Time/i.test(raw)) {
