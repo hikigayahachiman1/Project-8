@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Parser Transaksi QRIS — Sort by Application Time</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -1003,6 +1004,279 @@
     background: rgba(255, 23, 68, 0.34);
   }
 
+  .container::before {
+    content: '';
+    position: fixed;
+    width: 620px;
+    height: 620px;
+    left: -240px;
+    top: 12%;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(0,255,168,0.10), transparent 64%);
+    filter: blur(12px);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  header {
+    background:
+      linear-gradient(145deg, rgba(255,255,255,0.13), rgba(255,255,255,0.04)),
+      radial-gradient(circle at 14% 0%, rgba(39,245,255,0.15), transparent 36%),
+      radial-gradient(circle at 92% 20%, rgba(155,92,255,0.14), transparent 32%),
+      rgba(8, 13, 30, 0.78);
+    border-color: rgba(143,178,255,0.28);
+    box-shadow:
+      0 28px 90px rgba(0,0,0,0.46),
+      0 0 34px rgba(39,245,255,0.10),
+      inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+
+  header::after {
+    content: '';
+    position: absolute;
+    left: 24px;
+    right: 24px;
+    bottom: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, transparent, var(--accent), var(--accent-2), var(--accent-3), transparent);
+    opacity: 0.72;
+    box-shadow: 0 0 24px rgba(39,245,255,0.28);
+  }
+
+  .dashboard-brand {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .app-logo-mark {
+    width: 58px;
+    height: 58px;
+    display: grid;
+    place-items: center;
+    border-radius: 20px;
+    background:
+      linear-gradient(135deg, rgba(39,245,255,0.95), rgba(155,92,255,0.78) 58%, rgba(255,79,139,0.72)),
+      rgba(255,255,255,0.08);
+    color: #03111a;
+    font-family: 'Fraunces', serif;
+    font-size: 1.9rem;
+    font-weight: 800;
+    box-shadow: 0 16px 34px rgba(39,245,255,0.18), 0 0 28px rgba(155,92,255,0.18);
+  }
+
+  .datetime-panel {
+    border-color: rgba(39,245,255,0.34);
+    background:
+      linear-gradient(135deg, rgba(39,245,255,0.14), rgba(155,92,255,0.10)),
+      rgba(4,9,20,0.66);
+  }
+
+  .operator-info {
+    position: relative;
+    align-items: center;
+    justify-content: space-between;
+    margin: -10px 0 18px;
+    padding: 14px 16px;
+    border-radius: 22px;
+    border-color: rgba(39,245,255,0.24);
+    background:
+      linear-gradient(135deg, rgba(39,245,255,0.11), rgba(155,92,255,0.08)),
+      rgba(8, 13, 30, 0.72);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 0 28px rgba(39,245,255,0.08);
+  }
+
+  .operator-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .operator-avatar {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 15px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #03111a;
+    font-family: 'Fraunces', serif;
+    font-size: 1.25rem;
+    font-weight: 800;
+    box-shadow: 0 0 22px rgba(39,245,255,0.20);
+  }
+
+  .operator-label {
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .operator-name-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .logout-btn {
+    width: auto;
+    padding: 10px 16px;
+    border-color: rgba(255,79,139,0.38);
+    background: linear-gradient(135deg, rgba(255,79,139,0.20), rgba(255,107,53,0.14));
+    color: #ffd5df;
+  }
+
+  .logout-btn:hover {
+    border-color: rgba(255,255,255,0.28);
+    background: linear-gradient(135deg, rgba(255,79,139,0.30), rgba(255,107,53,0.22));
+    color: #ffffff;
+  }
+
+  .tool-tabs {
+    padding: 10px;
+    border: 1px solid rgba(143,178,255,0.20);
+    border-radius: 26px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.075), rgba(255,255,255,0.032)),
+      rgba(5, 9, 22, 0.68);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 18px 50px rgba(0,0,0,0.24);
+  }
+
+  .tool-tab {
+    border-radius: 18px;
+    background: rgba(255,255,255,0.055);
+    color: var(--ink-soft);
+  }
+
+  .tool-tab.active {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2) 58%, var(--accent-3));
+    box-shadow: 0 12px 28px rgba(39,245,255,0.18), 0 0 22px rgba(155,92,255,0.12);
+    transform: translateY(-1px);
+  }
+
+  .card {
+    background:
+      linear-gradient(145deg, rgba(255,255,255,0.105), rgba(255,255,255,0.035)),
+      rgba(11, 17, 36, 0.72);
+    border-color: rgba(143,178,255,0.22);
+    transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
+  }
+
+  .card::after {
+    content: '';
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    top: 0;
+    height: 3px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
+    opacity: 0.75;
+  }
+
+  #panel-bonus .card::after { background: linear-gradient(90deg, var(--accent-3), var(--warning), var(--accent)); }
+  #panel-audit .card::after { background: linear-gradient(90deg, var(--accent-2), var(--danger), var(--accent)); }
+  #panel-admin-operators .card::after { background: linear-gradient(90deg, var(--warning), var(--danger), var(--accent-2)); }
+
+  .card:hover {
+    transform: translateY(-2px);
+  }
+
+  .card-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .card-title::before {
+    content: '';
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 18px rgba(39,245,255,0.55);
+  }
+
+  #panel-bonus .card-title::before { background: var(--accent-3); box-shadow: 0 0 18px rgba(0,255,168,0.45); }
+  #panel-audit .card-title::before { background: var(--accent-2); box-shadow: 0 0 18px rgba(155,92,255,0.45); }
+  #panel-admin-operators .card-title::before { background: var(--warning); box-shadow: 0 0 18px rgba(255,200,87,0.42); }
+
+  button.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2) 62%, rgba(255,79,139,0.86));
+    box-shadow: 0 12px 28px rgba(39,245,255,0.18), 0 14px 34px rgba(155,92,255,0.14);
+  }
+
+  button.success {
+    box-shadow: 0 12px 28px rgba(0,255,168,0.15);
+  }
+
+  button.danger {
+    box-shadow: 0 14px 34px rgba(255, 23, 68, 0.30), 0 0 28px rgba(255, 107, 53, 0.18);
+  }
+
+  .stat {
+    background:
+      linear-gradient(135deg, rgba(39,245,255,0.14), rgba(155,92,255,0.08)),
+      rgba(255,255,255,0.035);
+    border-left: 0;
+    position: relative;
+    transition: transform 0.16s, border-color 0.16s, box-shadow 0.16s;
+  }
+
+  .stat::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 14px;
+    bottom: 14px;
+    width: 3px;
+    border-radius: 999px;
+    background: linear-gradient(var(--accent), var(--accent-2), var(--accent-3));
+  }
+
+  .stat:hover {
+    transform: translateY(-2px);
+    border-color: rgba(39,245,255,0.34);
+    box-shadow: 0 18px 42px rgba(0,0,0,0.18), 0 0 22px rgba(39,245,255,0.08);
+  }
+
+  .stat-value {
+    font-size: 1.72rem;
+  }
+
+  .table-wrap {
+    border-color: rgba(143,178,255,0.26);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.045), transparent),
+      rgba(3, 7, 18, 0.68);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 18px 48px rgba(0,0,0,0.20);
+  }
+
+  thead {
+    background:
+      linear-gradient(135deg, rgba(39,245,255,0.24), rgba(155,92,255,0.22)),
+      rgba(8, 13, 30, 0.98);
+  }
+
+  tbody tr:hover {
+    background: rgba(39,245,255,0.075);
+    box-shadow: inset 3px 0 0 rgba(39,245,255,0.38);
+  }
+
+  .empty {
+    background: linear-gradient(135deg, rgba(39,245,255,0.035), rgba(155,92,255,0.035));
+  }
+
+  .lock-warning,
+  .pending-timer {
+    border-radius: 22px;
+  }
+
   #outputText {
     min-height: 200px !important;
     background: linear-gradient(rgba(4,22,17,0.88), rgba(4,22,17,0.88)), repeating-linear-gradient(0deg, transparent 0 25px, rgba(0,255,168,0.06) 26px) !important;
@@ -1013,6 +1287,13 @@
     .login-screen { padding: 18px; }
     .login-card { border-radius: 26px; padding: 26px 22px; }
     .login-card h2 { font-size: 2rem; }
+    .dashboard-brand { align-items: flex-start; }
+    .app-logo-mark { width: 48px; height: 48px; border-radius: 16px; font-size: 1.55rem; }
+    .operator-info { flex-direction: column; align-items: stretch; }
+    .operator-left { align-items: flex-start; }
+    .logout-btn { width: 100%; }
+    .tool-tabs { border-radius: 22px; }
+    .tool-tab { min-width: 0; flex: 1 1 145px; }
     header, .card { border-radius: 22px; padding: 18px; }
     .date-panel { width: 100%; align-items: stretch; }
     .datetime-panel { min-width: 0; text-align: left; }
@@ -1029,7 +1310,7 @@
     <div class="login-shell">
       <div class="login-card">
         <div class="login-accent-line"></div>
-        <h2>Login</h2>
+        <h2>Login Operator</h2>
         <p>Masukkan username dan password.</p>
         <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
         <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
@@ -1040,9 +1321,12 @@
   </div>
   <div class="container">
     <header>
-      <div>
+      <div class="dashboard-brand">
+        <div class="app-logo-mark" aria-hidden="true">Q</div>
+        <div>
         <h1>Parser Transaksi <em>QRIS</em></h1>
         <div class="subtitle">Sort & Extract · By Application Time</div>
+        </div>
       </div>
       <div class="date-panel">
         <div class="subtitle" id="dateDisplay"></div>
@@ -1059,7 +1343,7 @@
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
-      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Dasboard</button>
+      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
     </div>
 
     <div id="operatorInfo" class="operator-info" style="display:none;"></div>
@@ -1465,7 +1749,21 @@
     const info = document.getElementById('operatorInfo');
     if (!info || !currentOperator) return;
     info.style.display = 'flex';
-    info.innerHTML = `<span>Login sebagai: <strong>${escapeHtml(currentOperator.display_name || currentOperator.username)}</strong> (${escapeHtml(currentOperator.role)})</span><button id="operatorLogoutBtn" class="ghost">Logout</button>`;
+    const displayName = currentOperator.display_name || currentOperator.username || 'Operator';
+    const initial = String(displayName).trim().charAt(0).toUpperCase() || 'O';
+    info.innerHTML = `
+      <div class="operator-left">
+        <div class="operator-avatar">${escapeHtml(initial)}</div>
+        <div>
+          <div class="operator-label">Operator Aktif</div>
+          <div class="operator-name-row">
+            <strong>${escapeHtml(displayName)}</strong>
+            <span class="role-badge ${escapeHtml(currentOperator.role)}">${escapeHtml(currentOperator.role)}</span>
+          </div>
+        </div>
+      </div>
+      <button id="operatorLogoutBtn" class="logout-btn">Logout</button>
+    `;
     document.getElementById('operatorLogoutBtn').addEventListener('click', () => {
       clearOperatorSession();
       window.location.reload();
