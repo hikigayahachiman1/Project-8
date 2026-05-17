@@ -122,6 +122,35 @@ function dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, cl
   return [...map.values()];
 }
 
+function dedupeAdjustmentApprovedRows(rows, date, now, expiresAt, operatorName) {
+  const map = new Map();
+
+  (rows || []).forEach(row => {
+    const loginId = normalizeLoginId(row.login_id || row.login_key || row.loginId);
+    if (!loginId) return;
+
+    const item = {
+      bonus_date: date,
+      login_id: loginId,
+      login_key: loginId,
+      bonus_type: 'BONUS_HARIAN',
+      bonus_amount: Number.isFinite(Number(row.bonus_amount ?? row.bonus)) ? Number(row.bonus_amount ?? row.bonus) : null,
+      remark: normalizeText(row.remark),
+      source: 'adjustment_approved',
+      operator_name: operatorName,
+      bonus_status: 'DONE',
+      done_at: now,
+      done_by_name: operatorName,
+      updated_at: now,
+      expires_at: expiresAt
+    };
+
+    map.set(`${item.bonus_date}|${item.login_key}|${item.bonus_type}`, item);
+  });
+
+  return [...map.values()];
+}
+
 function loginIdsFromRows(rows) {
   return [...new Set((rows || []).map(row => normalizeLoginId(row.login_key || row.login_id)).filter(Boolean))];
 }
@@ -529,6 +558,88 @@ async function handleDone(req, body, res) {
   });
 }
 
+async function handleSyncAdjustmentApproved(req, body, res) {
+  const operator = await getOperatorFromRequest(req, true);
+  const date = String(body.date || '');
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+
+  if (!isValidDate(date)) {
+    return res.status(400).json({ success: false, error: 'Format date harus YYYY-MM-DD.' });
+  }
+
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const expiresAt = addDays(nowDate, 2);
+  const operatorName = operatorNameFromOperator(operator, body.operator_name);
+  const payload = dedupeAdjustmentApprovedRows(rows, date, now, expiresAt, operatorName);
+
+  if (payload.length === 0) {
+    return res.status(200).json({
+      success: true,
+      syncedCount: 0,
+      loginIds: []
+    });
+  }
+
+  const loginKeys = payload.map(row => row.login_key);
+  const { data: existingRows, error: existingError } = await supabase
+    .from('bonus_done_daily')
+    .select('id, login_key')
+    .eq('bonus_date', date)
+    .eq('bonus_type', 'BONUS_HARIAN')
+    .in('login_key', loginKeys);
+
+  if (existingError) throw existingError;
+
+  const existingKeys = new Set((existingRows || []).map(row => normalizeLoginId(row.login_key)));
+  const insertRows = payload.filter(row => !existingKeys.has(row.login_key));
+  const updateRows = payload.filter(row => existingKeys.has(row.login_key));
+  const syncedIds = new Set();
+
+  let inserted = [];
+  if (insertRows.length > 0) {
+    const { data, error } = await supabase
+      .from('bonus_done_daily')
+      .insert(insertRows)
+      .select('login_key');
+
+    if (error && error.code !== '23505') throw error;
+    inserted = data || [];
+    inserted.forEach(row => syncedIds.add(normalizeLoginId(row.login_key)));
+  }
+
+  for (const row of updateRows) {
+    const { error } = await supabase
+      .from('bonus_done_daily')
+      .update({
+        login_id: row.login_id,
+        bonus_amount: row.bonus_amount,
+        remark: row.remark,
+        source: row.source,
+        operator_name: row.operator_name,
+        bonus_status: 'DONE',
+        done_at: row.done_at,
+        done_by_name: row.done_by_name,
+        updated_at: row.updated_at,
+        expires_at: row.expires_at
+      })
+      .eq('bonus_date', date)
+      .eq('bonus_type', 'BONUS_HARIAN')
+      .eq('login_key', row.login_key);
+
+    if (error) throw error;
+    syncedIds.add(row.login_key);
+  }
+
+  const loginIds = [...syncedIds];
+
+  return res.status(200).json({
+    success: true,
+    syncedCount: loginIds.length,
+    loginIds
+  });
+}
+
 async function handleGet(req, res) {
   const operator = await getOperatorFromRequest(req, false);
   const date = String(req.query.date || '');
@@ -597,6 +708,7 @@ export default async function handler(req, res) {
 
       if (action === 'claim_batch') return await handleClaimBatch(req, body, res);
       if (action === 'done') return await handleDone(req, body, res);
+      if (action === 'sync_adjustment_approved') return await handleSyncAdjustmentApproved(req, body, res);
 
       return res.status(400).json({
         success: false,

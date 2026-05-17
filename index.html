@@ -2145,6 +2145,40 @@
     }
   }
 
+  async function syncAdjustmentApprovedDone(dateValue, rows) {
+    try {
+      const response = await fetch('/api/bonus-done', {
+        method: 'POST',
+        headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          action: 'sync_adjustment_approved',
+          date: dateValue,
+          operator_name: currentOperator ? currentOperator.display_name : '',
+          rows: (rows || []).map(row => ({
+            ...row,
+            source: 'adjustment_approved'
+          }))
+        })
+      });
+
+      if (response.status === 401) {
+        handleOperatorUnauthorized();
+        return { success: false, unauthorized: true };
+      }
+
+      if (!response.ok) throw new Error('remote failed');
+
+      const result = await response.json();
+      bonusRemoteStatus = 'online';
+      delete bonusRemoteDoneCache[dateValue];
+      return result;
+    } catch (error) {
+      bonusRemoteStatus = 'offline';
+      showToast('Supabase tidak terhubung, Adjustment Approved hanya dipakai lokal.', 'error');
+      return { success: false };
+    }
+  }
+
   async function finalizeRemoteBonusBatch(dateValue) {
     const response = await fetch('/api/bonus-done', {
       method: 'POST',
@@ -2793,6 +2827,12 @@
     });
 
     const already = bonusParseAlready(adjustRaw, Object.keys(byLogin), targetDate);
+    const adjustmentApprovedRows = buildAdjustmentDoneRows(adjustRaw, Object.keys(byLogin), targetDate, bonusRemark);
+    if (adjustmentApprovedRows.length) {
+      const syncResult = await syncAdjustmentApprovedDone(dateValue, adjustmentApprovedRows);
+      if (syncResult.unauthorized) return;
+    }
+    const remoteDone = await fetchRemoteBonusDone(dateValue);
     const localDone = getBonusDoneSet(dateValue);
     const candidateRows = Object.entries(byLogin).map(([key, info]) => {
       const bonus = info.maxDeposit >= 100000 ? 10 : info.maxDeposit >= 50000 ? 5 : 0;
@@ -2808,7 +2848,7 @@
         bonus,
         remark: bonusRemark
       };
-    }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !localDone.has(row.loginKey));
+    }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !localDone.has(row.loginKey) && !remoteDone.has(row.loginKey));
 
     const claimResult = await claimRemoteBonusBatch(dateValue, candidateRows.map(row => ({
       login_id: row.loginId,
