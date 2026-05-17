@@ -125,8 +125,27 @@ async function extendOwnPending(date, claimOwner, pendingExpiresAt, now) {
 async function insertPendingRows(payload) {
   if (payload.length === 0) return [];
 
+  const date = payload[0].bonus_date;
+  const loginKeys = [...new Set(payload.map(row => row.login_key).filter(Boolean))];
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from('bonus_done_daily')
+    .select('login_key')
+    .eq('bonus_date', date)
+    .eq('bonus_type', 'BONUS_HARIAN')
+    .in('login_key', loginKeys);
+
+  if (existingError) throw existingError;
+
+  const existingKeys = new Set((existingRows || []).map(row => normalizeLoginId(row.login_key)));
+  const insertRows = payload.filter(row => !existingKeys.has(row.login_key));
+
+  if (insertRows.length === 0) return [];
+
   const { data, error } = await supabase
-    .rpc('claim_bonus_done_daily', { items: payload });
+    .from('bonus_done_daily')
+    .insert(insertRows)
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at');
 
   if (error) {
     if (error.code === '23505') return [];
