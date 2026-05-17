@@ -43,7 +43,7 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabase
         .from('bonus_done_daily')
-        .select('bonus_date, login_id, login_id_normalized, bonus_type, bonus_amount, remark, source, created_at')
+        .select('bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, created_at')
         .eq('bonus_date', date)
         .eq('bonus_type', 'BONUS_HARIAN')
         .gt('expires_at', new Date().toISOString())
@@ -51,7 +51,7 @@ export default async function handler(req, res) {
 
       if (error) throw error;
 
-      const loginIds = [...new Set((data || []).map(row => normalizeLoginId(row.login_id_normalized || row.login_id)))];
+      const loginIds = [...new Set((data || []).map(row => normalizeLoginId(row.login_key || row.login_id)))];
 
       return res.status(200).json({
         success: true,
@@ -77,18 +77,21 @@ export default async function handler(req, res) {
       const now = new Date().toISOString();
 
       const payload = rows
-        .map(row => ({
-          bonus_date: date,
-          login_id: normalizeLoginId(row.login_id),
-          bonus_type: 'BONUS_HARIAN',
-          bonus_amount: Number.isFinite(Number(row.bonus_amount)) ? Number(row.bonus_amount) : null,
-          remark: String(row.remark || ''),
-          source: String(row.source || 'unknown'),
-          operator_name: String(row.operator_name || ''),
-          operator_token: '',
-          updated_at: now,
-          expires_at: expiresAt
-        }))
+        .map(row => {
+          const loginId = normalizeLoginId(row.login_id);
+          return {
+            bonus_date: date,
+            login_id: loginId,
+            login_key: loginId,
+            bonus_type: 'BONUS_HARIAN',
+            bonus_amount: Number.isFinite(Number(row.bonus_amount)) ? Number(row.bonus_amount) : null,
+            remark: String(row.remark || ''),
+            source: String(row.source || 'unknown'),
+            operator_name: String(row.operator_name || ''),
+            updated_at: now,
+            expires_at: expiresAt
+          };
+        })
         .filter(row => row.login_id);
 
       if (payload.length === 0) {
@@ -102,10 +105,10 @@ export default async function handler(req, res) {
       const { data, error } = await supabase
         .from('bonus_done_daily')
         .upsert(payload, {
-          onConflict: 'bonus_date,login_id_normalized,bonus_type',
+          onConflict: 'bonus_date,login_key,bonus_type',
           ignoreDuplicates: false
         })
-        .select('id, bonus_date, login_id, login_id_normalized');
+        .select('id, bonus_date, login_id, login_key');
 
       if (error) throw error;
 
@@ -122,9 +125,11 @@ export default async function handler(req, res) {
       error: 'Method not allowed.'
     });
   } catch (error) {
+    console.error('bonus-done error:', error);
     return res.status(500).json({
       success: false,
-      error: error.message || 'Server error.'
+      error: error.message || 'Server error.',
+      details: error
     });
   }
 }
