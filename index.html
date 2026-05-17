@@ -1341,7 +1341,7 @@
         login_id: login,
         bonus_amount: Number.isFinite(Number(bonusAmount)) ? Number(bonusAmount) : null,
         remark: remark || remarkText,
-        source: 'adjustment_history'
+        source: 'adjustment_file'
       });
     }
 
@@ -1513,10 +1513,10 @@
     const already = bonusParseAlready(adjustRaw, Object.keys(byLogin), targetDate);
     const adjustmentDoneRows = buildAdjustmentDoneRows(adjustRaw, Object.keys(byLogin), targetDate, bonusRemark);
     if (adjustmentDoneRows.length) {
-      await syncRemoteBonusDone(dateValue, adjustmentDoneRows, 'adjustment_history');
+      await syncRemoteBonusDone(dateValue, adjustmentDoneRows, 'adjustment_file');
     }
     const combinedDone = await getCombinedBonusDoneSet(dateValue);
-    bonusRows = Object.entries(byLogin).map(([key, info]) => {
+    const candidateRows = Object.entries(byLogin).map(([key, info]) => {
       const bonus = info.maxDeposit >= 100000 ? 10 : info.maxDeposit >= 50000 ? 5 : 0;
       return {
         loginKey: key,
@@ -1531,6 +1531,20 @@
         remark: bonusRemark
       };
     }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !combinedDone.has(row.loginKey));
+
+    const claimResult = await syncRemoteBonusDone(dateValue, candidateRows.map(row => ({
+      login_id: row.loginId,
+      bonus_amount: row.bonus,
+      remark: row.remark,
+      source: 'process_claim'
+    })), 'process_claim');
+
+    if (claimResult && claimResult.success === true) {
+      const claimedSet = new Set((claimResult.loginIds || []).map(login => String(login).toUpperCase()));
+      bonusRows = candidateRows.filter(row => claimedSet.has(row.loginKey));
+    } else {
+      bonusRows = candidateRows;
+    }
 
     bonusRows.sort((a, b) => {
       const timeDiff = (a.timeValue || 0) - (b.timeValue || 0);
@@ -1571,7 +1585,7 @@
     copyToClipboard(text, 'Login ID dan bonus');
   }
 
-  async function markBonusRowsDone() {
+  function markBonusRowsDone() {
     const dateValue = document.getElementById('bonusDate').value;
     if (!dateValue) {
       showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
@@ -1600,23 +1614,11 @@
     });
 
     const savedCount = bonusRows.length;
-    const remoteRows = bonusRows.map(row => ({
-      login_id: row.loginId,
-      bonus_amount: row.bonus,
-      remark: row.remark,
-      source: 'manual_mark_done'
-    }));
     saveBonusDoneStore(store);
-    const remoteResult = await syncRemoteBonusDone(dateValue, remoteRows, 'manual_mark_done');
     bonusRows = [];
     bonusRender();
     renderBonusDoneInfo();
-    showToast(
-      remoteResult && remoteResult.success === false
-        ? `${savedCount} data tersimpan lokal. Supabase tidak terhubung.`
-        : `${savedCount} data ditandai sudah dibonuskan.`,
-      remoteResult && remoteResult.success === false ? 'error' : 'success'
-    );
+    showToast(`${savedCount} data ditandai sudah dibonuskan di cache lokal.`, 'success');
   }
 
   function clearBonusDoneByDate() {
@@ -2436,7 +2438,7 @@
       if (!dateValue) return;
       const targetDate = bonusPadDateFromInput(dateValue);
       const rows = buildAdjustmentDoneRows(text, [], targetDate, 'BONUS HARIAN ' + bonusDisplayDate(dateValue));
-      if (rows.length) await syncRemoteBonusDone(dateValue, rows, 'adjustment_history');
+      if (rows.length) await syncRemoteBonusDone(dateValue, rows, 'adjustment_file');
       renderBonusDoneInfo();
     });
   });
@@ -2453,7 +2455,7 @@
       if (!dateValue) return;
       const targetDate = bonusPadDateFromInput(dateValue);
       const rows = buildAdjustmentDoneRows(text, [], targetDate, 'BONUS HARIAN ' + bonusDisplayDate(dateValue));
-      if (rows.length) await syncRemoteBonusDone(dateValue, rows, 'adjustment_history');
+      if (rows.length) await syncRemoteBonusDone(dateValue, rows, 'adjustment_file');
       renderBonusDoneInfo();
     });
   });

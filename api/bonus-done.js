@@ -115,21 +115,25 @@ export default async function handler(req, res) {
 
       const { data, error } = await supabase
         .from('bonus_done_daily')
-        .upsert(payload, {
+        .insert(payload, {
           onConflict: 'bonus_date,login_key,bonus_type',
-          ignoreDuplicates: false
+          ignoreDuplicates: true
         })
         .select('id, bonus_date, login_id, login_key');
 
       if (error) throw error;
+      const claimedRows = data || [];
+      const loginIds = [...new Set(claimedRows.map(row => normalizeLoginId(row.login_key || row.login_id)))];
 
       return res.status(200).json({
         success: true,
-        inserted: data ? data.length : payload.length,
         received: rows.length,
         unique: payload.length,
+        claimed: claimedRows.length,
+        skipped: payload.length - claimedRows.length,
         duplicatesRemoved,
-        rows: data || []
+        loginIds,
+        rows: claimedRows
       });
     }
 
