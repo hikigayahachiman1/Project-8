@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const sessionSecret = process.env.OPERATOR_SESSION_SECRET;
 
 const supabase = supabaseUrl && serviceRoleKey
   ? createClient(supabaseUrl, serviceRoleKey, {
@@ -29,7 +31,67 @@ function addDays(date, days) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, claimBatchId) {
+function bearerToken(req) {
+  const header = req.headers.authorization || req.headers.Authorization || '';
+  const match = String(header).match(/^Bearer\s+(.+)$/i);
+  return match ? match[1] : '';
+}
+
+async function getOperatorFromRequest(req, required = false) {
+  if (!sessionSecret) {
+    if (required) {
+      const error = new Error('OPERATOR_SESSION_SECRET belum diset.');
+      error.statusCode = 500;
+      throw error;
+    }
+    return null;
+  }
+
+  const token = bearerToken(req);
+  if (!token) {
+    if (!required) return null;
+    const error = new Error('Session operator tidak valid.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  let payload;
+  try {
+    payload = jwt.verify(token, sessionSecret);
+  } catch (error) {
+    if (!required) return null;
+    const authError = new Error('Session operator tidak valid.');
+    authError.statusCode = 401;
+    throw authError;
+  }
+
+  const { data: operator, error } = await supabase
+    .from('operators')
+    .select('id, username, display_name, role, is_active')
+    .eq('id', payload.operator_id)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!operator) {
+    if (!required) return null;
+    const authError = new Error('Session operator tidak valid.');
+    authError.statusCode = 401;
+    throw authError;
+  }
+
+  return operator;
+}
+
+function claimOwnerFromOperator(operator, fallback) {
+  return operator ? `OPERATOR-${operator.id}` : normalizeText(fallback);
+}
+
+function operatorNameFromOperator(operator, fallback) {
+  return operator ? normalizeText(operator.display_name || operator.username) : normalizeText(fallback);
+}
+
+function dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, claimBatchId, operatorName) {
   const map = new Map();
 
   (rows || []).forEach(row => {
@@ -44,7 +106,7 @@ function dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, cl
       bonus_amount: Number.isFinite(Number(row.bonus_amount ?? row.bonus)) ? Number(row.bonus_amount ?? row.bonus) : null,
       remark: normalizeText(row.remark),
       source: normalizeText(row.source || 'process_claim') || 'process_claim',
-      operator_name: normalizeText(row.operator_name),
+      operator_name: operatorName || normalizeText(row.operator_name),
       bonus_status: 'PENDING',
       claim_owner: claimOwner,
       claim_batch_id: claimBatchId,
@@ -87,7 +149,7 @@ async function fetchPendingLock(date) {
 async function fetchPendingRows(date, claimOwner) {
   const { data, error } = await supabase
     .from('bonus_done_daily')
-    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at')
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at')
     .eq('bonus_date', date)
     .eq('bonus_type', 'BONUS_HARIAN')
     .eq('bonus_status', 'PENDING')
@@ -170,7 +232,7 @@ async function insertPendingRows(payload) {
   const { data, error } = await supabase
     .from('bonus_done_daily')
     .insert(insertRows)
-    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at');
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at');
 
   if (error) {
     if (error.code === '23505') return [];
@@ -180,7 +242,7 @@ async function insertPendingRows(payload) {
   return data || [];
 }
 
-async function reviveEmptyPendingLock(lockId, date, claimOwner, claimBatchId, now, pendingExpiresAt, expiresAt) {
+async function reviveEmptyPendingLock(lockId, date, claimOwner, claimBatchId, operatorName, now, pendingExpiresAt, expiresAt) {
   if (!lockId) return null;
 
   const { data, error } = await supabase
@@ -190,6 +252,7 @@ async function reviveEmptyPendingLock(lockId, date, claimOwner, claimBatchId, no
       lock_status: 'PENDING',
       claim_owner: claimOwner,
       claim_batch_id: claimBatchId,
+      operator_name: operatorName,
       started_at: now,
       updated_at: now,
       pending_expires_at: pendingExpiresAt,
@@ -205,7 +268,7 @@ async function reviveEmptyPendingLock(lockId, date, claimOwner, claimBatchId, no
   return data || null;
 }
 
-async function createPendingBatch(date, rows, payload, claimOwner, claimBatchId, now, pendingExpiresAt, expiresAt, emptyPendingCleared = false, reusableLockId = null) {
+async function createPendingBatch(date, rows, payload, claimOwner, claimBatchId, operatorName, now, pendingExpiresAt, expiresAt, emptyPendingCleared = false, reusableLockId = null) {
   const insertablePayload = await filterInsertableRows(payload);
 
   if (insertablePayload.length === 0) {
@@ -234,6 +297,7 @@ async function createPendingBatch(date, rows, payload, claimOwner, claimBatchId,
       lock_status: 'PENDING',
       claim_owner: claimOwner,
       claim_batch_id: claimBatchId,
+      operator_name: operatorName,
       started_at: now,
       updated_at: now,
       pending_expires_at: pendingExpiresAt,
@@ -247,7 +311,7 @@ async function createPendingBatch(date, rows, payload, claimOwner, claimBatchId,
     if (existingPending) return null;
 
     if (emptyPendingCleared && reusableLockId) {
-      const revivedLock = await reviveEmptyPendingLock(reusableLockId, date, claimOwner, claimBatchId, now, pendingExpiresAt, expiresAt);
+      const revivedLock = await reviveEmptyPendingLock(reusableLockId, date, claimOwner, claimBatchId, operatorName, now, pendingExpiresAt, expiresAt);
       if (!revivedLock) return null;
 
       const insertedRows = await insertPendingRows(insertablePayload);
@@ -291,11 +355,13 @@ async function createPendingBatch(date, rows, payload, claimOwner, claimBatchId,
   };
 }
 
-async function handleClaimBatch(body, res) {
+async function handleClaimBatch(req, body, res) {
+  const operator = await getOperatorFromRequest(req, true);
   const date = String(body.date || '');
   const rows = Array.isArray(body.rows) ? body.rows : [];
-  const claimOwner = normalizeText(body.claim_owner);
+  const claimOwner = claimOwnerFromOperator(operator, body.claim_owner);
   const claimBatchId = normalizeText(body.claim_batch_id);
+  const operatorName = operatorNameFromOperator(operator, body.operator_name);
 
   if (!isValidDate(date)) {
     return res.status(400).json({ success: false, error: 'Format date harus YYYY-MM-DD.' });
@@ -309,7 +375,7 @@ async function handleClaimBatch(body, res) {
   const now = nowDate.toISOString();
   const pendingExpiresAt = addMinutes(nowDate, 5);
   const expiresAt = addDays(nowDate, 2);
-  const payload = dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, claimBatchId);
+  const payload = dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, claimBatchId, operatorName);
 
   let lock = await fetchPendingLock(date);
   let emptyPendingCleared = false;
@@ -371,7 +437,7 @@ async function handleClaimBatch(body, res) {
     });
   }
 
-  const created = await createPendingBatch(date, rows, payload, claimOwner, claimBatchId, now, pendingExpiresAt, expiresAt, emptyPendingCleared, reusableEmptyLockId);
+  const created = await createPendingBatch(date, rows, payload, claimOwner, claimBatchId, operatorName, now, pendingExpiresAt, expiresAt, emptyPendingCleared, reusableEmptyLockId);
 
   if (created) {
     return res.status(200).json(created);
@@ -396,9 +462,11 @@ async function handleClaimBatch(body, res) {
   });
 }
 
-async function handleDone(body, res) {
+async function handleDone(req, body, res) {
+  const operator = await getOperatorFromRequest(req, true);
   const date = String(body.date || '');
-  const claimOwner = normalizeText(body.claim_owner);
+  const claimOwner = claimOwnerFromOperator(operator, body.claim_owner);
+  const operatorName = operatorNameFromOperator(operator, body.operator_name);
 
   if (!isValidDate(date)) {
     return res.status(400).json({ success: false, error: 'Format date harus YYYY-MM-DD.' });
@@ -424,7 +492,8 @@ async function handleDone(body, res) {
     .update({
       lock_status: 'DONE',
       done_at: now,
-      updated_at: now
+      updated_at: now,
+      done_by_name: operatorName
     })
     .eq('bonus_date', date)
     .eq('claim_owner', claimOwner)
@@ -437,13 +506,14 @@ async function handleDone(body, res) {
     .update({
       bonus_status: 'DONE',
       done_at: now,
-      updated_at: now
+      updated_at: now,
+      done_by_name: operatorName
     })
     .eq('bonus_date', date)
     .eq('claim_owner', claimOwner)
     .eq('bonus_status', 'PENDING')
     .eq('bonus_type', 'BONUS_HARIAN')
-    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, bonus_status, claim_owner, claim_batch_id, done_at');
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, operator_name, bonus_status, claim_owner, claim_batch_id, done_at, done_by_name');
 
   if (rowError) throw rowError;
 
@@ -460,8 +530,9 @@ async function handleDone(body, res) {
 }
 
 async function handleGet(req, res) {
+  const operator = await getOperatorFromRequest(req, false);
   const date = String(req.query.date || '');
-  const claimOwner = normalizeText(req.query.claim_owner);
+  const claimOwner = operator ? claimOwnerFromOperator(operator) : normalizeText(req.query.claim_owner);
 
   if (!isValidDate(date)) {
     return res.status(400).json({
@@ -477,7 +548,7 @@ async function handleGet(req, res) {
 
   const { data: rows, error } = await supabase
     .from('bonus_done_daily')
-    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, bonus_status, claim_owner, claim_batch_id, claimed_at, done_at, pending_expires_at, created_at')
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, done_at, pending_expires_at, created_at')
     .eq('bonus_date', date)
     .eq('bonus_type', 'BONUS_HARIAN')
     .gt('expires_at', new Date().toISOString())
@@ -524,8 +595,8 @@ export default async function handler(req, res) {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body;
       const action = String(body.action || '').trim();
 
-      if (action === 'claim_batch') return await handleClaimBatch(body, res);
-      if (action === 'done') return await handleDone(body, res);
+      if (action === 'claim_batch') return await handleClaimBatch(req, body, res);
+      if (action === 'done') return await handleDone(req, body, res);
 
       return res.status(400).json({
         success: false,
@@ -540,7 +611,7 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('bonus-done error:', error);
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
       error: error.message || 'Server error.',
       details: error

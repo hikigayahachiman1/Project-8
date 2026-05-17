@@ -72,6 +72,96 @@
     z-index: -1;
   }
 
+  body.operator-locked .container {
+    pointer-events: none;
+    filter: blur(5px);
+    opacity: 0.45;
+  }
+
+  .login-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(circle at 20% 16%, rgba(39,245,255,0.22), transparent 30%),
+      radial-gradient(circle at 84% 80%, rgba(155,92,255,0.20), transparent 32%),
+      rgba(3, 6, 16, 0.90);
+    z-index: 1000;
+    backdrop-filter: blur(18px);
+  }
+
+  .login-screen.hidden { display: none; }
+
+  .login-card {
+    width: min(100%, 420px);
+    border: 1px solid rgba(143,178,255,0.28);
+    border-radius: 28px;
+    padding: 28px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.11), rgba(255,255,255,0.04)), rgba(10,15,32,0.94);
+    box-shadow: var(--shadow), var(--glow);
+  }
+
+  .login-card h2 {
+    font-family: 'Fraunces', serif;
+    font-size: 2rem;
+    letter-spacing: -0.035em;
+    margin-bottom: 8px;
+  }
+
+  .login-card p {
+    color: var(--ink-soft);
+    margin-bottom: 18px;
+  }
+
+  .login-card input {
+    width: 100%;
+    min-height: 46px;
+    margin-bottom: 12px;
+    border: 1px solid rgba(143,178,255,0.26);
+    border-radius: 18px;
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.07);
+    color: var(--ink);
+    font-family: 'Instrument Sans', sans-serif;
+    font-weight: 700;
+  }
+
+  .login-card button { width: 100%; margin-top: 6px; }
+
+  .login-error {
+    min-height: 20px;
+    margin-top: 12px;
+    color: #ffb3c1;
+    font-weight: 800;
+    font-size: 0.88rem;
+  }
+
+  .operator-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: -8px 0 18px;
+    padding: 12px 14px;
+    border: 1px solid rgba(143,178,255,0.22);
+    border-radius: 18px;
+    background: rgba(255,255,255,0.055);
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+  }
+
+  .operator-info strong { color: var(--ink); }
+
+  .operator-info button {
+    width: auto;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+  }
+
   .container {
     max-width: 1320px;
     margin: 0 auto;
@@ -173,6 +263,37 @@
     background: rgba(0,255,168,0.12);
     color: var(--accent-3);
     font-weight: 800;
+  }
+
+  .role-badge, .status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 5px 10px;
+    border: 1px solid rgba(143,178,255,0.24);
+    background: rgba(255,255,255,0.08);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .role-badge.admin { color: #ffd166; border-color: rgba(255, 209, 102, 0.45); background: rgba(255, 209, 102, 0.12); }
+  .role-badge.audit { color: var(--accent); border-color: rgba(39,245,255,0.38); background: rgba(39,245,255,0.10); }
+  .status-badge.active { color: var(--accent-3); border-color: rgba(0,255,168,0.38); background: rgba(0,255,168,0.10); }
+  .status-badge.inactive { color: #ffb3c1; border-color: rgba(255,79,139,0.42); background: rgba(255,79,139,0.12); }
+
+  .row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .row-actions button {
+    padding: 8px 10px;
+    font-size: 0.75rem;
   }
 
   header {
@@ -757,6 +878,16 @@
 </style>
 </head>
 <body>
+  <div id="operatorLoginScreen" class="login-screen">
+    <div class="login-card">
+      <h2>Login Operator</h2>
+      <p>Masukkan username dan password operator.</p>
+      <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
+      <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
+      <button id="operatorLoginBtn" class="primary">Login</button>
+      <div id="operatorLoginError" class="login-error"></div>
+    </div>
+  </div>
   <div class="container">
     <header>
       <div>
@@ -778,7 +909,10 @@
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
+      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
     </div>
+
+    <div id="operatorInfo" class="operator-info" style="display:none;"></div>
 
     <section class="tool-panel active" id="panel-parser">
     <div class="grid">
@@ -1026,6 +1160,50 @@
       </div>
     </section>
 
+    <section class="tool-panel" id="panel-admin-operators">
+      <div class="bonus-grid">
+        <section class="card">
+          <div class="card-title">Tambah Operator</div>
+          <div class="card-desc">Buat akun operator baru. Password akan di-hash di server dan tidak pernah disimpan polos.</div>
+          <div class="date-row">
+            <input id="adminOperatorUsername" class="bonus-date" type="text" placeholder="Username">
+            <input id="adminOperatorDisplayName" class="bonus-date" type="text" placeholder="Display Name">
+            <input id="adminOperatorPassword" class="bonus-date" type="password" placeholder="Password">
+            <select id="adminOperatorRole" class="bonus-date">
+              <option value="operator">Operator</option>
+              <option value="audit">Audit</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div class="bonus-actions">
+            <button id="adminOperatorCreateBtn" class="primary">Tambah Operator</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-title">Daftar Operator</div>
+          <div class="card-desc">Kelola role, status aktif, dan reset password operator.</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Nama</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Last Login</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="adminOperatorTable">
+                <tr><td colspan="6" class="empty">Login sebagai admin untuk melihat operator.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+
     <footer>
       Tool lokal · Semua proses dilakukan di browser Anda · Tidak ada data yang dikirim ke server !
       <p>By Hachiman</p>
@@ -1066,23 +1244,183 @@
   let bonusRemark = '';
   const BONUS_DONE_KEY = 'qris_bonus_done_v1';
   const BONUS_CLAIM_OWNER_KEY = 'qris_bonus_claim_owner_v1';
+  const OPERATOR_TOKEN_KEY = 'qris_operator_token_v1';
+  const OPERATOR_PROFILE_KEY = 'qris_operator_profile_v1';
   const bonusRemoteDoneCache = {};
   let bonusRemoteStatus = 'idle';
   let bonusPendingTimerInterval = null;
   let bonusPendingServerOffsetMs = 0;
+  let currentOperator = null;
+  let adminOperatorRows = [];
+
+  function getOperatorToken() {
+    return localStorage.getItem(OPERATOR_TOKEN_KEY) || '';
+  }
+
+  function saveOperatorSession(token, operator) {
+    localStorage.setItem(OPERATOR_TOKEN_KEY, token);
+    localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(operator || {}));
+    currentOperator = operator || null;
+  }
+
+  function clearOperatorSession() {
+    localStorage.removeItem(OPERATOR_TOKEN_KEY);
+    localStorage.removeItem(OPERATOR_PROFILE_KEY);
+    currentOperator = null;
+  }
+
+  function hasAuditAccess() {
+    return currentOperator && ['audit', 'admin'].includes(currentOperator.role);
+  }
+
+  function isAdmin() {
+    return currentOperator && currentOperator.role === 'admin';
+  }
+
+  function requireOperator() {
+    if (currentOperator) return true;
+    showOperatorLogin();
+    showToast('Silakan login operator terlebih dahulu.', 'error');
+    return false;
+  }
+
+  function operatorAuthHeaders(extra = {}) {
+    const token = getOperatorToken();
+    return token ? { ...extra, Authorization: 'Bearer ' + token } : extra;
+  }
+
+  function handleOperatorUnauthorized() {
+    clearOperatorSession();
+    showOperatorLogin();
+    showToast('Session operator expired, silakan login ulang.', 'error');
+  }
+
+  function showOperatorLogin() {
+    document.body.classList.add('operator-locked');
+    document.getElementById('operatorLoginScreen').classList.remove('hidden');
+    document.getElementById('operatorUsername').focus();
+  }
+
+  function hideOperatorLogin() {
+    document.body.classList.remove('operator-locked');
+    document.getElementById('operatorLoginScreen').classList.add('hidden');
+  }
+
+  function renderOperatorInfo() {
+    const info = document.getElementById('operatorInfo');
+    if (!info || !currentOperator) return;
+    info.style.display = 'flex';
+    info.innerHTML = `<span>Login sebagai: <strong>${escapeHtml(currentOperator.display_name || currentOperator.username)}</strong> (${escapeHtml(currentOperator.role)})</span><button id="operatorLogoutBtn" class="ghost">Logout</button>`;
+    document.getElementById('operatorLogoutBtn').addEventListener('click', () => {
+      clearOperatorSession();
+      window.location.reload();
+    });
+  }
+
+  function applyRoleAccess() {
+    const auditTab = document.getElementById('auditTab');
+    const unlockBtn = document.getElementById('unlockAuditBtn');
+    const adminTab = document.getElementById('adminOperatorsTab');
+    if (hasAuditAccess()) {
+      unlockBtn.style.display = 'none';
+      auditTab.style.display = '';
+    } else {
+      unlockBtn.style.display = 'none';
+      auditTab.style.display = 'none';
+      if (document.getElementById('panel-audit').classList.contains('active')) {
+        document.querySelector('[data-panel="parser"]').click();
+      }
+    }
+
+    if (isAdmin()) {
+      adminTab.style.display = '';
+    } else {
+      adminTab.style.display = 'none';
+      if (document.getElementById('panel-admin-operators').classList.contains('active')) {
+        document.querySelector('[data-panel="parser"]').click();
+        if (currentOperator) showToast('Akses admin dibatasi.', 'error');
+      }
+    }
+  }
+
+  async function verifyOperatorSession() {
+    const token = getOperatorToken();
+    if (!token) {
+      showOperatorLogin();
+      applyRoleAccess();
+      return false;
+    }
+
+    try {
+      const response = await fetch('/api/operator-session', {
+        headers: operatorAuthHeaders()
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success !== true) {
+        throw new Error('invalid');
+      }
+      currentOperator = result.operator;
+      localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(result.operator));
+      hideOperatorLogin();
+      renderOperatorInfo();
+      applyRoleAccess();
+      return true;
+    } catch (error) {
+      clearOperatorSession();
+      showOperatorLogin();
+      applyRoleAccess();
+      return false;
+    }
+  }
+
+  async function loginOperator() {
+    const username = document.getElementById('operatorUsername').value;
+    const password = document.getElementById('operatorPassword').value;
+    const errorBox = document.getElementById('operatorLoginError');
+    errorBox.textContent = '';
+
+    try {
+      const response = await fetch('/api/operator-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success !== true) {
+        throw new Error(result.error || 'Username atau password salah.');
+      }
+      saveOperatorSession(result.token, result.operator);
+      hideOperatorLogin();
+      renderOperatorInfo();
+      applyRoleAccess();
+      showToast('Login operator berhasil.', 'success');
+    } catch (error) {
+      errorBox.textContent = error.message || 'Username atau password salah.';
+    }
+  }
 
   document.querySelectorAll('.tool-tab').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = btn.dataset.panel;
       if (!target) return;
+      if (target === 'audit' && !hasAuditAccess()) {
+        showToast('Akses Audit Bonus hanya untuk role audit/admin.', 'error');
+        return;
+      }
+      if (target === 'admin-operators' && !isAdmin()) {
+        showToast('Akses admin dibatasi.', 'error');
+        return;
+      }
       document.querySelectorAll('.tool-tab').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tool-panel').forEach(panel => panel.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('panel-' + target).classList.add('active');
+      if (target === 'admin-operators') adminFetchOperators();
     });
   });
 
   function showAuditTab() {
+    if (!hasAuditAccess()) return;
     const unlockBtn = document.getElementById('unlockAuditBtn');
     const auditTab = document.getElementById('auditTab');
     unlockBtn.style.display = 'none';
@@ -1091,6 +1429,13 @@
   }
 
   async function unlockAudit() {
+    if (hasAuditAccess()) {
+      showAuditTab();
+      return;
+    }
+    showToast('Akses Audit Bonus hanya untuk role audit/admin.', 'error');
+    return;
+/*
     const password = window.prompt('Masukkan password Audit Bonus:');
     if (password === null) return;
 
@@ -1111,6 +1456,7 @@
     } catch (error) {
       showToast('Gagal membuka Audit Bonus.', 'error');
     }
+*/
   }
 
   function getTodayWibInputValue() {
@@ -1147,6 +1493,7 @@
   }
 
   function getBonusClaimOwner() {
+    if (currentOperator && currentOperator.id) return 'OPERATOR-' + currentOperator.id;
     let owner = localStorage.getItem(BONUS_CLAIM_OWNER_KEY);
     if (!owner) {
       const id = window.crypto && typeof window.crypto.randomUUID === 'function'
@@ -1230,6 +1577,7 @@
     const ownerType = options.ownerType || 'unknown';
     const dateLabel = options.dateLabel || lock.bonus_date || '';
     const title = options.title || 'PENDING BONUS HARIAN AKTIF';
+    const operatorName = options.operatorName || lock.operator_name || '';
 
     function renderTimer() {
       const remainingMs = expiresMs - getAdjustedNowMs();
@@ -1240,9 +1588,9 @@
 
       let ownerText = '';
       if (ownerType === 'self') {
-        ownerText = 'Pending ini milik Anda. Jika lupa copy, klik Proses Bonus lagi untuk menampilkan ulang.';
+        ownerText = `Pending Bonus Harian milik Anda${operatorName ? ' (' + operatorName + ')' : ''} masih aktif. Jika lupa copy, klik Proses Bonus lagi untuk menampilkan ulang.`;
       } else if (ownerType === 'other') {
-        ownerText = 'Pending ini milik operator lain. Output Anda dikunci sampai pending selesai atau expired.';
+        ownerText = `Bonus Harian tanggal ini sedang diproses oleh ${operatorName || 'operator lain'}. Output Anda dikunci sampai pending selesai atau expired.`;
       } else {
         ownerText = 'Ada pending Bonus Harian yang belum ditandai selesai.';
       }
@@ -1252,7 +1600,7 @@
           <span class="timer-title">PENDING BONUS HARIAN EXPIRED</span>
           <span class="timer-clock">00:00</span>
           <span class="timer-note">
-            Tanggal ${escapeHtml(dateLabel)} punya pending yang sudah lewat 5 menit, tetapi belum di-DONE. Data tidak dihapus.
+            Pending sebelumnya${operatorName ? ' oleh ' + escapeHtml(operatorName) : ''} untuk tanggal ${escapeHtml(dateLabel)} sudah lewat 5 menit, tetapi belum di-DONE. Data tidak dihapus.
             Pastikan operator sebelumnya tidak sedang melanjutkan sebelum mengambil tindakan.
           </span>
         `;
@@ -1279,8 +1627,14 @@
   async function fetchRemoteBonusDone(dateValue) {
     try {
       const claimOwner = getBonusClaimOwner();
-      const response = await fetch(`/api/bonus-done?date=${encodeURIComponent(dateValue)}&claim_owner=${encodeURIComponent(claimOwner)}`);
+      const response = await fetch(`/api/bonus-done?date=${encodeURIComponent(dateValue)}&claim_owner=${encodeURIComponent(claimOwner)}`, {
+        headers: operatorAuthHeaders()
+      });
 
+      if (response.status === 401) {
+        handleOperatorUnauthorized();
+        throw new Error('unauthorized');
+      }
       if (!response.ok) throw new Error('remote failed');
 
       const result = await response.json();
@@ -1289,6 +1643,7 @@
       bonusRemoteStatus = 'online';
       return bonusRemoteDoneCache[dateValue];
     } catch (error) {
+      if (error.message === 'unauthorized') return new Set();
       bonusRemoteStatus = 'offline';
       showToast('Supabase tidak terhubung, memakai data lokal.', 'error');
       return new Set();
@@ -1300,12 +1655,15 @@
       const claimOwner = getBonusClaimOwner();
       const response = await fetch('/api/bonus-done', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           action: 'claim_batch',
           date: dateValue,
           claim_owner: claimOwner,
           claim_batch_id: createBonusBatchId(),
+          operator_id: currentOperator ? currentOperator.id : null,
+          operator_name: currentOperator ? currentOperator.display_name : '',
+          operator_role: currentOperator ? currentOperator.role : '',
           rows: (rows || []).map(row => ({
             ...row,
             source: row.source || 'process_claim'
@@ -1313,6 +1671,10 @@
         })
       });
 
+      if (response.status === 401) {
+        handleOperatorUnauthorized();
+        return { success: false, unauthorized: true };
+      }
       if (!response.ok) throw new Error('remote failed');
 
       const result = await response.json();
@@ -1320,6 +1682,7 @@
       delete bonusRemoteDoneCache[dateValue];
       return result;
     } catch (error) {
+      if (error.message === 'unauthorized') return { success: false, unauthorized: true };
       bonusRemoteStatus = 'offline';
       showToast('Supabase tidak terhubung, memakai data lokal.', 'error');
       return { success: false };
@@ -1329,15 +1692,19 @@
   async function finalizeRemoteBonusBatch(dateValue) {
     const response = await fetch('/api/bonus-done', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         action: 'done',
         date: dateValue,
-        claim_owner: getBonusClaimOwner()
+        claim_owner: getBonusClaimOwner(),
+        operator_name: currentOperator ? currentOperator.display_name : ''
       })
     });
 
     const result = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      handleOperatorUnauthorized();
+    }
     if (!response.ok || result.success !== true) {
       throw new Error(result.message || result.error || 'Gagal finalisasi batch.');
     }
@@ -1351,6 +1718,165 @@
     const localDone = getBonusDoneSet(dateValue);
     const remoteDone = await fetchRemoteBonusDone(dateValue);
     return new Set([...localDone, ...remoteDone].map(login => String(login).toUpperCase()));
+  }
+
+  async function adminApi(path, options = {}) {
+    const response = await fetch(path, {
+      ...options,
+      headers: operatorAuthHeaders({
+        ...(options.headers || {})
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      handleOperatorUnauthorized();
+      throw new Error('Session operator expired, silakan login ulang.');
+    }
+
+    if (response.status === 403) {
+      showToast('Anda tidak punya akses Admin Operator.', 'error');
+      throw new Error('Anda tidak punya akses Admin Operator.');
+    }
+
+    if (!response.ok || result.success !== true) {
+      throw new Error(result.error || 'Request admin gagal.');
+    }
+
+    return result;
+  }
+
+  async function adminFetchOperators() {
+    if (!isAdmin()) {
+      showToast('Akses admin dibatasi.', 'error');
+      return;
+    }
+
+    try {
+      const result = await adminApi('/api/operators');
+      renderAdminOperators(result.operators || []);
+    } catch (error) {
+      const table = document.getElementById('adminOperatorTable');
+      if (table) table.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(error.message || 'Gagal memuat operator.')}</td></tr>`;
+    }
+  }
+
+  async function adminCreateOperator() {
+    if (!isAdmin()) return;
+    const username = document.getElementById('adminOperatorUsername').value;
+    const displayName = document.getElementById('adminOperatorDisplayName').value;
+    const password = document.getElementById('adminOperatorPassword').value;
+    const role = document.getElementById('adminOperatorRole').value;
+
+    try {
+      await adminApi('/api/operators', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username,
+          password,
+          display_name: displayName,
+          role
+        })
+      });
+      document.getElementById('adminOperatorUsername').value = '';
+      document.getElementById('adminOperatorDisplayName').value = '';
+      document.getElementById('adminOperatorPassword').value = '';
+      document.getElementById('adminOperatorRole').value = 'operator';
+      showToast('Operator berhasil ditambahkan.', 'success');
+      adminFetchOperators();
+    } catch (error) {
+      showToast(error.message || 'Gagal menambah operator.', 'error');
+    }
+  }
+
+  async function adminUpdateOperator(payload) {
+    await adminApi('/api/operators', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    adminFetchOperators();
+  }
+
+  async function adminEditOperator(id) {
+    if (!isAdmin()) return;
+    const operator = adminOperatorRows.find(row => Number(row.id) === Number(id));
+    if (!operator) return;
+    const currentName = operator.display_name || '';
+    const currentRole = operator.role || 'operator';
+    const displayName = window.prompt('Display name baru:', currentName || '');
+    if (displayName === null) return;
+    const role = window.prompt('Role baru (operator/audit/admin):', currentRole || 'operator');
+    if (role === null) return;
+
+    try {
+      await adminUpdateOperator({ id, display_name: displayName, role });
+      showToast('Operator berhasil diperbarui.', 'success');
+    } catch (error) {
+      showToast(error.message || 'Gagal update operator.', 'error');
+    }
+  }
+
+  async function adminResetPassword(id) {
+    if (!isAdmin()) return;
+    const password = window.prompt('Password baru minimal 6 karakter:');
+    if (password === null) return;
+
+    try {
+      await adminUpdateOperator({ id, password });
+      showToast('Password operator berhasil direset.', 'success');
+    } catch (error) {
+      showToast(error.message || 'Gagal reset password.', 'error');
+    }
+  }
+
+  async function adminSetOperatorActive(id, isActive) {
+    if (!isAdmin()) return;
+    const label = isActive ? 'aktifkan' : 'nonaktifkan';
+    if (!window.confirm(`Yakin ingin ${label} operator ini?`)) return;
+
+    try {
+      await adminUpdateOperator({ id, is_active: isActive });
+      showToast(`Operator berhasil di${label}.`, 'success');
+    } catch (error) {
+      showToast(error.message || 'Gagal mengubah status operator.', 'error');
+    }
+  }
+
+  function formatAdminDate(value) {
+    if (!value) return '-';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', hour12: false });
+  }
+
+  function renderAdminOperators(operators) {
+    const table = document.getElementById('adminOperatorTable');
+    if (!table) return;
+    adminOperatorRows = operators || [];
+
+    if (!operators.length) {
+      table.innerHTML = '<tr><td colspan="6" class="empty">Belum ada operator.</td></tr>';
+      return;
+    }
+
+    table.innerHTML = operators.map(operator => `
+      <tr>
+        <td class="user-id">${escapeHtml(operator.username)}</td>
+        <td>${escapeHtml(operator.display_name || '-')}</td>
+        <td><span class="role-badge ${escapeHtml(operator.role)}">${escapeHtml(operator.role)}</span></td>
+        <td><span class="status-badge ${operator.is_active ? 'active' : 'inactive'}">${operator.is_active ? 'Aktif' : 'Nonaktif'}</span></td>
+        <td class="time-cell">${escapeHtml(formatAdminDate(operator.last_login_at))}</td>
+        <td>
+          <div class="row-actions">
+            <button onclick="adminEditOperator(${operator.id})">Edit</button>
+            <button onclick="adminResetPassword(${operator.id})">Reset Password</button>
+            <button class="${operator.is_active ? 'danger' : 'success'}" onclick="adminSetOperatorActive(${operator.id}, ${operator.is_active ? 'false' : 'true'})">${operator.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
   }
 
   function getAuditDateRange() {
@@ -1721,6 +2247,7 @@
   }
 
   async function bonusProcess() {
+    if (!requireOperator()) return;
     let adjustRaw = document.getElementById('bonusAdjustRaw').value;
     const dateValue = document.getElementById('bonusDate').value;
 
@@ -1813,13 +2340,20 @@
       source: 'process_claim'
     })));
 
+    if (claimResult && claimResult.unauthorized) {
+      bonusRows = [];
+      bonusRender();
+      return;
+    }
+
     if (claimResult && claimResult.success === true) {
       if (claimResult.status === 'locked_by_other') {
         bonusRows = [];
         bonusRender();
+        const operatorName = claimResult.lock && claimResult.lock.operator_name ? claimResult.lock.operator_name : 'operator lain';
         showBonusLockWarning(
           'BONUS HARIAN SEDANG DIPROSES',
-          'Tanggal ini sedang digunakan oleh operator lain dan belum ditandai selesai. Tunggu sampai operator tersebut klik Tandai Semua Sudah Dibonuskan.'
+          `Tanggal ini sedang diproses oleh ${operatorName} dan belum ditandai selesai. Tunggu sampai operator tersebut klik "Tandai Semua Sudah Dibonuskan".`
         );
         startBonusPendingTimer(claimResult.lock, {
           ownerType: 'other',
@@ -2520,6 +3054,14 @@
   document.getElementById('bonusClearDoneBtn').addEventListener('click', clearBonusDoneByDate);
   document.getElementById('bonusDate').addEventListener('change', renderBonusDoneInfo);
   document.getElementById('unlockAuditBtn').addEventListener('click', unlockAudit);
+  document.getElementById('adminOperatorCreateBtn').addEventListener('click', adminCreateOperator);
+  document.getElementById('operatorLoginBtn').addEventListener('click', loginOperator);
+  document.getElementById('operatorPassword').addEventListener('keydown', event => {
+    if (event.key === 'Enter') loginOperator();
+  });
+  document.getElementById('operatorUsername').addEventListener('keydown', event => {
+    if (event.key === 'Enter') document.getElementById('operatorPassword').focus();
+  });
   document.getElementById('importAuditAdjustBtn').addEventListener('click', () => {
     readFileToTextarea('auditAdjustFile', 'auditAdjustRaw');
   });
@@ -2972,6 +3514,7 @@
   updateDateTimeDisplay();
   setInterval(updateDateTimeDisplay, 1000);
   renderBonusDoneInfo();
+  verifyOperatorSession();
 
   // Allow Ctrl+Enter to parse
   document.getElementById('input').addEventListener('keydown', (e) => {
