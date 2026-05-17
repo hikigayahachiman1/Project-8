@@ -21,7 +21,8 @@ function operatorResponse(operator) {
     id: operator.id,
     username: operator.username,
     display_name: operator.display_name,
-    role: operator.role
+    role: operator.role,
+    is_protected: Boolean(operator.is_protected)
   };
 }
 
@@ -50,7 +51,7 @@ export default async function handler(req, res) {
 
     const { data: operator, error } = await supabase
       .from('operators')
-      .select('id, username, display_name, password_hash, role, is_active')
+      .select('id, username, display_name, password_hash, role, is_active, is_protected')
       .eq('username', username)
       .eq('is_active', true)
       .maybeSingle();
@@ -77,7 +78,8 @@ export default async function handler(req, res) {
       operator_id: operator.id,
       username: operator.username,
       display_name: operator.display_name,
-      role: operator.role
+      role: operator.role,
+      is_protected: Boolean(operator.is_protected)
     }, sessionSecret, { expiresIn: '12h' });
 
     return res.status(200).json({

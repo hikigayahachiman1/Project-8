@@ -15,6 +15,8 @@ function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+const validRoles = new Set(['admin', 'superadmin']);
+
 export default async function handler(req, res) {
   try {
     if (!allowBootstrap) {
@@ -33,7 +35,7 @@ export default async function handler(req, res) {
     const { data: existingAdmins, error: adminError } = await supabase
       .from('operators')
       .select('id')
-      .eq('role', 'admin')
+      .in('role', ['admin', 'superadmin'])
       .eq('is_active', true)
       .limit(1);
 
@@ -46,6 +48,7 @@ export default async function handler(req, res) {
     const username = normalizeUsername(body.username);
     const password = String(body.password || '');
     const displayName = String(body.display_name || '').trim();
+    const role = String(body.role || 'admin').trim().toLowerCase();
 
     if (!username || !password || !displayName) {
       return res.status(400).json({ success: false, error: 'Username, password, dan display_name wajib diisi.' });
@@ -55,7 +58,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Password minimal 6 karakter.' });
     }
 
+    if (!validRoles.has(role)) {
+      return res.status(400).json({ success: false, error: 'Role bootstrap harus admin atau superadmin.' });
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
+    const protectedAccount = role === 'superadmin' || username === 'james';
 
     const { data, error } = await supabase
       .from('operators')
@@ -63,11 +71,12 @@ export default async function handler(req, res) {
         username,
         display_name: displayName,
         password_hash: passwordHash,
-        role: 'admin',
+        role,
+        is_protected: protectedAccount,
         is_active: true,
         updated_at: new Date().toISOString()
       })
-      .select('id, username, display_name, role')
+      .select('id, username, display_name, role, is_protected')
       .single();
 
     if (error) throw error;

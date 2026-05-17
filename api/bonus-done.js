@@ -67,7 +67,7 @@ async function getOperatorFromRequest(req, required = false) {
 
   const { data: operator, error } = await supabase
     .from('operators')
-    .select('id, username, display_name, role, is_active')
+    .select('id, username, display_name, role, is_active, is_protected')
     .eq('id', payload.operator_id)
     .eq('is_active', true)
     .maybeSingle();

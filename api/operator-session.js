@@ -22,7 +22,8 @@ function operatorResponse(operator) {
     id: operator.id,
     username: operator.username,
     display_name: operator.display_name,
-    role: operator.role
+    role: operator.role,
+    is_protected: Boolean(operator.is_protected)
   };
 }
 
@@ -55,7 +56,7 @@ export default async function handler(req, res) {
 
     const { data: operator, error } = await supabase
       .from('operators')
-      .select('id, username, display_name, role, is_active')
+      .select('id, username, display_name, role, is_active, is_protected')
       .eq('id', payload.operator_id)
       .eq('is_active', true)
       .maybeSingle();

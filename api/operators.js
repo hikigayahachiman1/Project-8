@@ -12,7 +12,7 @@ const supabase = supabaseUrl && serviceRoleKey
     })
   : null;
 
-const validRoles = new Set(['operator', 'audit', 'admin']);
+const validRoles = new Set(['operator', 'audit', 'admin', 'superadmin']);
 
 function bearerToken(req) {
   const header = req.headers.authorization || req.headers.Authorization || '';
@@ -31,6 +31,7 @@ function safeOperator(row) {
     display_name: row.display_name,
     role: row.role,
     is_active: row.is_active,
+    is_protected: Boolean(row.is_protected),
     last_login_at: row.last_login_at,
     created_at: row.created_at,
     updated_at: row.updated_at
@@ -80,7 +81,7 @@ async function requireAdmin(req) {
     throw authError;
   }
 
-  if (operator.role !== 'admin') {
+  if (!['admin', 'superadmin'].includes(operator.role)) {
     const forbidden = new Error('Anda tidak punya akses Admin Operator.');
     forbidden.statusCode = 403;
     throw forbidden;
@@ -92,7 +93,7 @@ async function requireAdmin(req) {
 async function listOperators(res) {
   const { data, error } = await supabase
     .from('operators')
-    .select('id, username, display_name, role, is_active, last_login_at, created_at, updated_at')
+    .select('id, username, display_name, role, is_active, is_protected, last_login_at, created_at, updated_at')
     .order('username', { ascending: true });
 
   if (error) throw error;
@@ -103,7 +104,25 @@ async function listOperators(res) {
   });
 }
 
-async function createOperator(body, res) {
+function isSuperAdmin(operator) {
+  return operator && operator.role === 'superadmin';
+}
+
+async function countActiveAdminLike(exceptId = null) {
+  let query = supabase
+    .from('operators')
+    .select('id', { count: 'exact', head: true })
+    .eq('is_active', true)
+    .in('role', ['admin', 'superadmin']);
+
+  if (exceptId) query = query.neq('id', exceptId);
+
+  const { count, error } = await query;
+  if (error) throw error;
+  return count || 0;
+}
+
+async function createOperator(requester, body, res) {
   const username = normalizeUsername(body.username);
   const password = String(body.password || '');
   const displayName = String(body.display_name || '').trim();
@@ -121,6 +140,11 @@ async function createOperator(body, res) {
     return res.status(400).json({ success: false, error: 'Role tidak valid.' });
   }
 
+  const wantsProtected = body.is_protected === true;
+  if ((role === 'superadmin' || wantsProtected) && !isSuperAdmin(requester)) {
+    return res.status(403).json({ success: false, error: 'Hanya superadmin yang boleh membuat akun superadmin/protected.' });
+  }
+
   const passwordHash = await bcrypt.hash(password, 12);
   const now = new Date().toISOString();
 
@@ -131,10 +155,11 @@ async function createOperator(body, res) {
       display_name: displayName,
       password_hash: passwordHash,
       role,
+      is_protected: isSuperAdmin(requester) ? wantsProtected : false,
       is_active: true,
       updated_at: now
     })
-    .select('id, username, display_name, role, is_active, last_login_at, created_at, updated_at')
+    .select('id, username, display_name, role, is_active, is_protected, last_login_at, created_at, updated_at')
     .single();
 
   if (error) {
@@ -147,7 +172,7 @@ async function createOperator(body, res) {
   return res.status(201).json({ success: true, operator: safeOperator(data) });
 }
 
-async function updateOperator(body, res) {
+async function updateOperator(requester, body, res) {
   const id = Number(body.id);
   if (!Number.isFinite(id) || id <= 0) {
     return res.status(400).json({ success: false, error: 'ID operator tidak valid.' });
@@ -155,13 +180,19 @@ async function updateOperator(body, res) {
 
   const { data: existing, error: fetchError } = await supabase
     .from('operators')
-    .select('id')
+    .select('id, role, is_active, is_protected')
     .eq('id', id)
     .maybeSingle();
 
   if (fetchError) throw fetchError;
   if (!existing) {
     return res.status(404).json({ success: false, error: 'Operator tidak ditemukan.' });
+  }
+
+  const requesterIsSuper = isSuperAdmin(requester);
+  const targetProtected = existing.role === 'superadmin' || existing.is_protected === true;
+  if (targetProtected && !requesterIsSuper) {
+    return res.status(403).json({ success: false, error: 'Akun superadmin/protected tidak bisa diubah oleh admin biasa.' });
   }
 
   const patch = { updated_at: new Date().toISOString() };
@@ -175,11 +206,27 @@ async function updateOperator(body, res) {
   if (body.role !== undefined) {
     const role = String(body.role || '').trim().toLowerCase();
     if (!validRoles.has(role)) return res.status(400).json({ success: false, error: 'Role tidak valid.' });
+    if (role === 'superadmin' && !requesterIsSuper) {
+      return res.status(403).json({ success: false, error: 'Hanya superadmin yang boleh mengatur role superadmin.' });
+    }
     patch.role = role;
   }
 
   if (typeof body.is_active === 'boolean') {
+    if (body.is_active === false && existing.is_active && ['admin', 'superadmin'].includes(existing.role)) {
+      const remaining = await countActiveAdminLike(existing.id);
+      if (remaining === 0) {
+        return res.status(403).json({ success: false, error: 'Tidak boleh menonaktifkan satu-satunya admin/superadmin aktif.' });
+      }
+    }
     patch.is_active = body.is_active;
+  }
+
+  if (typeof body.is_protected === 'boolean') {
+    if (!requesterIsSuper) {
+      return res.status(403).json({ success: false, error: 'Hanya superadmin yang boleh mengubah proteksi akun.' });
+    }
+    patch.is_protected = body.is_protected;
   }
 
   if (body.password !== undefined && body.password !== null && String(body.password).trim()) {
@@ -192,7 +239,7 @@ async function updateOperator(body, res) {
     .from('operators')
     .update(patch)
     .eq('id', id)
-    .select('id, username, display_name, role, is_active, last_login_at, created_at, updated_at')
+    .select('id, username, display_name, role, is_active, is_protected, last_login_at, created_at, updated_at')
     .single();
 
   if (error) throw error;
@@ -200,10 +247,29 @@ async function updateOperator(body, res) {
   return res.status(200).json({ success: true, operator: safeOperator(data) });
 }
 
-async function disableOperator(req, res) {
+async function disableOperator(requester, req, res) {
   const id = Number(req.query.id);
   if (!Number.isFinite(id) || id <= 0) {
     return res.status(400).json({ success: false, error: 'ID operator tidak valid.' });
+  }
+
+  const { data: existing, error: fetchError } = await supabase
+    .from('operators')
+    .select('id, role, is_active, is_protected')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (fetchError) throw fetchError;
+  if (!existing) return res.status(404).json({ success: false, error: 'Operator tidak ditemukan.' });
+  if (existing.role === 'superadmin' || existing.is_protected === true) {
+    return res.status(403).json({ success: false, error: 'Akun protected tidak boleh dinonaktifkan.' });
+  }
+
+  if (existing.is_active && ['admin', 'superadmin'].includes(existing.role)) {
+    const remaining = await countActiveAdminLike(existing.id);
+    if (remaining === 0) {
+      return res.status(403).json({ success: false, error: 'Tidak boleh menonaktifkan satu-satunya admin/superadmin aktif.' });
+    }
   }
 
   const { error } = await supabase
@@ -218,15 +284,15 @@ async function disableOperator(req, res) {
 
 export default async function handler(req, res) {
   try {
-    await requireAdmin(req);
+    const requester = await requireAdmin(req);
 
     if (req.method === 'GET') return await listOperators(res);
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body;
 
-    if (req.method === 'POST') return await createOperator(body, res);
-    if (req.method === 'PUT') return await updateOperator(body, res);
-    if (req.method === 'DELETE') return await disableOperator(req, res);
+    if (req.method === 'POST') return await createOperator(requester, body, res);
+    if (req.method === 'PUT') return await updateOperator(requester, body, res);
+    if (req.method === 'DELETE') return await disableOperator(requester, req, res);
 
     res.setHeader('Allow', 'GET, POST, PUT, DELETE');
     return res.status(405).json({ success: false, error: 'Method not allowed.' });

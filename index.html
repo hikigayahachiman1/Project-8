@@ -281,7 +281,9 @@
   }
 
   .role-badge.admin { color: #ffd166; border-color: rgba(255, 209, 102, 0.45); background: rgba(255, 209, 102, 0.12); }
+  .role-badge.superadmin { color: #ffffff; border-color: rgba(255, 23, 68, 0.62); background: rgba(255, 23, 68, 0.20); }
   .role-badge.audit { color: var(--accent); border-color: rgba(39,245,255,0.38); background: rgba(39,245,255,0.10); }
+  .role-badge.protected { color: #ffb3c1; border-color: rgba(255,79,139,0.46); background: rgba(255,79,139,0.14); margin-left: 6px; }
   .status-badge.active { color: var(--accent-3); border-color: rgba(0,255,168,0.38); background: rgba(0,255,168,0.10); }
   .status-badge.inactive { color: #ffb3c1; border-color: rgba(255,79,139,0.42); background: rgba(255,79,139,0.12); }
 
@@ -1173,6 +1175,7 @@
               <option value="operator">Operator</option>
               <option value="audit">Audit</option>
               <option value="admin">Admin</option>
+              <option value="superadmin" data-superadmin-only="true">Superadmin</option>
             </select>
           </div>
           <div class="bonus-actions">
@@ -1270,11 +1273,15 @@
   }
 
   function hasAuditAccess() {
-    return currentOperator && ['audit', 'admin'].includes(currentOperator.role);
+    return currentOperator && ['audit', 'admin', 'superadmin'].includes(currentOperator.role);
   }
 
   function isAdmin() {
-    return currentOperator && currentOperator.role === 'admin';
+    return currentOperator && ['admin', 'superadmin'].includes(currentOperator.role);
+  }
+
+  function isSuperAdmin() {
+    return currentOperator && currentOperator.role === 'superadmin';
   }
 
   function requireOperator() {
@@ -1321,6 +1328,7 @@
     const auditTab = document.getElementById('auditTab');
     const unlockBtn = document.getElementById('unlockAuditBtn');
     const adminTab = document.getElementById('adminOperatorsTab');
+    const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
     if (hasAuditAccess()) {
       unlockBtn.style.display = 'none';
       auditTab.style.display = '';
@@ -1334,8 +1342,10 @@
 
     if (isAdmin()) {
       adminTab.style.display = '';
+      if (superRoleOption) superRoleOption.style.display = isSuperAdmin() ? '' : 'none';
     } else {
       adminTab.style.display = 'none';
+      if (superRoleOption) superRoleOption.style.display = 'none';
       if (document.getElementById('panel-admin-operators').classList.contains('active')) {
         document.querySelector('[data-panel="parser"]').click();
         if (currentOperator) showToast('Akses admin dibatasi.', 'error');
@@ -1803,11 +1813,15 @@
     if (!isAdmin()) return;
     const operator = adminOperatorRows.find(row => Number(row.id) === Number(id));
     if (!operator) return;
+    if (!isSuperAdmin() && (operator.role === 'superadmin' || operator.is_protected)) {
+      showToast('Akun superadmin/protected tidak bisa diubah oleh admin biasa.', 'error');
+      return;
+    }
     const currentName = operator.display_name || '';
     const currentRole = operator.role || 'operator';
     const displayName = window.prompt('Display name baru:', currentName || '');
     if (displayName === null) return;
-    const role = window.prompt('Role baru (operator/audit/admin):', currentRole || 'operator');
+    const role = window.prompt(isSuperAdmin() ? 'Role baru (operator/audit/admin/superadmin):' : 'Role baru (operator/audit/admin):', currentRole || 'operator');
     if (role === null) return;
 
     try {
@@ -1820,6 +1834,11 @@
 
   async function adminResetPassword(id) {
     if (!isAdmin()) return;
+    const operator = adminOperatorRows.find(row => Number(row.id) === Number(id));
+    if (!isSuperAdmin() && operator && (operator.role === 'superadmin' || operator.is_protected)) {
+      showToast('Akun superadmin/protected tidak bisa diubah oleh admin biasa.', 'error');
+      return;
+    }
     const password = window.prompt('Password baru minimal 6 karakter:');
     if (password === null) return;
 
@@ -1833,6 +1852,11 @@
 
   async function adminSetOperatorActive(id, isActive) {
     if (!isAdmin()) return;
+    const operator = adminOperatorRows.find(row => Number(row.id) === Number(id));
+    if (!isSuperAdmin() && operator && (operator.role === 'superadmin' || operator.is_protected)) {
+      showToast('Akun superadmin/protected tidak bisa diubah oleh admin biasa.', 'error');
+      return;
+    }
     const label = isActive ? 'aktifkan' : 'nonaktifkan';
     if (!window.confirm(`Yakin ingin ${label} operator ini?`)) return;
 
@@ -1861,22 +1885,29 @@
       return;
     }
 
-    table.innerHTML = operators.map(operator => `
-      <tr>
-        <td class="user-id">${escapeHtml(operator.username)}</td>
-        <td>${escapeHtml(operator.display_name || '-')}</td>
-        <td><span class="role-badge ${escapeHtml(operator.role)}">${escapeHtml(operator.role)}</span></td>
-        <td><span class="status-badge ${operator.is_active ? 'active' : 'inactive'}">${operator.is_active ? 'Aktif' : 'Nonaktif'}</span></td>
-        <td class="time-cell">${escapeHtml(formatAdminDate(operator.last_login_at))}</td>
-        <td>
-          <div class="row-actions">
-            <button onclick="adminEditOperator(${operator.id})">Edit</button>
-            <button onclick="adminResetPassword(${operator.id})">Reset Password</button>
-            <button class="${operator.is_active ? 'danger' : 'success'}" onclick="adminSetOperatorActive(${operator.id}, ${operator.is_active ? 'false' : 'true'})">${operator.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
+    table.innerHTML = operators.map(operator => {
+      const protectedAccount = operator.role === 'superadmin' || operator.is_protected;
+      const lockedForAdmin = protectedAccount && !isSuperAdmin();
+      return `
+        <tr>
+          <td class="user-id">${escapeHtml(operator.username)}</td>
+          <td>${escapeHtml(operator.display_name || '-')}</td>
+          <td>
+            <span class="role-badge ${escapeHtml(operator.role)}">${escapeHtml(operator.role)}</span>
+            ${operator.is_protected ? '<span class="role-badge protected">Protected</span>' : ''}
+          </td>
+          <td><span class="status-badge ${operator.is_active ? 'active' : 'inactive'}">${operator.is_active ? 'Aktif' : 'Nonaktif'}</span></td>
+          <td class="time-cell">${escapeHtml(formatAdminDate(operator.last_login_at))}</td>
+          <td>
+            <div class="row-actions">
+              <button ${lockedForAdmin ? 'disabled' : ''} onclick="adminEditOperator(${operator.id})">Edit</button>
+              <button ${lockedForAdmin ? 'disabled' : ''} onclick="adminResetPassword(${operator.id})">Reset Password</button>
+              <button ${lockedForAdmin ? 'disabled' : ''} class="${operator.is_active ? 'danger' : 'success'}" onclick="adminSetOperatorActive(${operator.id}, ${operator.is_active ? 'false' : 'true'})">${operator.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
   }
 
   function getAuditDateRange() {
