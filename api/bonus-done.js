@@ -70,11 +70,14 @@ async function deleteExpiredRows() {
   await supabase.from('bonus_process_locks').delete().lt('expires_at', now);
 }
 
-async function fetchDateLock(date) {
+async function fetchPendingLock(date) {
   const { data, error } = await supabase
     .from('bonus_process_locks')
     .select('*')
     .eq('bonus_date', date)
+    .eq('lock_status', 'PENDING')
+    .order('updated_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) throw error;
@@ -130,9 +133,10 @@ async function insertPendingRows(payload) {
 
   const { data: existingRows, error: existingError } = await supabase
     .from('bonus_done_daily')
-    .select('login_key')
+    .select('login_key, bonus_status')
     .eq('bonus_date', date)
     .eq('bonus_type', 'BONUS_HARIAN')
+    .in('bonus_status', ['DONE', 'PENDING'])
     .in('login_key', loginKeys);
 
   if (existingError) throw existingError;
@@ -175,7 +179,7 @@ async function handleClaimBatch(body, res) {
   const expiresAt = addDays(nowDate, 2);
   const payload = dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, claimBatchId);
 
-  let lock = await fetchDateLock(date);
+  let lock = await fetchPendingLock(date);
 
   if (!lock) {
     const { error: lockError } = await supabase
@@ -193,9 +197,22 @@ async function handleClaimBatch(body, res) {
 
     if (lockError) {
       if (lockError.code !== '23505') throw lockError;
-      lock = await fetchDateLock(date);
+      lock = await fetchPendingLock(date);
     } else {
       const insertedRows = await insertPendingRows(payload);
+      if (insertedRows.length === 0 && payload.length > 0) {
+        return res.status(200).json({
+          success: true,
+          status: 'all_already_done',
+          received: rows.length,
+          unique: payload.length,
+          claimed: 0,
+          skipped: payload.length,
+          rows: [],
+          loginIds: [],
+          message: 'Semua kandidat sudah pernah ditandai selesai bonus.'
+        });
+      }
       return res.status(200).json({
         success: true,
         status: 'claimed',
@@ -212,16 +229,6 @@ async function handleClaimBatch(body, res) {
 
   if (!lock) {
     throw new Error('Gagal membaca lock batch bonus.');
-  }
-
-  if (lock.lock_status === 'DONE') {
-    return res.status(200).json({
-      success: true,
-      status: 'already_done',
-      rows: [],
-      loginIds: [],
-      message: 'Bonus Harian tanggal ini sudah ditandai selesai.'
-    });
   }
 
   if (lock.lock_status === 'PENDING' && lock.claim_owner === claimOwner) {
@@ -277,7 +284,7 @@ async function handleDone(body, res) {
   }
 
   const now = new Date().toISOString();
-  const lock = await fetchDateLock(date);
+  const lock = await fetchPendingLock(date);
 
   if (!lock || lock.lock_status !== 'PENDING' || lock.claim_owner !== claimOwner) {
     return res.status(409).json({
@@ -340,7 +347,7 @@ async function handleGet(req, res) {
 
   await deleteExpiredRows();
 
-  const lock = await fetchDateLock(date);
+  const lock = await fetchPendingLock(date);
   const now = Date.now();
 
   const { data: rows, error } = await supabase

@@ -1677,6 +1677,17 @@
         return;
       }
 
+      if (claimResult.status === 'all_already_done') {
+        bonusRows = [];
+        bonusRender();
+        showBonusLockWarning(
+          'SEMUA KANDIDAT SUDAH DIBONUSKAN',
+          'Semua kandidat pada file ini sudah pernah ditandai selesai bonus. Tidak ada ID baru untuk diproses.'
+        );
+        showToast('Semua kandidat sudah pernah dibonuskan.', 'success');
+        return;
+      }
+
       if (claimResult.status === 'already_done') {
         bonusRows = [];
         bonusRender();
