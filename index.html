@@ -963,7 +963,6 @@
   let auditDepositRows = [];
   let bonusRemark = '';
   const BONUS_DONE_KEY = 'qris_bonus_done_v1';
-  const BONUS_SYNC_TOKEN_KEY = 'qris_bonus_sync_token_v1';
   const bonusRemoteDoneCache = {};
   let bonusRemoteStatus = 'idle';
 
@@ -1048,36 +1047,9 @@
     return new Set(Object.keys(rows).map(login => String(login).toUpperCase()));
   }
 
-  function getBonusSyncToken() {
-    let token = localStorage.getItem(BONUS_SYNC_TOKEN_KEY) || '';
-    if (!token) {
-      token = window.prompt('Masukkan token sinkron bonus:') || '';
-      if (token) setBonusSyncToken(token);
-    }
-    return token;
-  }
-
-  function setBonusSyncToken(token) {
-    localStorage.setItem(BONUS_SYNC_TOKEN_KEY, String(token || '').trim());
-  }
-
   async function fetchRemoteBonusDone(dateValue) {
-    const token = getBonusSyncToken();
-    if (!token) {
-      bonusRemoteStatus = 'offline';
-      return new Set();
-    }
-
     try {
-      const response = await fetch(`/api/bonus-done?date=${encodeURIComponent(dateValue)}`, {
-        headers: { 'x-bonus-sync-token': token }
-      });
-
-      if (response.status === 401) {
-        bonusRemoteStatus = 'unauthorized';
-        showToast('Token sinkron salah.', 'error');
-        return new Set();
-      }
+      const response = await fetch(`/api/bonus-done?date=${encodeURIComponent(dateValue)}`);
 
       if (!response.ok) throw new Error('remote failed');
 
@@ -1094,16 +1066,10 @@
   }
 
   async function syncRemoteBonusDone(dateValue, rows, source) {
-    const token = getBonusSyncToken();
-    if (!token) return { success: false };
-
     try {
       const response = await fetch('/api/bonus-done', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-bonus-sync-token': token
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: dateValue,
           rows: (rows || []).map(row => ({
@@ -1112,12 +1078,6 @@
           }))
         })
       });
-
-      if (response.status === 401) {
-        bonusRemoteStatus = 'unauthorized';
-        showToast('Token sinkron salah.', 'error');
-        return { success: false };
-      }
 
       if (!response.ok) throw new Error('remote failed');
 

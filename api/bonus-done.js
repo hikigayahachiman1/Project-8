@@ -2,7 +2,6 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const syncToken = process.env.BONUS_SYNC_TOKEN;
 
 const supabase = supabaseUrl && serviceRoleKey
   ? createClient(supabaseUrl, serviceRoleKey, {
@@ -18,24 +17,12 @@ function normalizeLoginId(value) {
   return String(value || '').trim().toUpperCase();
 }
 
-function isAuthorized(req) {
-  if (!syncToken) return true;
-  return req.headers['x-bonus-sync-token'] === syncToken;
-}
-
 export default async function handler(req, res) {
   try {
     if (!supabase) {
       return res.status(500).json({
         success: false,
         error: 'SUPABASE_URL atau SUPABASE_SERVICE_ROLE_KEY belum diset.'
-      });
-    }
-
-    if (!isAuthorized(req)) {
-      return res.status(401).json({
-        success: false,
-        error: 'Token sinkron salah.'
       });
     }
 
