@@ -432,6 +432,19 @@
   button.ghost { color: var(--ink-soft); }
   button.ghost:hover { color: var(--ink); }
 
+  button.danger {
+    background: linear-gradient(135deg, #ff1744, #ff6b35);
+    border-color: rgba(255, 23, 68, 0.75);
+    color: #ffffff;
+    box-shadow: 0 10px 28px rgba(255, 23, 68, 0.25), 0 0 24px rgba(255, 107, 53, 0.16);
+  }
+
+  button.danger:hover {
+    background: linear-gradient(135deg, #ff4569, #ff865c);
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.28);
+  }
+
   select {
     padding-right: 42px;
     appearance: none;
@@ -640,6 +653,93 @@
 
   .warning-row { background: var(--highlight) !important; }
 
+  .lock-warning {
+    margin: 0 0 16px;
+    padding: 18px 20px;
+    border: 1px solid rgba(255, 23, 68, 0.75);
+    border-radius: 20px;
+    background:
+      linear-gradient(135deg, rgba(255, 23, 68, 0.22), rgba(255, 107, 53, 0.14)),
+      rgba(20, 4, 8, 0.82);
+    color: #ffffff;
+    font-weight: 800;
+    line-height: 1.55;
+    box-shadow: 0 0 30px rgba(255, 23, 68, 0.22);
+  }
+
+  .lock-warning strong {
+    display: block;
+    margin-bottom: 6px;
+    color: #ffb3c1;
+    font-size: 1rem;
+  }
+
+  .lock-warning span {
+    display: block;
+    color: #ffffff;
+  }
+
+  .pending-timer {
+    margin: 0 0 16px;
+    padding: 16px 18px;
+    border: 1px solid rgba(255, 200, 87, 0.75);
+    border-radius: 20px;
+    background:
+      linear-gradient(135deg, rgba(255, 200, 87, 0.18), rgba(255, 23, 68, 0.10)),
+      rgba(18, 12, 4, 0.82);
+    color: #ffffff;
+    font-weight: 800;
+    line-height: 1.55;
+    box-shadow: 0 0 26px rgba(255, 200, 87, 0.18);
+  }
+
+  .pending-timer .timer-title {
+    display: block;
+    margin-bottom: 6px;
+    color: #ffd166;
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+  }
+
+  .pending-timer .timer-clock {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 96px;
+    margin: 6px 0;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(255, 23, 68, 0.22);
+    border: 1px solid rgba(255, 23, 68, 0.38);
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem;
+    font-weight: 900;
+    box-shadow: 0 0 20px rgba(255, 23, 68, 0.18);
+  }
+
+  .pending-timer .timer-note {
+    display: block;
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+    margin-top: 4px;
+  }
+
+  .pending-timer.expired {
+    border-color: rgba(255, 23, 68, 0.85);
+    background:
+      linear-gradient(135deg, rgba(255, 23, 68, 0.24), rgba(255, 107, 53, 0.14)),
+      rgba(20, 4, 8, 0.86);
+  }
+
+  .pending-timer.expired .timer-title {
+    color: #ffb3c1;
+  }
+
+  .pending-timer.expired .timer-clock {
+    background: rgba(255, 23, 68, 0.34);
+  }
+
   #outputText {
     min-height: 200px !important;
     background: linear-gradient(rgba(4,22,17,0.88), rgba(4,22,17,0.88)), repeating-linear-gradient(0deg, transparent 0 25px, rgba(0,255,168,0.06) 26px) !important;
@@ -817,10 +917,12 @@
           </div>
           <div class="bonus-copy" id="bonusCopyActions">
             <button id="bonusCopyAllBtn" class="success">Copy Login ID + Bonus</button>
-            <button id="bonusMarkDoneBtn">Tandai Semua Sudah Dibonuskan</button>
-            <button id="bonusClearDoneBtn" class="ghost">Hapus Data Tersimpan Tanggal Ini</button>
+            <button id="bonusMarkDoneBtn" class="danger">🚨 Tandai Semua Sudah Dibonuskan</button>
+            <button id="bonusClearDoneBtn" class="ghost">Hapus Cache Lokal Tanggal Ini</button>
           </div>
-          <div class="source-note" id="bonusDoneInfo">Data tersimpan lokal tanggal ini: 0 Login ID</div>
+          <div class="source-note" id="bonusDoneInfo">Data sudah bonus tanggal ini: 0 ID (Supabase + lokal)</div>
+          <div id="bonusLockWarning" class="lock-warning" style="display:none;"></div>
+          <div id="bonusPendingTimer" class="pending-timer" style="display:none;"></div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -963,6 +1065,11 @@
   let auditDepositRows = [];
   let bonusRemark = '';
   const BONUS_DONE_KEY = 'qris_bonus_done_v1';
+  const BONUS_CLAIM_OWNER_KEY = 'qris_bonus_claim_owner_v1';
+  const bonusRemoteDoneCache = {};
+  let bonusRemoteStatus = 'idle';
+  let bonusPendingTimerInterval = null;
+  let bonusPendingServerOffsetMs = 0;
 
   document.querySelectorAll('.tool-tab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1039,10 +1146,211 @@
     localStorage.setItem(BONUS_DONE_KEY, JSON.stringify(store || {}));
   }
 
+  function getBonusClaimOwner() {
+    let owner = localStorage.getItem(BONUS_CLAIM_OWNER_KEY);
+    if (!owner) {
+      const id = window.crypto && typeof window.crypto.randomUUID === 'function'
+        ? window.crypto.randomUUID()
+        : Date.now() + '-' + Math.random().toString(36).slice(2);
+      owner = 'OP-' + id;
+      localStorage.setItem(BONUS_CLAIM_OWNER_KEY, owner);
+    }
+    return owner;
+  }
+
+  function createBonusBatchId() {
+    return 'BATCH-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  }
+
   function getBonusDoneSet(dateValue) {
     const store = getBonusDoneStore();
     const rows = store[dateValue] || {};
     return new Set(Object.keys(rows).map(login => String(login).toUpperCase()));
+  }
+
+  function showBonusLockWarning(title, message) {
+    const box = document.getElementById('bonusLockWarning');
+    if (!box) return;
+    box.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
+    box.style.display = 'block';
+  }
+
+  function hideBonusLockWarning() {
+    const box = document.getElementById('bonusLockWarning');
+    if (!box) return;
+    box.style.display = 'none';
+  }
+
+  function stopBonusPendingTimer() {
+    if (bonusPendingTimerInterval) {
+      clearInterval(bonusPendingTimerInterval);
+      bonusPendingTimerInterval = null;
+    }
+
+    const timer = document.getElementById('bonusPendingTimer');
+    if (timer) {
+      timer.style.display = 'none';
+      timer.innerHTML = '';
+      timer.classList.remove('expired');
+    }
+  }
+
+  function formatCountdown(ms) {
+    const safeMs = Math.max(0, ms);
+    const totalSeconds = Math.floor(safeMs / 1000);
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return `${minutes}:${seconds}`;
+  }
+
+  function getAdjustedNowMs() {
+    return Date.now() + bonusPendingServerOffsetMs;
+  }
+
+  function startBonusPendingTimer(lock, options = {}) {
+    const timer = document.getElementById('bonusPendingTimer');
+    if (!timer || !lock || !lock.pending_expires_at) {
+      stopBonusPendingTimer();
+      return;
+    }
+
+    if (options.serverTime) {
+      const serverMs = new Date(options.serverTime).getTime();
+      if (!Number.isNaN(serverMs)) {
+        bonusPendingServerOffsetMs = serverMs - Date.now();
+      }
+    }
+
+    const expiresMs = new Date(lock.pending_expires_at).getTime();
+    if (Number.isNaN(expiresMs)) {
+      stopBonusPendingTimer();
+      return;
+    }
+
+    const ownerType = options.ownerType || 'unknown';
+    const dateLabel = options.dateLabel || lock.bonus_date || '';
+    const title = options.title || 'PENDING BONUS HARIAN AKTIF';
+
+    function renderTimer() {
+      const remainingMs = expiresMs - getAdjustedNowMs();
+      const isExpired = remainingMs <= 0;
+
+      timer.style.display = 'block';
+      timer.classList.toggle('expired', isExpired);
+
+      let ownerText = '';
+      if (ownerType === 'self') {
+        ownerText = 'Pending ini milik Anda. Jika lupa copy, klik Proses Bonus lagi untuk menampilkan ulang.';
+      } else if (ownerType === 'other') {
+        ownerText = 'Pending ini milik operator lain. Output Anda dikunci sampai pending selesai atau expired.';
+      } else {
+        ownerText = 'Ada pending Bonus Harian yang belum ditandai selesai.';
+      }
+
+      if (isExpired) {
+        timer.innerHTML = `
+          <span class="timer-title">PENDING BONUS HARIAN EXPIRED</span>
+          <span class="timer-clock">00:00</span>
+          <span class="timer-note">
+            Tanggal ${escapeHtml(dateLabel)} punya pending yang sudah lewat 5 menit, tetapi belum di-DONE. Data tidak dihapus.
+            Pastikan operator sebelumnya tidak sedang melanjutkan sebelum mengambil tindakan.
+          </span>
+        `;
+        return;
+      }
+
+      timer.innerHTML = `
+        <span class="timer-title">${escapeHtml(title)}</span>
+        <span class="timer-clock">${formatCountdown(remainingMs)}</span>
+        <span class="timer-note">
+          Tanggal ${escapeHtml(dateLabel)}. ${escapeHtml(ownerText)}
+        </span>
+      `;
+    }
+
+    if (bonusPendingTimerInterval) {
+      clearInterval(bonusPendingTimerInterval);
+    }
+
+    renderTimer();
+    bonusPendingTimerInterval = setInterval(renderTimer, 1000);
+  }
+
+  async function fetchRemoteBonusDone(dateValue) {
+    try {
+      const claimOwner = getBonusClaimOwner();
+      const response = await fetch(`/api/bonus-done?date=${encodeURIComponent(dateValue)}&claim_owner=${encodeURIComponent(claimOwner)}`);
+
+      if (!response.ok) throw new Error('remote failed');
+
+      const result = await response.json();
+      const loginIds = Array.isArray(result.doneLoginIds) ? result.doneLoginIds : (Array.isArray(result.loginIds) ? result.loginIds : []);
+      bonusRemoteDoneCache[dateValue] = new Set(loginIds.map(login => String(login).toUpperCase()));
+      bonusRemoteStatus = 'online';
+      return bonusRemoteDoneCache[dateValue];
+    } catch (error) {
+      bonusRemoteStatus = 'offline';
+      showToast('Supabase tidak terhubung, memakai data lokal.', 'error');
+      return new Set();
+    }
+  }
+
+  async function claimRemoteBonusBatch(dateValue, rows) {
+    try {
+      const claimOwner = getBonusClaimOwner();
+      const response = await fetch('/api/bonus-done', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'claim_batch',
+          date: dateValue,
+          claim_owner: claimOwner,
+          claim_batch_id: createBonusBatchId(),
+          rows: (rows || []).map(row => ({
+            ...row,
+            source: row.source || 'process_claim'
+          }))
+        })
+      });
+
+      if (!response.ok) throw new Error('remote failed');
+
+      const result = await response.json();
+      bonusRemoteStatus = 'online';
+      delete bonusRemoteDoneCache[dateValue];
+      return result;
+    } catch (error) {
+      bonusRemoteStatus = 'offline';
+      showToast('Supabase tidak terhubung, memakai data lokal.', 'error');
+      return { success: false };
+    }
+  }
+
+  async function finalizeRemoteBonusBatch(dateValue) {
+    const response = await fetch('/api/bonus-done', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'done',
+        date: dateValue,
+        claim_owner: getBonusClaimOwner()
+      })
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success !== true) {
+      throw new Error(result.message || result.error || 'Gagal finalisasi batch.');
+    }
+
+    bonusRemoteStatus = 'online';
+    delete bonusRemoteDoneCache[dateValue];
+    return result;
+  }
+
+  async function getCombinedBonusDoneSet(dateValue) {
+    const localDone = getBonusDoneSet(dateValue);
+    const remoteDone = await fetchRemoteBonusDone(dateValue);
+    return new Set([...localDone, ...remoteDone].map(login => String(login).toUpperCase()));
   }
 
   function getAuditDateRange() {
@@ -1069,8 +1377,14 @@
     const info = document.getElementById('bonusDoneInfo');
     if (!info) return;
     const dateValue = document.getElementById('bonusDate').value;
-    const count = dateValue ? getBonusDoneSet(dateValue).size : 0;
-    info.textContent = `Data tersimpan lokal tanggal ini: ${count} Login ID`;
+    const localSet = dateValue ? getBonusDoneSet(dateValue) : new Set();
+    const remoteSet = dateValue && bonusRemoteDoneCache[dateValue] ? bonusRemoteDoneCache[dateValue] : new Set();
+    const combined = new Set([...localSet, ...remoteSet]);
+    if (bonusRemoteStatus === 'offline' || bonusRemoteStatus === 'unauthorized') {
+      info.textContent = `Mode lokal: ${localSet.size} ID. Supabase tidak terhubung.`;
+      return;
+    }
+    info.textContent = `Data sudah bonus tanggal ini: ${combined.size} ID (Supabase + lokal)`;
   }
 
   function cleanCell(value) {
@@ -1270,6 +1584,81 @@
     return already;
   }
 
+  function buildAdjustmentDoneRows(raw, loginKeys, targetDate, remarkText) {
+    const rows = [];
+    const loginFilter = new Set((loginKeys || []).map(login => String(login).toUpperCase()));
+
+    function addLogin(loginId, bonusAmount, remark) {
+      const login = String(loginId || '').trim().toUpperCase();
+      if (!login) return;
+      if (loginFilter.size && !loginFilter.has(login)) return;
+      rows.push({
+        login_id: login,
+        bonus_amount: Number.isFinite(Number(bonusAmount)) ? Number(bonusAmount) : null,
+        remark: remark || remarkText,
+        source: 'adjustment_file'
+      });
+    }
+
+    if (looksLikeCsv(raw)) {
+      csvRecords(raw).forEach(row => {
+        const login = String(row['Login ID'] || '').trim().toUpperCase();
+        const remark = `${row['Remark'] || ''} ${row['Transaction Number'] || ''}`.trim();
+        const dateText = row['Approved Time'] || row['Date Created'] || '';
+        const status = String(row['Status'] || '').trim().toUpperCase();
+        const amount = row['Adjustment Amt'] || row['Adjustment Amount'] || row['Adj Amount'] || row['Amount'] || '';
+        if (!login || !remark.toUpperCase().includes('BONUS HARIAN')) return;
+        if (status && status !== 'APPROVED') return;
+        if (!bonusMatchGmt7Date(dateText, targetDate)) return;
+        addLogin(login, amount, remark);
+      });
+      return rows;
+    }
+
+    const lines = String(raw || '').split('\n').map(line => line.trim()).filter(Boolean);
+    const loginList = [...loginFilter];
+
+    for (let i = 0; i < lines.length; i++) {
+      if (!String(lines[i]).toUpperCase().includes('BONUS HARIAN')) continue;
+
+      const start = Math.max(0, i - 18);
+      const end = Math.min(lines.length - 1, i + 18);
+      const blockLines = lines.slice(start, end + 1);
+      const block = blockLines.join('\n').toUpperCase();
+      if (/\bREJECT(?:ED)?\b/.test(block)) continue;
+      if (!blockLines.some(line => bonusMatchGmt7Date(line, targetDate))) continue;
+
+      loginList.forEach(login => {
+        if (block.includes(login)) addLogin(login, null, lines[i]);
+      });
+    }
+
+    return rows;
+  }
+
+  function rowsFromClaimResponse(responseRows, candidateRows) {
+    const candidateMap = new Map(candidateRows.map(row => [row.loginKey, row]));
+
+    return (responseRows || []).map(remoteRow => {
+      const key = String(remoteRow.login_key || remoteRow.login_id || '').trim().toUpperCase();
+      const localRow = candidateMap.get(key);
+      if (localRow) return localRow;
+
+      return {
+        loginKey: key,
+        loginId: key,
+        memberName: '',
+        maxDeposit: 0,
+        time: '-',
+        timestamp: 0,
+        timeValue: 0,
+        depositCount: 0,
+        bonus: Number(remoteRow.bonus_amount || 0),
+        remark: remoteRow.remark || bonusRemark
+      };
+    }).filter(row => row.loginKey);
+  }
+
   function bonusRender() {
     const tbody = document.getElementById('bonusTable');
     const stats = document.getElementById('bonusStats');
@@ -1401,7 +1790,7 @@
 
     const already = bonusParseAlready(adjustRaw, Object.keys(byLogin), targetDate);
     const localDone = getBonusDoneSet(dateValue);
-    bonusRows = Object.entries(byLogin).map(([key, info]) => {
+    const candidateRows = Object.entries(byLogin).map(([key, info]) => {
       const bonus = info.maxDeposit >= 100000 ? 10 : info.maxDeposit >= 50000 ? 5 : 0;
       return {
         loginKey: key,
@@ -1417,6 +1806,119 @@
       };
     }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !localDone.has(row.loginKey));
 
+    const claimResult = await claimRemoteBonusBatch(dateValue, candidateRows.map(row => ({
+      login_id: row.loginId,
+      bonus_amount: row.bonus,
+      remark: row.remark,
+      source: 'process_claim'
+    })));
+
+    if (claimResult && claimResult.success === true) {
+      if (claimResult.status === 'locked_by_other') {
+        bonusRows = [];
+        bonusRender();
+        showBonusLockWarning(
+          'BONUS HARIAN SEDANG DIPROSES',
+          'Tanggal ini sedang digunakan oleh operator lain dan belum ditandai selesai. Tunggu sampai operator tersebut klik Tandai Semua Sudah Dibonuskan.'
+        );
+        startBonusPendingTimer(claimResult.lock, {
+          ownerType: 'other',
+          serverTime: claimResult.serverTime,
+          dateLabel: dateValue,
+          title: 'BONUS HARIAN SEDANG DIPROSES OPERATOR LAIN'
+        });
+        showToast('Bonus Harian tanggal ini sedang dikunci operator lain.', 'error');
+        return;
+      }
+
+      if (claimResult.status === 'pending_expired') {
+        bonusRows = [];
+        bonusRender();
+        showBonusLockWarning(
+          'PENDING BONUS HARIAN BELUM SELESAI',
+          'Ada proses sebelumnya yang belum ditandai selesai. Pending aktif sudah lewat 5 menit, tetapi data tetap tersimpan. Pastikan operator sebelumnya tidak sedang melanjutkan sebelum mengambil tindakan.'
+        );
+        startBonusPendingTimer(claimResult.lock, {
+          ownerType: 'other',
+          serverTime: claimResult.serverTime,
+          dateLabel: dateValue,
+          title: 'PENDING BONUS HARIAN BELUM SELESAI'
+        });
+        showToast('Pending bonus harian sebelumnya belum selesai.', 'error');
+        return;
+      }
+
+      if (claimResult.status === 'all_already_done') {
+        bonusRows = [];
+        bonusRender();
+        showBonusLockWarning(
+          'SEMUA KANDIDAT SUDAH DIBONUSKAN',
+          'Semua kandidat pada file ini sudah pernah ditandai selesai bonus. Tidak ada ID baru untuk diproses.'
+        );
+        stopBonusPendingTimer();
+        showToast('Semua kandidat sudah pernah dibonuskan.', 'success');
+        return;
+      }
+
+      if (claimResult.status === 'no_candidates') {
+        bonusRows = [];
+        bonusRender();
+        hideBonusLockWarning();
+        stopBonusPendingTimer();
+        showToast('Tidak ada kandidat bonus baru untuk diproses.', 'success');
+        return;
+      }
+
+      if (claimResult.status === 'already_done') {
+        bonusRows = [];
+        bonusRender();
+        showBonusLockWarning(
+          'BONUS HARIAN SUDAH SELESAI',
+          'Bonus Harian tanggal ini sudah ditandai selesai.'
+        );
+        stopBonusPendingTimer();
+        showToast('Bonus Harian tanggal ini sudah ditandai selesai.', 'success');
+        return;
+      }
+
+      bonusRows = rowsFromClaimResponse(claimResult.rows || [], candidateRows);
+      if (claimResult.status === 'own_pending' && bonusRows.length > 0) {
+        showBonusLockWarning(
+          'PENDING MILIK ANDA',
+          'Menampilkan ulang pending milik Anda. Silakan copy ulang jika sebelumnya lupa.'
+        );
+        startBonusPendingTimer(claimResult.lock, {
+          ownerType: 'self',
+          serverTime: claimResult.serverTime,
+          dateLabel: dateValue,
+          title: 'MENAMPILKAN ULANG PENDING MILIK ANDA'
+        });
+      } else if (claimResult.status === 'own_pending') {
+        bonusRows = [];
+        bonusRender();
+        hideBonusLockWarning();
+        stopBonusPendingTimer();
+        showToast('Pending lama kosong, silakan proses ulang data terbaru.', 'success');
+        return;
+      } else {
+        hideBonusLockWarning();
+        if (claimResult.status === 'claimed') {
+          startBonusPendingTimer(claimResult.lock, {
+            ownerType: 'self',
+            serverTime: claimResult.serverTime,
+            dateLabel: dateValue,
+            title: 'PENDING BONUS HARIAN MILIK ANDA'
+          });
+        } else {
+          stopBonusPendingTimer();
+        }
+      }
+    } else {
+      hideBonusLockWarning();
+      stopBonusPendingTimer();
+      bonusRows = candidateRows;
+    }
+
     bonusRows.sort((a, b) => {
       const timeDiff = (a.timeValue || 0) - (b.timeValue || 0);
       if (timeDiff !== 0) return timeDiff;
@@ -1424,7 +1926,15 @@
     });
     bonusRender();
     renderBonusDoneInfo();
-    showToast(`${bonusRows.length} data bonus harian berhasil diproses.`, 'success');
+    if (claimResult && claimResult.success === true && candidateRows.length > 0 && bonusRows.length === 0) {
+      showToast('Semua kandidat sudah pernah diproses/terclaim.', 'success');
+    } else if (claimResult && claimResult.status === 'claimed') {
+      showToast(claimResult.emptyPendingCleared ? 'Pending kosong sebelumnya dibersihkan. Batch baru berhasil dibuat.' : 'Batch Bonus Harian berhasil dibuat.', 'success');
+    } else if (claimResult && claimResult.status === 'own_pending') {
+      showToast('Menampilkan ulang pending milik Anda.', 'success');
+    } else {
+      showToast(`${bonusRows.length} data bonus harian berhasil diproses.`, 'success');
+    }
   }
 
   function bonusReset() {
@@ -1436,6 +1946,8 @@
     document.getElementById('bonusTable').innerHTML = '<tr><td colspan="9" class="empty">Belum ada data bonus untuk ditampilkan</td></tr>';
     document.getElementById('bonusStats').style.display = 'none';
     document.getElementById('bonusCopyActions').style.display = 'flex';
+    hideBonusLockWarning();
+    stopBonusPendingTimer();
     updateBonusSourceNote();
     renderBonusDoneInfo();
     showToast('Data bonus dibersihkan.');
@@ -1456,7 +1968,7 @@
     copyToClipboard(text, 'Login ID dan bonus');
   }
 
-  function markBonusRowsDone() {
+  async function markBonusRowsDone() {
     const dateValue = document.getElementById('bonusDate').value;
     if (!dateValue) {
       showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
@@ -1464,6 +1976,18 @@
     }
     if (bonusRows.length === 0) {
       showToast('Tidak ada data bonus untuk ditandai.', 'error');
+      return;
+    }
+
+    let finalizeResult;
+    try {
+      finalizeResult = await finalizeRemoteBonusBatch(dateValue);
+    } catch (error) {
+      showBonusLockWarning(
+        'GAGAL FINALISASI KE SUPABASE',
+        'Jangan lanjut proses baru sebelum koneksi normal. Bonus belum dianggap selesai di server.'
+      );
+      showToast(error.message || 'Gagal finalisasi ke Supabase.', 'error');
       return;
     }
 
@@ -1487,9 +2011,11 @@
     const savedCount = bonusRows.length;
     saveBonusDoneStore(store);
     bonusRows = [];
+    hideBonusLockWarning();
+    stopBonusPendingTimer();
     bonusRender();
     renderBonusDoneInfo();
-    showToast(`${savedCount} data ditandai sudah dibonuskan.`, 'success');
+    showToast(finalizeResult.message || `Bonus Harian berhasil ditandai selesai. ${savedCount} data tersimpan di cache lokal.`, 'success');
   }
 
   function clearBonusDoneByDate() {
@@ -1498,13 +2024,13 @@
       showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
       return;
     }
-    if (!window.confirm('Hapus data tersimpan lokal untuk tanggal ini saja?')) return;
+    if (!window.confirm('Hapus cache lokal untuk tanggal ini saja? Data Supabase tidak akan dihapus.')) return;
 
     const store = getBonusDoneStore();
     delete store[dateValue];
     saveBonusDoneStore(store);
     renderBonusDoneInfo();
-    showToast('Data tersimpan lokal tanggal ini dihapus.', 'success');
+    showToast('Cache lokal tanggal ini dihapus. Data Supabase tidak dihapus.', 'success');
   }
 
   function extractTicketNumbers(text) {
@@ -2304,7 +2830,13 @@
   });
 
   document.getElementById('importAdjustBtn').addEventListener('click', () => {
-    readFileToTextarea('adjustFile', 'bonusAdjustRaw');
+    readFileToTextarea('adjustFile', 'bonusAdjustRaw', async text => {
+      const dateValue = document.getElementById('bonusDate').value;
+      if (!dateValue) return;
+      const targetDate = bonusPadDateFromInput(dateValue);
+      buildAdjustmentDoneRows(text, [], targetDate, 'BONUS HARIAN ' + bonusDisplayDate(dateValue));
+      renderBonusDoneInfo();
+    });
   });
 
   document.getElementById('depositFile').addEventListener('change', () => {
@@ -2314,7 +2846,13 @@
   });
 
   document.getElementById('adjustFile').addEventListener('change', () => {
-    readFileToTextarea('adjustFile', 'bonusAdjustRaw');
+    readFileToTextarea('adjustFile', 'bonusAdjustRaw', async text => {
+      const dateValue = document.getElementById('bonusDate').value;
+      if (!dateValue) return;
+      const targetDate = bonusPadDateFromInput(dateValue);
+      buildAdjustmentDoneRows(text, [], targetDate, 'BONUS HARIAN ' + bonusDisplayDate(dateValue));
+      renderBonusDoneInfo();
+    });
   });
 
   document.getElementById('parseBtn').addEventListener('click', async () => {
