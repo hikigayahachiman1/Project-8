@@ -85,58 +85,198 @@
     align-items: center;
     justify-content: center;
     padding: 24px;
+    overflow: hidden;
     background:
-      radial-gradient(circle at 20% 16%, rgba(39,245,255,0.22), transparent 30%),
-      radial-gradient(circle at 84% 80%, rgba(155,92,255,0.20), transparent 32%),
-      rgba(3, 6, 16, 0.90);
+      radial-gradient(circle at 18% 18%, rgba(0, 255, 200, 0.20), transparent 30%),
+      radial-gradient(circle at 82% 18%, rgba(155, 92, 255, 0.22), transparent 32%),
+      radial-gradient(circle at 58% 88%, rgba(255, 79, 139, 0.14), transparent 34%),
+      linear-gradient(135deg, #030612 0%, #071426 48%, #050713 100%);
     z-index: 1000;
     backdrop-filter: blur(18px);
   }
 
+  .login-screen::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: radial-gradient(circle at center, rgba(0,0,0,0.86), transparent 78%);
+  }
+
+  .login-screen::after {
+    content: '';
+    position: absolute;
+    width: 520px;
+    height: 520px;
+    border-radius: 999px;
+    background:
+      conic-gradient(from 180deg, rgba(39,245,255,0.20), rgba(155,92,255,0.22), rgba(255,79,139,0.16), rgba(0,255,168,0.16), rgba(39,245,255,0.20));
+    filter: blur(48px);
+    opacity: 0.75;
+    animation: loginGlowDrift 9s ease-in-out infinite alternate;
+  }
+
   .login-screen.hidden { display: none; }
 
+  .login-orb {
+    position: absolute;
+    border-radius: 999px;
+    pointer-events: none;
+    filter: blur(10px);
+    opacity: 0.75;
+  }
+
+  .login-orb-one {
+    width: 240px;
+    height: 240px;
+    left: 8%;
+    top: 18%;
+    background: radial-gradient(circle, rgba(0,255,168,0.20), transparent 66%);
+  }
+
+  .login-orb-two {
+    width: 220px;
+    height: 220px;
+    right: 10%;
+    bottom: 16%;
+    background: radial-gradient(circle, rgba(255,79,139,0.16), transparent 64%);
+  }
+
+  .login-shell {
+    position: relative;
+    z-index: 2;
+    width: min(100%, 440px);
+  }
+
   .login-card {
-    width: min(100%, 420px);
+    position: relative;
+    width: 100%;
     border: 1px solid rgba(143,178,255,0.28);
-    border-radius: 28px;
-    padding: 28px;
-    background: linear-gradient(135deg, rgba(255,255,255,0.11), rgba(255,255,255,0.04)), rgba(10,15,32,0.94);
-    box-shadow: var(--shadow), var(--glow);
+    border-radius: 32px;
+    padding: 32px 30px;
+    background:
+      linear-gradient(145deg, rgba(255,255,255,0.13), rgba(255,255,255,0.045)),
+      rgba(9, 14, 31, 0.88);
+    box-shadow:
+      0 30px 90px rgba(0,0,0,0.54),
+      0 0 38px rgba(39,245,255,0.12),
+      inset 0 1px 0 rgba(255,255,255,0.12);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    overflow: hidden;
+  }
+
+  .login-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 20% 0%, rgba(39,245,255,0.18), transparent 36%),
+      radial-gradient(circle at 92% 18%, rgba(155,92,255,0.16), transparent 34%),
+      linear-gradient(135deg, rgba(255,255,255,0.08), transparent 46%);
+  }
+
+  .login-card > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .login-accent-line {
+    width: 76px;
+    height: 5px;
+    border-radius: 999px;
+    margin-bottom: 18px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--danger));
+    box-shadow: 0 0 24px rgba(39,245,255,0.34);
   }
 
   .login-card h2 {
     font-family: 'Fraunces', serif;
-    font-size: 2rem;
-    letter-spacing: -0.035em;
+    font-size: clamp(2rem, 4vw, 2.6rem);
+    letter-spacing: -0.045em;
     margin-bottom: 8px;
+    color: var(--ink);
+    text-shadow: 0 0 28px rgba(39,245,255,0.18);
   }
 
   .login-card p {
     color: var(--ink-soft);
-    margin-bottom: 18px;
+    margin-bottom: 22px;
+    line-height: 1.5;
   }
 
   .login-card input {
     width: 100%;
-    min-height: 46px;
-    margin-bottom: 12px;
-    border: 1px solid rgba(143,178,255,0.26);
+    min-height: 50px;
+    margin-bottom: 13px;
+    border: 1px solid rgba(143,178,255,0.24);
     border-radius: 18px;
-    padding: 12px 14px;
-    background: rgba(255,255,255,0.07);
+    padding: 13px 15px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.075), rgba(255,255,255,0.035)),
+      rgba(2, 7, 18, 0.42);
     color: var(--ink);
     font-family: 'Instrument Sans', sans-serif;
-    font-weight: 700;
+    font-weight: 750;
+    outline: none;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s, background 0.18s;
   }
 
-  .login-card button { width: 100%; margin-top: 6px; }
+  .login-card input::placeholder {
+    color: rgba(154,168,199,0.62);
+  }
+
+  .login-card input:hover {
+    border-color: rgba(39,245,255,0.40);
+    background: rgba(255,255,255,0.075);
+  }
+
+  .login-card input:focus {
+    transform: translateY(-1px);
+    border-color: rgba(39,245,255,0.78);
+    box-shadow:
+      0 0 0 4px rgba(39,245,255,0.10),
+      0 0 22px rgba(39,245,255,0.12);
+  }
+
+  .login-card button {
+    width: 100%;
+    min-height: 50px;
+    margin-top: 6px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #27f5ff 0%, #9b5cff 58%, #ff4f8b 100%);
+    color: #03111a;
+    box-shadow:
+      0 16px 34px rgba(39,245,255,0.18),
+      0 14px 36px rgba(155,92,255,0.16);
+  }
+
+  .login-card button:hover {
+    transform: translateY(-2px);
+    background: linear-gradient(135deg, #7ffaff 0%, #b690ff 55%, #ff80a8 100%);
+  }
 
   .login-error {
-    min-height: 20px;
-    margin-top: 12px;
+    min-height: 22px;
+    margin-top: 14px;
     color: #ffb3c1;
-    font-weight: 800;
+    font-weight: 850;
     font-size: 0.88rem;
+    text-align: center;
+  }
+
+  @keyframes loginGlowDrift {
+    0% {
+      transform: translate(-180px, -80px) rotate(0deg) scale(0.92);
+    }
+    100% {
+      transform: translate(160px, 90px) rotate(24deg) scale(1.08);
+    }
   }
 
   .operator-info {
@@ -870,6 +1010,9 @@
 
   @media (max-width: 640px) {
     body { padding: 18px 14px; }
+    .login-screen { padding: 18px; }
+    .login-card { border-radius: 26px; padding: 26px 22px; }
+    .login-card h2 { font-size: 2rem; }
     header, .card { border-radius: 22px; padding: 18px; }
     .date-panel { width: 100%; align-items: stretch; }
     .datetime-panel { min-width: 0; text-align: left; }
@@ -881,13 +1024,18 @@
 </head>
 <body>
   <div id="operatorLoginScreen" class="login-screen">
-    <div class="login-card">
-      <h2>Login</h2>
-      <p>Masukkan username dan password.</p>
-      <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
-      <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
-      <button id="operatorLoginBtn" class="primary">Login</button>
-      <div id="operatorLoginError" class="login-error"></div>
+    <div class="login-orb login-orb-one"></div>
+    <div class="login-orb login-orb-two"></div>
+    <div class="login-shell">
+      <div class="login-card">
+        <div class="login-accent-line"></div>
+        <h2>Login Operator</h2>
+        <p>Masukkan username dan password.</p>
+        <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
+        <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
+        <button id="operatorLoginBtn" class="primary">Login</button>
+        <div id="operatorLoginError" class="login-error"></div>
+      </div>
     </div>
   </div>
   <div class="container">
@@ -911,7 +1059,7 @@
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
-      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Dasboard</button>
+      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
     </div>
 
     <div id="operatorInfo" class="operator-info" style="display:none;"></div>
