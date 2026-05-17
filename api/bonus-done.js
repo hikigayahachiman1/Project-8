@@ -76,7 +76,7 @@ export default async function handler(req, res) {
       const expiresAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
       const now = new Date().toISOString();
 
-      const payload = rows
+      const normalizedPayload = rows
         .map(row => {
           const loginId = normalizeLoginId(row.login_id);
           return {
@@ -94,11 +94,22 @@ export default async function handler(req, res) {
         })
         .filter(row => row.login_id);
 
+      const payloadMap = new Map();
+      normalizedPayload.forEach(row => {
+        const key = `${row.bonus_date}|${row.login_key}|${row.bonus_type}`;
+        payloadMap.set(key, row);
+      });
+      const payload = [...payloadMap.values()];
+      const duplicatesRemoved = rows.length - payload.length;
+
       if (payload.length === 0) {
         return res.status(200).json({
           success: true,
           inserted: 0,
-          skipped: rows.length
+          skipped: rows.length,
+          received: rows.length,
+          unique: 0,
+          duplicatesRemoved
         });
       }
 
@@ -115,6 +126,9 @@ export default async function handler(req, res) {
       return res.status(200).json({
         success: true,
         inserted: data ? data.length : payload.length,
+        received: rows.length,
+        unique: payload.length,
+        duplicatesRemoved,
         rows: data || []
       });
     }
