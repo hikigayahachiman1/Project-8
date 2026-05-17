@@ -125,7 +125,23 @@ async function extendOwnPending(date, claimOwner, pendingExpiresAt, now) {
   if (rowError) throw rowError;
 }
 
-async function insertPendingRows(payload) {
+async function closeEmptyPendingLock(lock, now) {
+  if (!lock || !lock.id) return;
+
+  const { error } = await supabase
+    .from('bonus_process_locks')
+    .update({
+      lock_status: 'EMPTY',
+      done_at: now,
+      updated_at: now
+    })
+    .eq('id', lock.id)
+    .eq('lock_status', 'PENDING');
+
+  if (error) throw error;
+}
+
+async function filterInsertableRows(payload) {
   if (payload.length === 0) return [];
 
   const date = payload[0].bonus_date;
@@ -142,8 +158,13 @@ async function insertPendingRows(payload) {
   if (existingError) throw existingError;
 
   const existingKeys = new Set((existingRows || []).map(row => normalizeLoginId(row.login_key)));
-  const insertRows = payload.filter(row => !existingKeys.has(row.login_key));
+  return payload.filter(row => !existingKeys.has(row.login_key));
+}
 
+async function insertPendingRows(payload) {
+  if (payload.length === 0) return [];
+
+  const insertRows = await filterInsertableRows(payload);
   if (insertRows.length === 0) return [];
 
   const { data, error } = await supabase
@@ -157,6 +178,117 @@ async function insertPendingRows(payload) {
   }
 
   return data || [];
+}
+
+async function reviveEmptyPendingLock(lockId, date, claimOwner, claimBatchId, now, pendingExpiresAt, expiresAt) {
+  if (!lockId) return null;
+
+  const { data, error } = await supabase
+    .from('bonus_process_locks')
+    .update({
+      bonus_date: date,
+      lock_status: 'PENDING',
+      claim_owner: claimOwner,
+      claim_batch_id: claimBatchId,
+      started_at: now,
+      updated_at: now,
+      pending_expires_at: pendingExpiresAt,
+      expires_at: expiresAt,
+      done_at: null
+    })
+    .eq('id', lockId)
+    .eq('lock_status', 'EMPTY')
+    .select('*')
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function createPendingBatch(date, rows, payload, claimOwner, claimBatchId, now, pendingExpiresAt, expiresAt, emptyPendingCleared = false, reusableLockId = null) {
+  const insertablePayload = await filterInsertableRows(payload);
+
+  if (insertablePayload.length === 0) {
+    return {
+      success: true,
+      status: payload.length > 0 ? 'all_already_done' : 'no_candidates',
+      emptyPendingCleared,
+      received: rows.length,
+      unique: payload.length,
+      claimed: 0,
+      skipped: payload.length,
+      rows: [],
+      loginIds: [],
+      lock: null,
+      serverTime: now,
+      message: payload.length > 0
+        ? 'Semua kandidat sudah pernah ditandai selesai bonus.'
+        : 'Tidak ada kandidat bonus baru untuk diproses.'
+    };
+  }
+
+  const { error: lockError } = await supabase
+    .from('bonus_process_locks')
+    .insert({
+      bonus_date: date,
+      lock_status: 'PENDING',
+      claim_owner: claimOwner,
+      claim_batch_id: claimBatchId,
+      started_at: now,
+      updated_at: now,
+      pending_expires_at: pendingExpiresAt,
+      expires_at: expiresAt
+    });
+
+  if (lockError) {
+    if (lockError.code !== '23505') throw lockError;
+
+    const existingPending = await fetchPendingLock(date);
+    if (existingPending) return null;
+
+    if (emptyPendingCleared && reusableLockId) {
+      const revivedLock = await reviveEmptyPendingLock(reusableLockId, date, claimOwner, claimBatchId, now, pendingExpiresAt, expiresAt);
+      if (!revivedLock) return null;
+
+      const insertedRows = await insertPendingRows(insertablePayload);
+      return {
+        success: true,
+        status: 'claimed',
+        emptyPendingCleared,
+        received: rows.length,
+        unique: payload.length,
+        claimed: insertedRows.length,
+        skipped: payload.length - insertedRows.length,
+        rows: insertedRows,
+        loginIds: loginIdsFromRows(insertedRows),
+        lock: revivedLock,
+        serverTime: now,
+        message: 'Pending kosong sebelumnya dibersihkan, batch baru dibuat.'
+      };
+    }
+
+    return null;
+  }
+
+  const insertedRows = await insertPendingRows(insertablePayload);
+  const lock = await fetchPendingLock(date);
+
+  return {
+    success: true,
+    status: 'claimed',
+    emptyPendingCleared,
+    received: rows.length,
+    unique: payload.length,
+    claimed: insertedRows.length,
+    skipped: payload.length - insertedRows.length,
+    rows: insertedRows,
+    loginIds: loginIdsFromRows(insertedRows),
+    lock,
+    serverTime: now,
+    message: emptyPendingCleared
+      ? 'Pending kosong sebelumnya dibersihkan, batch baru dibuat.'
+      : 'Batch berhasil dibuat.'
+  };
 }
 
 async function handleClaimBatch(body, res) {
@@ -180,94 +312,87 @@ async function handleClaimBatch(body, res) {
   const payload = dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, claimBatchId);
 
   let lock = await fetchPendingLock(date);
+  let emptyPendingCleared = false;
+  let reusableEmptyLockId = null;
 
-  if (!lock) {
-    const { error: lockError } = await supabase
-      .from('bonus_process_locks')
-      .insert({
-        bonus_date: date,
-        lock_status: 'PENDING',
-        claim_owner: claimOwner,
-        claim_batch_id: claimBatchId,
-        started_at: now,
-        updated_at: now,
-        pending_expires_at: pendingExpiresAt,
-        expires_at: expiresAt
-      });
-
-    if (lockError) {
-      if (lockError.code !== '23505') throw lockError;
-      lock = await fetchPendingLock(date);
-    } else {
-      const insertedRows = await insertPendingRows(payload);
-      if (insertedRows.length === 0 && payload.length > 0) {
-        return res.status(200).json({
-          success: true,
-          status: 'all_already_done',
-          received: rows.length,
-          unique: payload.length,
-          claimed: 0,
-          skipped: payload.length,
-          rows: [],
-          loginIds: [],
-          message: 'Semua kandidat sudah pernah ditandai selesai bonus.'
-        });
-      }
-      return res.status(200).json({
-        success: true,
-        status: 'claimed',
-        received: rows.length,
-        unique: payload.length,
-        claimed: insertedRows.length,
-        skipped: payload.length - insertedRows.length,
-        rows: insertedRows,
-        loginIds: loginIdsFromRows(insertedRows),
-        message: 'Batch berhasil dibuat.'
-      });
-    }
-  }
-
-  if (!lock) {
-    throw new Error('Gagal membaca lock batch bonus.');
-  }
-
-  if (lock.lock_status === 'PENDING' && lock.claim_owner === claimOwner) {
-    await extendOwnPending(date, claimOwner, pendingExpiresAt, now);
+  if (lock && lock.lock_status === 'PENDING' && lock.claim_owner === claimOwner) {
     const ownRows = await fetchPendingRows(date, claimOwner);
 
-    return res.status(200).json({
-      success: true,
-      status: 'own_pending',
-      received: rows.length,
-      unique: payload.length,
-      claimed: ownRows.length,
-      skipped: 0,
-      rows: ownRows,
-      loginIds: loginIdsFromRows(ownRows),
-      message: 'Menampilkan ulang pending milik Anda.'
-    });
+    if (ownRows.length > 0) {
+      await extendOwnPending(date, claimOwner, pendingExpiresAt, now);
+      const updatedLock = await fetchPendingLock(date);
+
+      return res.status(200).json({
+        success: true,
+        status: 'own_pending',
+        received: rows.length,
+        unique: payload.length,
+        claimed: ownRows.length,
+        skipped: 0,
+        rows: ownRows,
+        loginIds: loginIdsFromRows(ownRows),
+        lock: updatedLock,
+        serverTime: now,
+        message: 'Menampilkan ulang pending milik Anda.'
+      });
+    }
+
+    reusableEmptyLockId = lock.id;
+    await closeEmptyPendingLock(lock, now);
+    emptyPendingCleared = true;
+    lock = null;
   }
 
-  const pendingActive = lock.pending_expires_at && new Date(lock.pending_expires_at).getTime() > nowDate.getTime();
+  if (lock) {
+    const pendingActive = lock.pending_expires_at && new Date(lock.pending_expires_at).getTime() > nowDate.getTime();
 
-  if (lock.lock_status === 'PENDING' && pendingActive) {
+    if (lock.lock_status === 'PENDING' && pendingActive) {
+      return res.status(200).json({
+        success: true,
+        status: 'locked_by_other',
+        lockedByOther: true,
+        rows: [],
+        loginIds: [],
+        lock,
+        serverTime: now,
+        message: 'Bonus Harian tanggal ini sedang diproses operator lain.'
+      });
+    }
+
     return res.status(200).json({
       success: true,
-      status: 'locked_by_other',
-      lockedByOther: true,
+      status: 'pending_expired',
+      pendingExpired: true,
       rows: [],
       loginIds: [],
-      message: 'Bonus Harian tanggal ini sedang diproses operator lain.'
+      lock,
+      serverTime: now,
+      message: 'Ada pending lama yang belum ditandai selesai.'
     });
   }
 
+  const created = await createPendingBatch(date, rows, payload, claimOwner, claimBatchId, now, pendingExpiresAt, expiresAt, emptyPendingCleared, reusableEmptyLockId);
+
+  if (created) {
+    return res.status(200).json(created);
+  }
+
+  lock = await fetchPendingLock(date);
+  if (!lock) throw new Error('Gagal membaca lock batch bonus.');
+
+  const pendingActive = lock.pending_expires_at && new Date(lock.pending_expires_at).getTime() > nowDate.getTime();
   return res.status(200).json({
     success: true,
-    status: 'pending_expired',
-    pendingExpired: true,
+    status: pendingActive ? 'locked_by_other' : 'pending_expired',
+    lockedByOther: pendingActive,
+    pendingExpired: !pendingActive,
     rows: [],
     loginIds: [],
-    message: 'Ada pending lama yang belum ditandai selesai.'
+    lock,
+    serverTime: now,
+    message: pendingActive
+      ? 'Bonus Harian tanggal ini sedang diproses operator lain.'
+      : 'Ada pending lama yang belum ditandai selesai.'
   });
 }
 

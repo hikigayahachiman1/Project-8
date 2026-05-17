@@ -679,6 +679,67 @@
     color: #ffffff;
   }
 
+  .pending-timer {
+    margin: 0 0 16px;
+    padding: 16px 18px;
+    border: 1px solid rgba(255, 200, 87, 0.75);
+    border-radius: 20px;
+    background:
+      linear-gradient(135deg, rgba(255, 200, 87, 0.18), rgba(255, 23, 68, 0.10)),
+      rgba(18, 12, 4, 0.82);
+    color: #ffffff;
+    font-weight: 800;
+    line-height: 1.55;
+    box-shadow: 0 0 26px rgba(255, 200, 87, 0.18);
+  }
+
+  .pending-timer .timer-title {
+    display: block;
+    margin-bottom: 6px;
+    color: #ffd166;
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+  }
+
+  .pending-timer .timer-clock {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 96px;
+    margin: 6px 0;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(255, 23, 68, 0.22);
+    border: 1px solid rgba(255, 23, 68, 0.38);
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.1rem;
+    font-weight: 900;
+    box-shadow: 0 0 20px rgba(255, 23, 68, 0.18);
+  }
+
+  .pending-timer .timer-note {
+    display: block;
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+    margin-top: 4px;
+  }
+
+  .pending-timer.expired {
+    border-color: rgba(255, 23, 68, 0.85);
+    background:
+      linear-gradient(135deg, rgba(255, 23, 68, 0.24), rgba(255, 107, 53, 0.14)),
+      rgba(20, 4, 8, 0.86);
+  }
+
+  .pending-timer.expired .timer-title {
+    color: #ffb3c1;
+  }
+
+  .pending-timer.expired .timer-clock {
+    background: rgba(255, 23, 68, 0.34);
+  }
+
   #outputText {
     min-height: 200px !important;
     background: linear-gradient(rgba(4,22,17,0.88), rgba(4,22,17,0.88)), repeating-linear-gradient(0deg, transparent 0 25px, rgba(0,255,168,0.06) 26px) !important;
@@ -861,6 +922,7 @@
           </div>
           <div class="source-note" id="bonusDoneInfo">Data sudah bonus tanggal ini: 0 ID (Supabase + lokal)</div>
           <div id="bonusLockWarning" class="lock-warning" style="display:none;"></div>
+          <div id="bonusPendingTimer" class="pending-timer" style="display:none;"></div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -1006,6 +1068,8 @@
   const BONUS_CLAIM_OWNER_KEY = 'qris_bonus_claim_owner_v1';
   const bonusRemoteDoneCache = {};
   let bonusRemoteStatus = 'idle';
+  let bonusPendingTimerInterval = null;
+  let bonusPendingServerOffsetMs = 0;
 
   document.querySelectorAll('.tool-tab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1115,6 +1179,101 @@
     const box = document.getElementById('bonusLockWarning');
     if (!box) return;
     box.style.display = 'none';
+  }
+
+  function stopBonusPendingTimer() {
+    if (bonusPendingTimerInterval) {
+      clearInterval(bonusPendingTimerInterval);
+      bonusPendingTimerInterval = null;
+    }
+
+    const timer = document.getElementById('bonusPendingTimer');
+    if (timer) {
+      timer.style.display = 'none';
+      timer.innerHTML = '';
+      timer.classList.remove('expired');
+    }
+  }
+
+  function formatCountdown(ms) {
+    const safeMs = Math.max(0, ms);
+    const totalSeconds = Math.floor(safeMs / 1000);
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+    const seconds = String(totalSeconds % 60).padStart(2, '0');
+    return `${minutes}:${seconds}`;
+  }
+
+  function getAdjustedNowMs() {
+    return Date.now() + bonusPendingServerOffsetMs;
+  }
+
+  function startBonusPendingTimer(lock, options = {}) {
+    const timer = document.getElementById('bonusPendingTimer');
+    if (!timer || !lock || !lock.pending_expires_at) {
+      stopBonusPendingTimer();
+      return;
+    }
+
+    if (options.serverTime) {
+      const serverMs = new Date(options.serverTime).getTime();
+      if (!Number.isNaN(serverMs)) {
+        bonusPendingServerOffsetMs = serverMs - Date.now();
+      }
+    }
+
+    const expiresMs = new Date(lock.pending_expires_at).getTime();
+    if (Number.isNaN(expiresMs)) {
+      stopBonusPendingTimer();
+      return;
+    }
+
+    const ownerType = options.ownerType || 'unknown';
+    const dateLabel = options.dateLabel || lock.bonus_date || '';
+    const title = options.title || 'PENDING BONUS HARIAN AKTIF';
+
+    function renderTimer() {
+      const remainingMs = expiresMs - getAdjustedNowMs();
+      const isExpired = remainingMs <= 0;
+
+      timer.style.display = 'block';
+      timer.classList.toggle('expired', isExpired);
+
+      let ownerText = '';
+      if (ownerType === 'self') {
+        ownerText = 'Pending ini milik Anda. Jika lupa copy, klik Proses Bonus lagi untuk menampilkan ulang.';
+      } else if (ownerType === 'other') {
+        ownerText = 'Pending ini milik operator lain. Output Anda dikunci sampai pending selesai atau expired.';
+      } else {
+        ownerText = 'Ada pending Bonus Harian yang belum ditandai selesai.';
+      }
+
+      if (isExpired) {
+        timer.innerHTML = `
+          <span class="timer-title">PENDING BONUS HARIAN EXPIRED</span>
+          <span class="timer-clock">00:00</span>
+          <span class="timer-note">
+            Tanggal ${escapeHtml(dateLabel)} punya pending yang sudah lewat 5 menit, tetapi belum di-DONE. Data tidak dihapus.
+            Pastikan operator sebelumnya tidak sedang melanjutkan sebelum mengambil tindakan.
+          </span>
+        `;
+        return;
+      }
+
+      timer.innerHTML = `
+        <span class="timer-title">${escapeHtml(title)}</span>
+        <span class="timer-clock">${formatCountdown(remainingMs)}</span>
+        <span class="timer-note">
+          Tanggal ${escapeHtml(dateLabel)}. ${escapeHtml(ownerText)}
+        </span>
+      `;
+    }
+
+    if (bonusPendingTimerInterval) {
+      clearInterval(bonusPendingTimerInterval);
+    }
+
+    renderTimer();
+    bonusPendingTimerInterval = setInterval(renderTimer, 1000);
   }
 
   async function fetchRemoteBonusDone(dateValue) {
@@ -1659,9 +1818,15 @@
         bonusRows = [];
         bonusRender();
         showBonusLockWarning(
-          '🚨 BONUS HARIAN SEDANG DIPROSES',
+          'BONUS HARIAN SEDANG DIPROSES',
           'Tanggal ini sedang digunakan oleh operator lain dan belum ditandai selesai. Tunggu sampai operator tersebut klik Tandai Semua Sudah Dibonuskan.'
         );
+        startBonusPendingTimer(claimResult.lock, {
+          ownerType: 'other',
+          serverTime: claimResult.serverTime,
+          dateLabel: dateValue,
+          title: 'BONUS HARIAN SEDANG DIPROSES OPERATOR LAIN'
+        });
         showToast('Bonus Harian tanggal ini sedang dikunci operator lain.', 'error');
         return;
       }
@@ -1670,9 +1835,15 @@
         bonusRows = [];
         bonusRender();
         showBonusLockWarning(
-          '⚠️ PENDING BONUS HARIAN BELUM SELESAI',
+          'PENDING BONUS HARIAN BELUM SELESAI',
           'Ada proses sebelumnya yang belum ditandai selesai. Pending aktif sudah lewat 5 menit, tetapi data tetap tersimpan. Pastikan operator sebelumnya tidak sedang melanjutkan sebelum mengambil tindakan.'
         );
+        startBonusPendingTimer(claimResult.lock, {
+          ownerType: 'other',
+          serverTime: claimResult.serverTime,
+          dateLabel: dateValue,
+          title: 'PENDING BONUS HARIAN BELUM SELESAI'
+        });
         showToast('Pending bonus harian sebelumnya belum selesai.', 'error');
         return;
       }
@@ -1684,7 +1855,17 @@
           'SEMUA KANDIDAT SUDAH DIBONUSKAN',
           'Semua kandidat pada file ini sudah pernah ditandai selesai bonus. Tidak ada ID baru untuk diproses.'
         );
+        stopBonusPendingTimer();
         showToast('Semua kandidat sudah pernah dibonuskan.', 'success');
+        return;
+      }
+
+      if (claimResult.status === 'no_candidates') {
+        bonusRows = [];
+        bonusRender();
+        hideBonusLockWarning();
+        stopBonusPendingTimer();
+        showToast('Tidak ada kandidat bonus baru untuk diproses.', 'success');
         return;
       }
 
@@ -1695,21 +1876,46 @@
           'BONUS HARIAN SUDAH SELESAI',
           'Bonus Harian tanggal ini sudah ditandai selesai.'
         );
+        stopBonusPendingTimer();
         showToast('Bonus Harian tanggal ini sudah ditandai selesai.', 'success');
         return;
       }
 
       bonusRows = rowsFromClaimResponse(claimResult.rows || [], candidateRows);
-      if (claimResult.status === 'own_pending') {
+      if (claimResult.status === 'own_pending' && bonusRows.length > 0) {
         showBonusLockWarning(
           'PENDING MILIK ANDA',
           'Menampilkan ulang pending milik Anda. Silakan copy ulang jika sebelumnya lupa.'
         );
+        startBonusPendingTimer(claimResult.lock, {
+          ownerType: 'self',
+          serverTime: claimResult.serverTime,
+          dateLabel: dateValue,
+          title: 'MENAMPILKAN ULANG PENDING MILIK ANDA'
+        });
+      } else if (claimResult.status === 'own_pending') {
+        bonusRows = [];
+        bonusRender();
+        hideBonusLockWarning();
+        stopBonusPendingTimer();
+        showToast('Pending lama kosong, silakan proses ulang data terbaru.', 'success');
+        return;
       } else {
         hideBonusLockWarning();
+        if (claimResult.status === 'claimed') {
+          startBonusPendingTimer(claimResult.lock, {
+            ownerType: 'self',
+            serverTime: claimResult.serverTime,
+            dateLabel: dateValue,
+            title: 'PENDING BONUS HARIAN MILIK ANDA'
+          });
+        } else {
+          stopBonusPendingTimer();
+        }
       }
     } else {
       hideBonusLockWarning();
+      stopBonusPendingTimer();
       bonusRows = candidateRows;
     }
 
@@ -1723,7 +1929,7 @@
     if (claimResult && claimResult.success === true && candidateRows.length > 0 && bonusRows.length === 0) {
       showToast('Semua kandidat sudah pernah diproses/terclaim.', 'success');
     } else if (claimResult && claimResult.status === 'claimed') {
-      showToast('Batch Bonus Harian berhasil dibuat.', 'success');
+      showToast(claimResult.emptyPendingCleared ? 'Pending kosong sebelumnya dibersihkan. Batch baru berhasil dibuat.' : 'Batch Bonus Harian berhasil dibuat.', 'success');
     } else if (claimResult && claimResult.status === 'own_pending') {
       showToast('Menampilkan ulang pending milik Anda.', 'success');
     } else {
@@ -1741,6 +1947,7 @@
     document.getElementById('bonusStats').style.display = 'none';
     document.getElementById('bonusCopyActions').style.display = 'flex';
     hideBonusLockWarning();
+    stopBonusPendingTimer();
     updateBonusSourceNote();
     renderBonusDoneInfo();
     showToast('Data bonus dibersihkan.');
@@ -1805,6 +2012,7 @@
     saveBonusDoneStore(store);
     bonusRows = [];
     hideBonusLockWarning();
+    stopBonusPendingTimer();
     bonusRender();
     renderBonusDoneInfo();
     showToast(finalizeResult.message || `Bonus Harian berhasil ditandai selesai. ${savedCount} data tersimpan di cache lokal.`, 'success');
