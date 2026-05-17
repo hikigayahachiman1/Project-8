@@ -1553,7 +1553,11 @@
     });
     bonusRender();
     renderBonusDoneInfo();
-    showToast(`${bonusRows.length} data bonus harian berhasil diproses.`, 'success');
+    if (claimResult && claimResult.success === true && candidateRows.length > 0 && bonusRows.length === 0) {
+      showToast('Semua kandidat sudah pernah diproses/terclaim.', 'success');
+    } else {
+      showToast(`${bonusRows.length} data bonus harian berhasil diproses.`, 'success');
+    }
   }
 
   function bonusReset() {
