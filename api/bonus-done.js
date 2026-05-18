@@ -122,15 +122,17 @@ function dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, cl
   return [...map.values()];
 }
 
-function dedupeAdjustmentApprovedRows(rows, date, now, expiresAt, operatorName) {
+function dedupeAdjustmentApprovedRows(rows, now, expiresAt, operatorName, fallbackDate = '') {
   const map = new Map();
 
   (rows || []).forEach(row => {
     const loginId = normalizeLoginId(row.login_id || row.login_key || row.loginId);
+    const bonusDate = String(row.bonus_date || fallbackDate || '').trim();
     if (!loginId) return;
+    if (!isValidDate(bonusDate)) return;
 
     const item = {
-      bonus_date: date,
+      bonus_date: bonusDate,
       login_id: loginId,
       login_key: loginId,
       bonus_type: 'BONUS_HARIAN',
@@ -560,18 +562,14 @@ async function handleDone(req, body, res) {
 
 async function handleSyncAdjustmentApproved(req, body, res) {
   const operator = await getOperatorFromRequest(req, true);
-  const date = String(body.date || '');
   const rows = Array.isArray(body.rows) ? body.rows : [];
-
-  if (!isValidDate(date)) {
-    return res.status(400).json({ success: false, error: 'Format date harus YYYY-MM-DD.' });
-  }
+  const fallbackDate = String(body.date || '');
 
   const nowDate = new Date();
   const now = nowDate.toISOString();
   const expiresAt = addDays(nowDate, 2);
   const operatorName = operatorNameFromOperator(operator, body.operator_name);
-  const payload = dedupeAdjustmentApprovedRows(rows, date, now, expiresAt, operatorName);
+  const payload = dedupeAdjustmentApprovedRows(rows, now, expiresAt, operatorName, fallbackDate);
 
   if (payload.length === 0) {
     return res.status(200).json({
@@ -579,6 +577,7 @@ async function handleSyncAdjustmentApproved(req, body, res) {
       status: 'no_adjustment_approved',
       syncedCount: 0,
       loginIds: [],
+      dates: [],
       serverTime: now
     });
   }
@@ -594,12 +593,14 @@ async function handleSyncAdjustmentApproved(req, body, res) {
   if (error) throw error;
 
   const loginIds = loginIdsFromRows(data && data.length ? data : payload);
+  const dates = [...new Set(payload.map(row => row.bonus_date).filter(Boolean))].sort();
 
   return res.status(200).json({
     success: true,
     status: 'synced_adjustment_approved',
-    syncedCount: loginIds.length,
+    syncedCount: payload.length,
     loginIds,
+    dates,
     serverTime: now
   });
 }
@@ -649,7 +650,7 @@ async function handleGet(req, res) {
     loginIds: loginIdsFromRows(doneRows),
     isLockedByOther,
     isPendingExpired,
-    rows: rows || []
+    rows: doneRows
   });
 }
 

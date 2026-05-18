@@ -2514,14 +2514,13 @@
     }
   }
 
-  async function syncAdjustmentApprovedDone(dateValue, rows) {
+  async function syncAdjustmentApprovedDone(rows) {
     try {
       const response = await fetch('/api/bonus-done', {
         method: 'POST',
         headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           action: 'sync_adjustment_approved',
-          date: dateValue,
           operator_name: currentOperator ? currentOperator.display_name : '',
           rows: (rows || []).map(row => ({
             ...row,
@@ -2539,7 +2538,10 @@
 
       const result = await response.json();
       bonusRemoteStatus = 'online';
-      delete bonusRemoteDoneCache[dateValue];
+      const dates = Array.isArray(result.dates)
+        ? result.dates
+        : [...new Set((rows || []).map(row => row.bonus_date).filter(Boolean))];
+      dates.forEach(date => delete bonusRemoteDoneCache[date]);
       return result;
     } catch (error) {
       bonusRemoteStatus = 'offline';
@@ -2548,24 +2550,29 @@
     }
   }
 
-  async function syncAdjustmentApprovedToSupabase(dateValue, adjustRaw) {
-    const rows = extractApprovedBonusHarianFromAdjustment(adjustRaw, dateValue);
+  async function syncAdjustmentApprovedToDatabase(adjustRaw) {
+    const rows = extractApprovedBonusHarianForDatabase(adjustRaw);
     if (rows.length === 0) {
       showToast('Tidak ada Adjustment Approved baru untuk disinkronkan.', 'success');
       return {
         success: true,
         status: 'no_adjustment_approved',
         syncedCount: 0,
-        loginIds: []
+        loginIds: [],
+        dates: []
       };
     }
 
-    const result = await syncAdjustmentApprovedDone(dateValue, rows);
+    const result = await syncAdjustmentApprovedDone(rows);
     if (result.unauthorized) return result;
     if (result.success) {
       showToast(`Sinkron Adjustment Approved: ${result.syncedCount || 0} ID tersimpan ke database pusat.`, 'success');
     }
     return result;
+  }
+
+  async function syncAdjustmentApprovedToSupabase(dateValue, adjustRaw) {
+    return syncAdjustmentApprovedToDatabase(adjustRaw);
   }
 
   async function finalizeRemoteBonusBatch(dateValue) {
@@ -2996,6 +3003,38 @@
     return `${String(sourceDate.getMonth() + 1).padStart(2, '0')}/${String(sourceDate.getDate()).padStart(2, '0')}/${sourceDate.getFullYear()}`;
   }
 
+  function dateInputFromSlashDate(value) {
+    const parts = String(value || '').split('/');
+    if (parts.length !== 3) return '';
+    return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+  }
+
+  function bonusGmt7InputDate(dateText) {
+    return dateInputFromSlashDate(bonusGmt7Date(dateText));
+  }
+
+  function addDaysToInputDate(value, days) {
+    const date = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return '';
+    date.setDate(date.getDate() + days);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function getAdjustmentSyncDateRangeWib() {
+    const endDate = getTodayWibInputValue();
+    return {
+      startDate: addDaysToInputDate(endDate, -2),
+      endDate
+    };
+  }
+
+  function isInputDateInRange(value, startDate, endDate) {
+    return Boolean(value && startDate && endDate && value >= startDate && value <= endDate);
+  }
+
   function bonusMatchGmt7Date(dateText, targetDate) {
     return bonusGmt7Date(dateText) === targetDate;
   }
@@ -3056,6 +3095,8 @@
         const loginId = String(firstValue(row, ['Login ID', 'LoginID', 'User ID']) || '').trim();
         const transactionNumber = String(firstValue(row, ['Transaction Number', 'Trans. Number', 'Trans Number']) || '').trim();
         const remark = String(firstValue(row, ['Remark', 'Remarks']) || '').trim();
+        const approvedTime = String(firstValue(row, ['Approved Time', 'Approve Time']) || '').trim();
+        const dateCreated = String(firstValue(row, ['Date Created', 'Created Time']) || '').trim();
         return {
           login_id: loginId,
           login_key: normalizeLoginId(loginId),
@@ -3065,10 +3106,11 @@
           status: String(firstValue(row, ['Status']) || '').trim(),
           transaction_number: transactionNumber,
           remark,
-          date_created: String(firstValue(row, ['Date Created', 'Created Time']) || '').trim(),
+          date_created: dateCreated,
           created_by: String(firstValue(row, ['Create By', 'Created By']) || '').trim(),
-          approved_time: String(firstValue(row, ['Approved Time', 'Approve Time']) || '').trim(),
+          approved_time: approvedTime,
           approved_by: String(firstValue(row, ['Approved By', 'Approve By']) || '').trim(),
+          adjusted_bonus_date: bonusGmt7InputDate(approvedTime || dateCreated),
           raw_record: Object.values(row).join('\n')
         };
       }).filter(row => isValidAdjustmentLoginId(row.login_id));
@@ -3122,6 +3164,9 @@
         statusIndex
       );
 
+      const approvedTime = approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '';
+      const dateCreated = dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '';
+
       records.push({
         login_id: loginId,
         login_key: normalizeLoginId(loginId),
@@ -3131,10 +3176,11 @@
         status: lines[statusIndex] || '',
         transaction_number: transactionNumber,
         remark,
-        date_created: dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '',
+        date_created: dateCreated,
         created_by: dateCreatedIndex !== -1 && !isBoDateLine(lines[dateCreatedIndex + 1]) ? (lines[dateCreatedIndex + 1] || '') : '',
-        approved_time: approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '',
+        approved_time: approvedTime,
         approved_by: approvedTimeIndex !== -1 ? (lines[approvedTimeIndex + 1] || '') : '',
+        adjusted_bonus_date: bonusGmt7InputDate(approvedTime || dateCreated),
         raw_record: lines.slice(Math.max(0, i - 5), Math.min(lines.length, recordEnd + 1)).join('\n')
       });
 
@@ -3148,35 +3194,69 @@
     return /BONUS\s*HARIAN\b/i.test(String(text || ''));
   }
 
-  function extractApprovedBonusHarianFromAdjustment(raw, dateValue) {
-    const targetDate = normalizeBonusTargetDate(dateValue);
+  function rowFromApprovedBonusHarianRecord(record) {
+    const loginKey = normalizeLoginId(record.login_key || record.login_id);
+    const amountText = String(record.adjustment_amount || '').trim();
+    return {
+      bonus_date: record.adjusted_bonus_date || '',
+      login_id: record.login_id || loginKey,
+      login_key: loginKey,
+      bonus_type: 'BONUS_HARIAN',
+      bonus_amount: amountText ? parseNumber(amountText) : null,
+      remark: record.remark || record.transaction_number || 'BONUS HARIAN',
+      source: 'adjustment_approved',
+      adjustment_id: record.adjustment_id || '',
+      approved_time: record.approved_time || record.date_created || ''
+    };
+  }
+
+  function isApprovedBonusHarianRecord(record) {
+    const loginKey = normalizeLoginId(record.login_key || record.login_id);
+    const status = String(record.status || '').trim().toUpperCase();
+    const combinedText = `${record.transaction_number || ''} ${record.remark || ''}`.trim();
+    return Boolean(
+      loginKey &&
+      isValidAdjustmentLoginId(record.login_id || loginKey) &&
+      status === 'APPROVED' &&
+      isBonusHarianAdjustmentText(combinedText) &&
+      record.adjusted_bonus_date
+    );
+  }
+
+  function extractApprovedBonusHarianForDatabase(raw) {
+    const { startDate, endDate } = getAdjustmentSyncDateRangeWib();
     const map = new Map();
 
     parseAdjustmentBoRecords(raw).forEach(record => {
-      const loginKey = normalizeLoginId(record.login_key || record.login_id);
-      const status = String(record.status || '').trim().toUpperCase();
-      const combinedText = `${record.transaction_number || ''} ${record.remark || ''}`.trim();
-      const dateText = record.approved_time || record.date_created || '';
+      if (!isApprovedBonusHarianRecord(record)) return;
+      if (!isInputDateInRange(record.adjusted_bonus_date, startDate, endDate)) return;
 
-      if (!loginKey || !isValidAdjustmentLoginId(record.login_id || loginKey)) return;
-      if (status !== 'APPROVED') return;
-      if (!isBonusHarianAdjustmentText(combinedText)) return;
-      if (!bonusMatchGmt7Date(dateText, targetDate)) return;
-
-      const amountText = String(record.adjustment_amount || '').trim();
-      map.set(`${loginKey}|BONUS_HARIAN`, {
-        login_id: record.login_id || loginKey,
-        login_key: loginKey,
-        bonus_type: 'BONUS_HARIAN',
-        bonus_amount: amountText ? parseNumber(amountText) : null,
-        remark: record.remark || record.transaction_number || ('BONUS HARIAN ' + targetDate),
-        source: 'adjustment_approved',
-        adjustment_id: record.adjustment_id || '',
-        approved_time: dateText
-      });
+      const row = rowFromApprovedBonusHarianRecord(record);
+      map.set(`${row.bonus_date}|${row.login_key}|BONUS_HARIAN`, row);
     });
 
     return [...map.values()];
+  }
+
+  function extractApprovedBonusHarianForDate(raw, dateValue) {
+    const targetDate = String(dateValue || '').includes('/')
+      ? dateInputFromSlashDate(normalizeBonusTargetDate(dateValue))
+      : String(dateValue || '').trim();
+    const map = new Map();
+
+    parseAdjustmentBoRecords(raw).forEach(record => {
+      if (!isApprovedBonusHarianRecord(record)) return;
+      if (record.adjusted_bonus_date !== targetDate) return;
+
+      const row = rowFromApprovedBonusHarianRecord(record);
+      map.set(`${row.login_key}|BONUS_HARIAN`, row);
+    });
+
+    return [...map.values()];
+  }
+
+  function extractApprovedBonusHarianFromAdjustment(raw, dateValue) {
+    return extractApprovedBonusHarianForDate(raw, dateValue);
   }
 
   function bonusParseAlready(raw, loginKeys, targetDate) {
@@ -3300,28 +3380,38 @@
       'Memproses Bonus Harian',
       'Membaca deposit, adjustment, dan data pusat...',
       [
-        'Membaca data deposit',
         'Membaca raw Adjustment Bonus',
         'Sinkron data BONUS HARIAN Approved',
         'Mengambil data sudah bonus',
+        'Membaca data deposit',
         'Mengecek lock operator',
         'Menyiapkan output'
       ]
     );
 
     try {
-    updateLoading('Membaca data deposit dari Parser QRIS...', 0);
-    const hasParserData = await ensureParserData();
-    if (!hasParserData) {
-      return;
-    }
-
-    updateLoading('Membaca Adjustment Approved BONUS HARIAN...', 1, 0);
+    updateLoading('Membaca Adjustment Approved BONUS HARIAN...', 0);
     if (!adjustRaw.trim()) {
       adjustRaw = await readSelectedFile('adjustFile');
       if (adjustRaw.trim()) {
         document.getElementById('bonusAdjustRaw').value = adjustRaw;
       }
+    }
+
+    const adjustmentApprovedRows = extractApprovedBonusHarianForDate(adjustRaw, dateValue);
+    const adjustmentAlreadySet = new Set(adjustmentApprovedRows.map(row => row.login_key));
+    bonusAdjustmentDoneCache[dateValue] = adjustmentAlreadySet;
+    updateLoading('Sinkron data Approved ke database pusat...', 1, 0);
+    const syncResult = await syncAdjustmentApprovedToDatabase(adjustRaw);
+    if (syncResult.unauthorized) return;
+    updateLoading('Mengambil data sudah bonus dari database pusat...', 2, 1);
+    const remoteDone = await fetchRemoteBonusDone(dateValue);
+    const localDone = getBonusDoneSet(dateValue);
+
+    updateLoading('Membaca data deposit dari Parser QRIS...', 3, 2);
+    const hasParserData = await ensureParserData();
+    if (!hasParserData) {
+      return;
     }
 
     const targetDate = bonusPadDateFromInput(dateValue);
@@ -3371,17 +3461,6 @@
       }
     });
 
-    const loginKeys = Object.keys(byLogin);
-    const adjustmentApprovedRows = extractApprovedBonusHarianFromAdjustment(adjustRaw, dateValue);
-    const adjustmentAlreadySet = new Set(adjustmentApprovedRows.map(row => row.login_key));
-    bonusAdjustmentDoneCache[dateValue] = adjustmentAlreadySet;
-    const already = bonusParseAlready(adjustRaw, loginKeys, targetDate);
-    updateLoading('Sinkron data Approved ke database pusat...', 2, 1);
-    const syncResult = await syncAdjustmentApprovedToSupabase(dateValue, adjustRaw);
-    if (syncResult.unauthorized) return;
-    updateLoading('Mengambil data sudah bonus dari database pusat...', 3, 2);
-    const remoteDone = await fetchRemoteBonusDone(dateValue);
-    const localDone = getBonusDoneSet(dateValue);
     const candidateRows = Object.entries(byLogin).map(([key, info]) => {
       const bonus = info.maxDeposit >= 100000 ? 10 : info.maxDeposit >= 50000 ? 5 : 0;
       return {
@@ -3396,7 +3475,7 @@
         bonus,
         remark: bonusRemark
       };
-    }).filter(row => row.bonus > 0 && !adjustmentAlreadySet.has(row.loginKey) && !already.has(row.loginKey) && !localDone.has(row.loginKey) && !remoteDone.has(row.loginKey));
+    }).filter(row => row.bonus > 0 && !adjustmentAlreadySet.has(row.loginKey) && !localDone.has(row.loginKey) && !remoteDone.has(row.loginKey));
 
     updateLoading('Mengecek apakah ada operator lain yang sedang proses...', 4, 3);
     const claimResult = await claimRemoteBonusBatch(dateValue, candidateRows.map(row => ({
