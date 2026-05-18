@@ -1219,6 +1219,127 @@
     box-shadow: 0 14px 34px rgba(255, 23, 68, 0.30), 0 0 28px rgba(255, 107, 53, 0.18);
   }
 
+  button:disabled {
+    opacity: 0.62;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+
+  .global-loading {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+      radial-gradient(circle at 22% 18%, rgba(39,245,255,0.16), transparent 30%),
+      radial-gradient(circle at 80% 75%, rgba(155,92,255,0.18), transparent 34%),
+      rgba(3, 6, 16, 0.72);
+    backdrop-filter: blur(10px);
+  }
+
+  .loading-card {
+    width: min(100%, 520px);
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+    border: 1px solid rgba(143,178,255,0.28);
+    border-radius: 26px;
+    padding: 24px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04)),
+      rgba(9,14,31,0.94);
+    box-shadow:
+      0 30px 90px rgba(0,0,0,0.52),
+      0 0 34px rgba(39,245,255,0.14),
+      inset 0 1px 0 rgba(255,255,255,0.10);
+  }
+
+  .loading-spinner {
+    width: 46px;
+    height: 46px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    border: 3px solid rgba(143,178,255,0.22);
+    border-top-color: var(--accent);
+    border-right-color: var(--accent-2);
+    animation: loadingSpin 0.85s linear infinite;
+    box-shadow: 0 0 22px rgba(39,245,255,0.18);
+  }
+
+  .loading-content {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .loading-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+    margin-bottom: 6px;
+  }
+
+  .loading-message {
+    color: var(--ink-soft);
+    font-size: 0.92rem;
+    line-height: 1.5;
+    margin-bottom: 14px;
+  }
+
+  .loading-steps {
+    display: grid;
+    gap: 8px;
+  }
+
+  .loading-step {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 11px;
+    border: 1px solid rgba(143,178,255,0.16);
+    border-radius: 14px;
+    background: rgba(255,255,255,0.045);
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .loading-step.active {
+    color: var(--ink);
+    border-color: rgba(39,245,255,0.34);
+    background: rgba(39,245,255,0.08);
+    box-shadow: 0 0 18px rgba(39,245,255,0.08);
+  }
+
+  .loading-step.done {
+    color: var(--accent-3);
+    border-color: rgba(0,255,168,0.28);
+    background: rgba(0,255,168,0.08);
+  }
+
+  .loading-step.error {
+    color: #ffb3c1;
+    border-color: rgba(255,79,139,0.36);
+    background: rgba(255,79,139,0.10);
+  }
+
+  .loading-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 12px currentColor;
+    flex: 0 0 auto;
+  }
+
+  @keyframes loadingSpin {
+    to { transform: rotate(360deg); }
+  }
+
   .stat {
     background:
       linear-gradient(135deg, rgba(39,245,255,0.14), rgba(155,92,255,0.08)),
@@ -1295,6 +1416,8 @@
     .tool-tabs { border-radius: 22px; }
     .tool-tab { min-width: 0; flex: 1 1 145px; }
     header, .card { border-radius: 22px; padding: 18px; }
+    .loading-card { flex-direction: column; padding: 22px; border-radius: 22px; }
+    .loading-spinner { width: 42px; height: 42px; }
     .date-panel { width: 100%; align-items: stretch; }
     .datetime-panel { min-width: 0; text-align: left; }
     .controls { align-items: stretch; }
@@ -1488,7 +1611,7 @@
             <button id="bonusMarkDoneBtn" class="danger">🚨 Tandai Semua Sudah Dibonuskan</button>
             <button id="bonusClearDoneBtn" class="ghost">Hapus Cache Lokal Tanggal Ini</button>
           </div>
-          <div class="source-note" id="bonusDoneInfo">Data sudah bonus tanggal ini: 0 ID (Supabase + lokal)</div>
+          <div class="source-note" id="bonusDoneInfo">Data sudah bonus tanggal ini: 0 ID (database pusat + Adjustment + lokal)</div>
           <div id="bonusLockWarning" class="lock-warning" style="display:none;"></div>
           <div id="bonusPendingTimer" class="pending-timer" style="display:none;"></div>
           <div class="table-wrap">
@@ -1645,6 +1768,17 @@
     </footer>
   </div>
 
+  <div id="globalLoading" class="global-loading" style="display:none;">
+    <div class="loading-card">
+      <div class="loading-spinner"></div>
+      <div class="loading-content">
+        <div id="loadingTitle" class="loading-title">Memproses...</div>
+        <div id="loadingMessage" class="loading-message">Mohon tunggu sebentar.</div>
+        <div id="loadingSteps" class="loading-steps"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
 <script>
@@ -1682,11 +1816,97 @@
   const OPERATOR_TOKEN_KEY = 'qris_operator_token_v1';
   const OPERATOR_PROFILE_KEY = 'qris_operator_profile_v1';
   const bonusRemoteDoneCache = {};
+  const bonusAdjustmentDoneCache = {};
   let bonusRemoteStatus = 'idle';
   let bonusPendingTimerInterval = null;
   let bonusPendingServerOffsetMs = 0;
   let currentOperator = null;
   let adminOperatorRows = [];
+  let currentLoadingSteps = [];
+
+  function showLoading(title = 'Memproses...', message = 'Mohon tunggu sebentar.', steps = []) {
+    const overlay = document.getElementById('globalLoading');
+    const titleEl = document.getElementById('loadingTitle');
+    const messageEl = document.getElementById('loadingMessage');
+    const stepsEl = document.getElementById('loadingSteps');
+
+    if (!overlay || !titleEl || !messageEl || !stepsEl) return;
+
+    currentLoadingSteps = steps.map(step => ({
+      label: typeof step === 'string' ? step : step.label,
+      status: typeof step === 'string' ? 'pending' : (step.status || 'pending')
+    }));
+
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    renderLoadingSteps();
+    overlay.style.display = 'flex';
+  }
+
+  function hideLoading() {
+    const overlay = document.getElementById('globalLoading');
+    if (!overlay) return;
+    overlay.style.display = 'none';
+    currentLoadingSteps = [];
+  }
+
+  function renderLoadingSteps() {
+    const stepsEl = document.getElementById('loadingSteps');
+    if (!stepsEl) return;
+
+    stepsEl.innerHTML = currentLoadingSteps.map(step => `
+      <div class="loading-step ${escapeHtml(step.status || '')}">
+        <span class="loading-dot"></span>
+        <span>${escapeHtml(step.label || '')}</span>
+      </div>
+    `).join('');
+  }
+
+  function updateLoading(message, activeStepIndex = null, doneUntilIndex = null) {
+    const messageEl = document.getElementById('loadingMessage');
+    if (messageEl && message) messageEl.textContent = message;
+
+    if (Array.isArray(currentLoadingSteps) && currentLoadingSteps.length) {
+      currentLoadingSteps = currentLoadingSteps.map((step, index) => {
+        let status = step.status || 'pending';
+
+        if (typeof doneUntilIndex === 'number' && index <= doneUntilIndex) {
+          status = 'done';
+        }
+
+        if (typeof activeStepIndex === 'number' && index === activeStepIndex) {
+          status = 'active';
+        }
+
+        return { ...step, status };
+      });
+
+      renderLoadingSteps();
+    }
+  }
+
+  function setLoadingError(message, stepIndex = null) {
+    const messageEl = document.getElementById('loadingMessage');
+    if (messageEl && message) messageEl.textContent = message;
+
+    if (typeof stepIndex === 'number' && currentLoadingSteps[stepIndex]) {
+      currentLoadingSteps[stepIndex].status = 'error';
+      renderLoadingSteps();
+    }
+  }
+
+  function setButtonLoading(button, isLoading, loadingText) {
+    if (!button) return;
+    if (isLoading) {
+      if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
+      button.textContent = loadingText || 'Memproses...';
+      button.disabled = true;
+      return;
+    }
+    button.textContent = button.dataset.originalText || button.textContent;
+    delete button.dataset.originalText;
+    button.disabled = false;
+  }
 
   function getOperatorToken() {
     return localStorage.getItem(OPERATOR_TOKEN_KEY) || '';
@@ -1833,7 +2053,9 @@
     const username = document.getElementById('operatorUsername').value;
     const password = document.getElementById('operatorPassword').value;
     const errorBox = document.getElementById('operatorLoginError');
+    const loginBtn = document.getElementById('operatorLoginBtn');
     errorBox.textContent = '';
+    setButtonLoading(loginBtn, true, 'Memeriksa akses...');
 
     try {
       const response = await fetch('/api/operator-login', {
@@ -1852,6 +2074,8 @@
       showToast('Login operator berhasil.', 'success');
     } catch (error) {
       errorBox.textContent = error.message || 'Username atau password salah.';
+    } finally {
+      setButtonLoading(loginBtn, false);
     }
   }
 
@@ -2056,7 +2280,7 @@
           <span class="timer-title">PENDING BONUS HARIAN EXPIRED</span>
           <span class="timer-clock">00:00</span>
           <span class="timer-note">
-            Pending sebelumnya${operatorName ? ' oleh ' + escapeHtml(operatorName) : ''} untuk tanggal ${escapeHtml(dateLabel)} sudah lewat 5 menit, tetapi belum di-DONE. Data tidak dihapus.
+            Pending sebelumnya${operatorName ? ' oleh ' + escapeHtml(operatorName) : ''} untuk tanggal ${escapeHtml(dateLabel)} sudah lewat 5 menit, tetapi belum ditandai selesai. Data tidak dihapus.
             Pastikan operator sebelumnya tidak sedang melanjutkan sebelum mengambil tindakan.
           </span>
         `;
@@ -2101,7 +2325,7 @@
     } catch (error) {
       if (error.message === 'unauthorized') return new Set();
       bonusRemoteStatus = 'offline';
-      showToast('Supabase tidak terhubung, memakai data lokal.', 'error');
+      showToast('Database pusat tidak terhubung, memakai data lokal.', 'error');
       return new Set();
     }
   }
@@ -2140,7 +2364,7 @@
     } catch (error) {
       if (error.message === 'unauthorized') return { success: false, unauthorized: true };
       bonusRemoteStatus = 'offline';
-      showToast('Supabase tidak terhubung, memakai data lokal.', 'error');
+      showToast('Database pusat tidak terhubung, memakai data lokal.', 'error');
       return { success: false };
     }
   }
@@ -2174,41 +2398,15 @@
       return result;
     } catch (error) {
       bonusRemoteStatus = 'offline';
-      showToast('Gagal sync Adjustment Approved ke Supabase. Browser tetap memakai raw Adjustment lokal, tetapi operator lain belum terlindungi.', 'error');
+      showToast('Gagal sinkron Adjustment Approved ke database pusat. Browser tetap memakai raw lokal.', 'error');
       return { success: false };
     }
   }
 
-  function extractApprovedBonusHarianFromAdjustment(dateValue, loginKeys = []) {
-    const raw = document.getElementById('bonusAdjustRaw').value || '';
-    if (!raw.trim()) return [];
-
-    const targetDate = bonusPadDateFromInput(dateValue);
-    const fallbackRemark = 'BONUS HARIAN ' + bonusDisplayDate(dateValue);
-    const syncLoginKeys = looksLikeCsv(raw) ? [] : loginKeys;
-    const rows = buildAdjustmentDoneRows(raw, syncLoginKeys, targetDate, fallbackRemark);
-    const map = new Map();
-
-    rows.forEach(row => {
-      const loginKey = String(row.login_key || row.login_id || '').trim().toUpperCase();
-      if (!loginKey) return;
-      map.set(loginKey, {
-        login_id: loginKey,
-        login_key: loginKey,
-        bonus_type: 'BONUS_HARIAN',
-        bonus_amount: Number.isFinite(Number(row.bonus_amount)) ? Number(row.bonus_amount) : null,
-        remark: row.remark || fallbackRemark,
-        source: 'adjustment_approved'
-      });
-    });
-
-    return [...map.values()];
-  }
-
-  async function syncAdjustmentApprovedToSupabase(dateValue, loginKeys = []) {
-    const rows = extractApprovedBonusHarianFromAdjustment(dateValue, loginKeys);
+  async function syncAdjustmentApprovedToSupabase(dateValue, adjustRaw) {
+    const rows = extractApprovedBonusHarianFromAdjustment(adjustRaw, dateValue);
     if (rows.length === 0) {
-      showToast('Tidak ada Adjustment Approved baru untuk disync.', 'success');
+      showToast('Tidak ada Adjustment Approved baru untuk disinkronkan.', 'success');
       return {
         success: true,
         status: 'no_adjustment_approved',
@@ -2220,7 +2418,7 @@
     const result = await syncAdjustmentApprovedDone(dateValue, rows);
     if (result.unauthorized) return result;
     if (result.success) {
-      showToast(`Sync Adjustment Approved: ${result.syncedCount || 0} ID sudah dikonfirmasi ke Supabase.`, 'success');
+      showToast(`Sinkron Adjustment Approved: ${result.syncedCount || 0} ID tersimpan ke database pusat.`, 'success');
     }
     return result;
   }
@@ -2288,12 +2486,22 @@
       return;
     }
 
+    showLoading('Mengambil Data Operator', 'Sedang mengambil daftar operator...', [
+      'Menghubungi server',
+      'Validasi akses admin',
+      'Memuat daftar operator'
+    ]);
     try {
+      updateLoading('Menghubungi server...', 0);
       const result = await adminApi('/api/operators');
+      updateLoading('Memuat daftar operator...', 2, 1);
       renderAdminOperators(result.operators || []);
     } catch (error) {
+      setLoadingError(error.message || 'Gagal memuat operator.', 1);
       const table = document.getElementById('adminOperatorTable');
       if (table) table.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(error.message || 'Gagal memuat operator.')}</td></tr>`;
+    } finally {
+      hideLoading();
     }
   }
 
@@ -2304,7 +2512,15 @@
     const password = document.getElementById('adminOperatorPassword').value;
     const role = document.getElementById('adminOperatorRole').value;
 
+    const createBtn = document.getElementById('adminOperatorCreateBtn');
+    setButtonLoading(createBtn, true, 'Menyimpan...');
+    showLoading('Menyimpan Data Operator', 'Sedang menyimpan perubahan operator...', [
+      'Validasi input',
+      'Mengirim ke server',
+      'Memuat ulang daftar operator'
+    ]);
     try {
+      updateLoading('Validasi input operator...', 0);
       await adminApi('/api/operators', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2315,6 +2531,7 @@
           role
         })
       });
+      updateLoading('Operator tersimpan. Memuat ulang daftar...', 2, 1);
       document.getElementById('adminOperatorUsername').value = '';
       document.getElementById('adminOperatorDisplayName').value = '';
       document.getElementById('adminOperatorPassword').value = '';
@@ -2322,17 +2539,35 @@
       showToast('Operator berhasil ditambahkan.', 'success');
       adminFetchOperators();
     } catch (error) {
+      setLoadingError(error.message || 'Gagal menambah operator.', 1);
       showToast(error.message || 'Gagal menambah operator.', 'error');
+    } finally {
+      hideLoading();
+      setButtonLoading(createBtn, false);
     }
   }
 
   async function adminUpdateOperator(payload) {
-    await adminApi('/api/operators', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    adminFetchOperators();
+    showLoading('Menyimpan Data Operator', 'Sedang menyimpan perubahan operator...', [
+      'Validasi input',
+      'Mengirim ke server',
+      'Memuat ulang daftar operator'
+    ]);
+    try {
+      updateLoading('Mengirim perubahan ke server...', 1, 0);
+      await adminApi('/api/operators', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      updateLoading('Perubahan tersimpan. Memuat ulang daftar...', 2, 1);
+      await adminFetchOperators();
+    } catch (error) {
+      setLoadingError(error.message || 'Gagal menyimpan operator.', 1);
+      throw error;
+    } finally {
+      hideLoading();
+    }
   }
 
   async function adminEditOperator(id) {
@@ -2462,12 +2697,14 @@
     const dateValue = document.getElementById('bonusDate').value;
     const localSet = dateValue ? getBonusDoneSet(dateValue) : new Set();
     const remoteSet = dateValue && bonusRemoteDoneCache[dateValue] ? bonusRemoteDoneCache[dateValue] : new Set();
-    const combined = new Set([...localSet, ...remoteSet]);
+    const adjustmentSet = dateValue && bonusAdjustmentDoneCache[dateValue] ? bonusAdjustmentDoneCache[dateValue] : new Set();
+    const combined = new Set([...localSet, ...remoteSet, ...adjustmentSet]);
     if (bonusRemoteStatus === 'offline' || bonusRemoteStatus === 'unauthorized') {
-      info.textContent = `Mode lokal: ${localSet.size} ID. Supabase tidak terhubung.`;
+      const localCombined = new Set([...localSet, ...adjustmentSet]);
+      info.textContent = `Mode lokal: ${localCombined.size} ID (Adjustment + lokal). Database pusat tidak terhubung.`;
       return;
     }
-    info.textContent = `Data sudah bonus tanggal ini: ${combined.size} ID (Supabase + lokal)`;
+    info.textContent = `Data sudah bonus tanggal ini: ${combined.size} ID (database pusat + Adjustment + lokal)`;
   }
 
   function cleanCell(value) {
@@ -2554,15 +2791,27 @@
       return '';
     }
 
+    showLoading('Membaca File', 'Sedang membaca file yang diupload...', [
+      'Membuka file',
+      'Membaca isi file',
+      'Memasukkan data ke textarea'
+    ]);
     try {
+      updateLoading('Membuka file upload...', 0);
       const text = await readSelectedFile(inputId);
+      updateLoading('Membaca isi file...', 1, 0);
       document.getElementById(textareaId).value = text;
+      updateLoading('Memasukkan data ke textarea...', 2, 1);
       showToast(`${file.name} berhasil diimport.`, 'success');
       if (afterRead) afterRead(text);
+      updateLoading('File selesai dibaca.', null, 2);
       return text;
     } catch (error) {
+      setLoadingError(error.message || 'Gagal membaca file.', 1);
       showToast(error.message || 'Gagal membaca file.', 'error');
       return '';
+    } finally {
+      hideLoading();
     }
   }
 
@@ -2620,103 +2869,190 @@
     return 'Rp ' + Math.round(value).toLocaleString('id-ID');
   }
 
-  function bonusParseAlready(raw, loginKeys, targetDate) {
-    if (looksLikeCsv(raw)) {
-      const alreadyCsv = new Set();
-      const rows = csvRecords(raw);
-      rows.forEach(row => {
-        const login = String(row['Login ID'] || '').trim().toUpperCase();
-        const remark = `${row['Remark'] || ''} ${row['Transaction Number'] || ''}`.toUpperCase();
-        const dateText = row['Approved Time'] || row['Date Created'] || '';
-        const status = String(row['Status'] || '').trim();
-        if (!login || !remark.includes('BONUS HARIAN')) return;
-        if (status && status !== 'Approved') return;
-        if (!bonusMatchGmt7Date(dateText, targetDate)) return;
-        if (loginKeys.includes(login)) alreadyCsv.add(login);
-      });
-      return alreadyCsv;
+  function normalizeBonusTargetDate(value) {
+    const text = String(value || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return bonusPadDateFromInput(text);
+    const parts = text.split('/');
+    if (parts.length === 3) {
+      return `${parts[0].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[2]}`;
+    }
+    return text;
+  }
+
+  function isValidAdjustmentLoginId(value) {
+    const login = String(value || '').trim();
+    if (!login || login.includes('@')) return false;
+    if (/\s|\(|\)|\//.test(login)) return false;
+    if (/^(GROUP|MERCHANT|LOGIN|MEMBER|IDR|APPROVED|REJECT|REJECTED)$/i.test(login)) return false;
+    return /^[A-Z0-9_.-]{3,32}$/i.test(login);
+  }
+
+  function isBoDateLine(value) {
+    return parseDate(value).getTime() !== 0;
+  }
+
+  function isBoStatusLine(value) {
+    return /^(APPROVED|REJECT|REJECTED)$/i.test(String(value || '').trim());
+  }
+
+  function firstValue(row, fields) {
+    for (const field of fields) {
+      if (row[field] !== undefined && row[field] !== '') return row[field];
+    }
+    return '';
+  }
+
+  function parseAdjustmentBoRecords(raw) {
+    const text = String(raw || '');
+    if (!text.trim()) return [];
+
+    if (looksLikeCsv(text)) {
+      return csvRecords(text).map(row => {
+        const loginId = String(firstValue(row, ['Login ID', 'LoginID', 'User ID']) || '').trim();
+        const transactionNumber = String(firstValue(row, ['Transaction Number', 'Trans. Number', 'Trans Number']) || '').trim();
+        const remark = String(firstValue(row, ['Remark', 'Remarks']) || '').trim();
+        return {
+          login_id: loginId,
+          login_key: normalizeLoginId(loginId),
+          member_id: String(firstValue(row, ['Member ID', 'MemberID']) || '').trim(),
+          adjustment_id: String(firstValue(row, ['Adjustment ID', 'AdjustmentID']) || '').trim(),
+          adjustment_amount: firstValue(row, ['Adjustment Amt', 'Adjustment Amount', 'Adj Amount', 'Amount']),
+          status: String(firstValue(row, ['Status']) || '').trim(),
+          transaction_number: transactionNumber,
+          remark,
+          date_created: String(firstValue(row, ['Date Created', 'Created Time']) || '').trim(),
+          created_by: String(firstValue(row, ['Create By', 'Created By']) || '').trim(),
+          approved_time: String(firstValue(row, ['Approved Time', 'Approve Time']) || '').trim(),
+          approved_by: String(firstValue(row, ['Approved By', 'Approve By']) || '').trim(),
+          raw_record: Object.values(row).join('\n')
+        };
+      }).filter(row => isValidAdjustmentLoginId(row.login_id));
     }
 
-    const lines = raw.split('\n').map(line => line.trim()).filter(Boolean);
-    const already = new Set();
-    const loginList = [...loginKeys];
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const records = [];
 
     for (let i = 0; i < lines.length; i++) {
-      if (!String(lines[i]).toUpperCase().includes('BONUS HARIAN')) continue;
+      if (String(lines[i]).toUpperCase() !== 'IDR') continue;
+      if (i < 3 || !/^\d{4,}$/.test(lines[i - 1])) continue;
 
-      const start = Math.max(0, i - 18);
-      const end = Math.min(lines.length - 1, i + 18);
-      let sameDate = false;
-      for (let j = start; j <= end; j++) {
-        if (bonusMatchGmt7Date(lines[j], targetDate)) {
-          sameDate = true;
+      const loginId = lines[i - 3] || '';
+      if (!isValidAdjustmentLoginId(loginId)) continue;
+
+      const searchStart = i + 5;
+      const searchEnd = Math.min(lines.length - 1, i + 22);
+      let statusIndex = -1;
+      for (let j = searchStart; j <= searchEnd; j++) {
+        if (isBoStatusLine(lines[j])) {
+          statusIndex = j;
           break;
         }
       }
-      if (!sameDate) continue;
+      if (statusIndex === -1) continue;
 
-      const block = lines.slice(start, end + 1).join('\n').toUpperCase();
-      for (const login of loginList) {
-        if (block.includes(login)) {
-          already.add(login);
+      let dateCreatedIndex = -1;
+      for (let j = statusIndex + 1; j <= searchEnd; j++) {
+        if (isBoDateLine(lines[j])) {
+          dateCreatedIndex = j;
           break;
         }
       }
+
+      let approvedTimeIndex = -1;
+      if (dateCreatedIndex !== -1) {
+        for (let j = dateCreatedIndex + 1; j <= searchEnd; j++) {
+          if (isBoDateLine(lines[j])) {
+            approvedTimeIndex = j;
+            break;
+          }
+        }
+      }
+
+      const transactionNumber = lines.slice(searchStart, statusIndex).join(' ').trim();
+      const remarkEnd = dateCreatedIndex === -1 ? Math.min(searchEnd + 1, statusIndex + 5) : dateCreatedIndex;
+      const remark = lines.slice(statusIndex + 1, remarkEnd).join(' ').trim() || transactionNumber;
+      const recordEnd = Math.max(
+        approvedTimeIndex !== -1 ? approvedTimeIndex + 1 : -1,
+        dateCreatedIndex !== -1 ? dateCreatedIndex + 1 : -1,
+        statusIndex
+      );
+
+      records.push({
+        login_id: loginId,
+        login_key: normalizeLoginId(loginId),
+        member_id: lines[i - 2] || '',
+        adjustment_id: lines[i - 1] || '',
+        adjustment_amount: lines[i + 3] || '',
+        status: lines[statusIndex] || '',
+        transaction_number: transactionNumber,
+        remark,
+        date_created: dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '',
+        created_by: dateCreatedIndex !== -1 && !isBoDateLine(lines[dateCreatedIndex + 1]) ? (lines[dateCreatedIndex + 1] || '') : '',
+        approved_time: approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '',
+        approved_by: approvedTimeIndex !== -1 ? (lines[approvedTimeIndex + 1] || '') : '',
+        raw_record: lines.slice(Math.max(0, i - 5), Math.min(lines.length, recordEnd + 1)).join('\n')
+      });
+
+      if (recordEnd > i) i = recordEnd;
     }
+
+    return records;
+  }
+
+  function isBonusHarianAdjustmentText(text) {
+    return /BONUS\s*HARIAN\b/i.test(String(text || ''));
+  }
+
+  function extractApprovedBonusHarianFromAdjustment(raw, dateValue) {
+    const targetDate = normalizeBonusTargetDate(dateValue);
+    const map = new Map();
+
+    parseAdjustmentBoRecords(raw).forEach(record => {
+      const loginKey = normalizeLoginId(record.login_key || record.login_id);
+      const status = String(record.status || '').trim().toUpperCase();
+      const combinedText = `${record.transaction_number || ''} ${record.remark || ''}`.trim();
+      const dateText = record.approved_time || record.date_created || '';
+
+      if (!loginKey || !isValidAdjustmentLoginId(record.login_id || loginKey)) return;
+      if (status !== 'APPROVED') return;
+      if (!isBonusHarianAdjustmentText(combinedText)) return;
+      if (!bonusMatchGmt7Date(dateText, targetDate)) return;
+
+      const amountText = String(record.adjustment_amount || '').trim();
+      map.set(`${loginKey}|BONUS_HARIAN`, {
+        login_id: record.login_id || loginKey,
+        login_key: loginKey,
+        bonus_type: 'BONUS_HARIAN',
+        bonus_amount: amountText ? parseNumber(amountText) : null,
+        remark: record.remark || record.transaction_number || ('BONUS HARIAN ' + targetDate),
+        source: 'adjustment_approved',
+        adjustment_id: record.adjustment_id || '',
+        approved_time: dateText
+      });
+    });
+
+    return [...map.values()];
+  }
+
+  function bonusParseAlready(raw, loginKeys, targetDate) {
+    const loginFilter = new Set((loginKeys || []).map(login => normalizeLoginId(login)).filter(Boolean));
+    const already = new Set();
+
+    extractApprovedBonusHarianFromAdjustment(raw, targetDate).forEach(row => {
+      const login = normalizeLoginId(row.login_key || row.login_id);
+      if (!login) return;
+      if (loginFilter.size && !loginFilter.has(login)) return;
+      already.add(login);
+    });
 
     return already;
   }
 
-  function buildAdjustmentDoneRows(raw, loginKeys, targetDate, remarkText) {
-    const rows = [];
-    const loginFilter = new Set((loginKeys || []).map(login => String(login).toUpperCase()));
-
-    function addLogin(loginId, bonusAmount, remark) {
-      const login = String(loginId || '').trim().toUpperCase();
-      if (!login) return;
-      if (loginFilter.size && !loginFilter.has(login)) return;
-      rows.push({
-        login_id: login,
-        bonus_amount: Number.isFinite(Number(bonusAmount)) ? Number(bonusAmount) : null,
-        remark: remark || remarkText,
-        source: 'adjustment_file'
-      });
-    }
-
-    if (looksLikeCsv(raw)) {
-      csvRecords(raw).forEach(row => {
-        const login = String(row['Login ID'] || '').trim().toUpperCase();
-        const remark = `${row['Remark'] || ''} ${row['Transaction Number'] || ''}`.trim();
-        const dateText = row['Approved Time'] || row['Date Created'] || '';
-        const status = String(row['Status'] || '').trim().toUpperCase();
-        const amount = row['Adjustment Amt'] || row['Adjustment Amount'] || row['Adj Amount'] || row['Amount'] || '';
-        if (!login || !remark.toUpperCase().includes('BONUS HARIAN')) return;
-        if (status && status !== 'APPROVED') return;
-        if (!bonusMatchGmt7Date(dateText, targetDate)) return;
-        addLogin(login, amount, remark);
-      });
-      return rows;
-    }
-
-    const lines = String(raw || '').split('\n').map(line => line.trim()).filter(Boolean);
-    const loginList = [...loginFilter];
-
-    for (let i = 0; i < lines.length; i++) {
-      if (!String(lines[i]).toUpperCase().includes('BONUS HARIAN')) continue;
-
-      const start = Math.max(0, i - 18);
-      const end = Math.min(lines.length - 1, i + 18);
-      const blockLines = lines.slice(start, end + 1);
-      const block = blockLines.join('\n').toUpperCase();
-      if (/\bREJECT(?:ED)?\b/.test(block)) continue;
-      if (!blockLines.some(line => bonusMatchGmt7Date(line, targetDate))) continue;
-
-      loginList.forEach(login => {
-        if (block.includes(login)) addLogin(login, null, lines[i]);
-      });
-    }
-
-    return rows;
+  function buildAdjustmentDoneRows(raw, loginKeys, targetDate) {
+    const loginFilter = new Set((loginKeys || []).map(login => normalizeLoginId(login)).filter(Boolean));
+    return extractApprovedBonusHarianFromAdjustment(raw, targetDate).filter(row => {
+      return !loginFilter.size || loginFilter.has(row.login_key);
+    });
   }
 
   function rowsFromClaimResponse(responseRows, candidateRows) {
@@ -2813,11 +3149,29 @@
       return;
     }
 
+    const processBtn = document.getElementById('bonusProcessBtn');
+    setButtonLoading(processBtn, true, 'Memproses...');
+    showLoading(
+      'Memproses Bonus Harian',
+      'Membaca deposit, adjustment, dan data ...',
+      [
+        'Membaca data deposit',
+        'Membaca raw Adjustment Bonus',
+        'Sinkron data BONUS HARIAN Approved',
+        'Mengambil data sudah bonus',
+        'Mengecek lock operator',
+        'Menyiapkan output'
+      ]
+    );
+
+    try {
+    updateLoading('Membaca data deposit dari Parser QRIS...', 0);
     const hasParserData = await ensureParserData();
     if (!hasParserData) {
       return;
     }
 
+    updateLoading('Membaca raw Adjustment Bonus...', 1, 0);
     if (!adjustRaw.trim()) {
       adjustRaw = await readSelectedFile('adjustFile');
       if (adjustRaw.trim()) {
@@ -2873,9 +3227,14 @@
     });
 
     const loginKeys = Object.keys(byLogin);
+    const adjustmentApprovedRows = extractApprovedBonusHarianFromAdjustment(adjustRaw, dateValue);
+    const adjustmentAlreadySet = new Set(adjustmentApprovedRows.map(row => row.login_key));
+    bonusAdjustmentDoneCache[dateValue] = adjustmentAlreadySet;
     const already = bonusParseAlready(adjustRaw, loginKeys, targetDate);
-    const syncResult = await syncAdjustmentApprovedToSupabase(dateValue, loginKeys);
+    updateLoading('Sinkron data BONUS HARIAN Approved ke database pusat...', 2, 1);
+    const syncResult = await syncAdjustmentApprovedToSupabase(dateValue, adjustRaw);
     if (syncResult.unauthorized) return;
+    updateLoading('Mengambil data sudah bonus dari database pusat...', 3, 2);
     const remoteDone = await fetchRemoteBonusDone(dateValue);
     const localDone = getBonusDoneSet(dateValue);
     const candidateRows = Object.entries(byLogin).map(([key, info]) => {
@@ -2892,8 +3251,9 @@
         bonus,
         remark: bonusRemark
       };
-    }).filter(row => row.bonus > 0 && !already.has(row.loginKey) && !localDone.has(row.loginKey) && !remoteDone.has(row.loginKey));
+    }).filter(row => row.bonus > 0 && !adjustmentAlreadySet.has(row.loginKey) && !already.has(row.loginKey) && !localDone.has(row.loginKey) && !remoteDone.has(row.loginKey));
 
+    updateLoading('Mengecek apakah ada operator lain yang sedang proses...', 4, 3);
     const claimResult = await claimRemoteBonusBatch(dateValue, candidateRows.map(row => ({
       login_id: row.loginId,
       bonus_amount: row.bonus,
@@ -3014,6 +3374,7 @@
       bonusRows = candidateRows;
     }
 
+    updateLoading('Menyiapkan output yang benar-benar belum bonus...', 5, 4);
     bonusRows.sort((a, b) => {
       const timeDiff = (a.timeValue || 0) - (b.timeValue || 0);
       if (timeDiff !== 0) return timeDiff;
@@ -3029,6 +3390,14 @@
       showToast('Menampilkan ulang pending milik Anda.', 'success');
     } else {
       showToast(`${bonusRows.length} data bonus harian berhasil diproses.`, 'success');
+    }
+    updateLoading('Selesai.', null, 5);
+    } catch (error) {
+      setLoadingError(error.message || 'Proses Bonus Harian gagal.');
+      showToast(error.message || 'Proses Bonus Harian gagal.', 'error');
+    } finally {
+      hideLoading();
+      setButtonLoading(processBtn, false);
     }
   }
 
@@ -3074,18 +3443,36 @@
       return;
     }
 
+    const doneBtn = document.getElementById('bonusMarkDoneBtn');
+    setButtonLoading(doneBtn, true, 'Finalisasi...');
+    showLoading(
+      'Finalisasi Bonus Harian',
+      'Menyimpan status selesai ke database pusat...',
+      [
+        'Mengirim finalisasi batch',
+        'Update status selesai',
+        'Mengambil ulang data terbaru'
+      ]
+    );
+
     let finalizeResult;
     try {
+      updateLoading('Mengirim finalisasi batch...', 0);
       finalizeResult = await finalizeRemoteBonusBatch(dateValue);
+      updateLoading('Update status selesai di database pusat...', 1, 0);
     } catch (error) {
+      setLoadingError(error.message || 'Gagal finalisasi ke database pusat.', 0);
       showBonusLockWarning(
-        'GAGAL FINALISASI KE SUPABASE',
+        'GAGAL FINALISASI KE DATABASE PUSAT',
         'Jangan lanjut proses baru sebelum koneksi normal. Bonus belum dianggap selesai di server.'
       );
-      showToast(error.message || 'Gagal finalisasi ke Supabase.', 'error');
+      showToast(error.message || 'Gagal finalisasi ke database pusat.', 'error');
+      hideLoading();
+      setButtonLoading(doneBtn, false);
       return;
     }
 
+    updateLoading('Mengambil ulang data terbaru...', 2, 1);
     const store = getBonusDoneStore();
     if (!store[dateValue]) store[dateValue] = {};
     bonusRows.forEach(row => {
@@ -3110,6 +3497,9 @@
     stopBonusPendingTimer();
     bonusRender();
     renderBonusDoneInfo();
+    updateLoading('Finalisasi selesai.', null, 2);
+    hideLoading();
+    setButtonLoading(doneBtn, false);
     showToast(finalizeResult.message || `Bonus Harian berhasil ditandai selesai. ${savedCount} data tersimpan di cache lokal.`, 'success');
   }
 
@@ -3119,13 +3509,13 @@
       showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
       return;
     }
-    if (!window.confirm('Hapus cache lokal untuk tanggal ini saja? Data Supabase tidak akan dihapus.')) return;
+    if (!window.confirm('Hapus cache lokal untuk tanggal ini saja? Data database pusat tidak akan dihapus.')) return;
 
     const store = getBonusDoneStore();
     delete store[dateValue];
     saveBonusDoneStore(store);
     renderBonusDoneInfo();
-    showToast('Cache lokal tanggal ini dihapus. Data Supabase tidak dihapus.', 'success');
+    showToast('Cache lokal tanggal ini dihapus. Data database pusat tidak dihapus.', 'success');
   }
 
   function extractTicketNumbers(text) {
@@ -3556,6 +3946,7 @@
   }
 
   async function auditCheckDoubleTicket() {
+    const auditBtn = document.getElementById('auditCheckTicketBtn');
     const allDates = document.getElementById('auditAllDates')?.checked;
     const targetDates = allDates ? [] : getAuditDateRange();
 
@@ -3564,6 +3955,22 @@
       return;
     }
 
+    setButtonLoading(auditBtn, true, 'Memproses...');
+    showLoading(
+      'Memproses Audit Bonus',
+      'Mengecek data adjustment dan kemungkinan mistake...',
+      [
+        'Membaca raw Adjustment Audit',
+        'Membaca deposit audit opsional',
+        'Mendeteksi double ticket',
+        'Mendeteksi double bonus harian',
+        'Menghitung selisih',
+        'Menyiapkan tabel audit'
+      ]
+    );
+
+    try {
+    updateLoading('Membaca raw Adjustment Audit...', 0);
     let raw = document.getElementById('auditAdjustRaw').value;
     if (!raw.trim()) {
       raw = await readSelectedFile('auditAdjustFile');
@@ -3575,6 +3982,7 @@
       return;
     }
 
+    updateLoading('Membaca deposit audit opsional...', 1, 0);
     let depositRaw = document.getElementById('auditDepositRaw')?.value || '';
     if (!depositRaw.trim()) {
       depositRaw = await readSelectedFile('auditDepositFile');
@@ -3583,9 +3991,13 @@
 
     auditDepositRows = depositRaw.trim() ? parseAuditDepositRows(depositRaw) : [];
 
+    updateLoading('Mendeteksi double ticket...', 2, 1);
     const result = findAuditMistakes(raw, targetDates, allDates);
+    updateLoading('Mendeteksi double bonus harian...', 3, 2);
+    updateLoading('Menghitung selisih mistake...', 4, 3);
     auditDoubleTicketRows = result.mistakes;
     renderAuditDoubleTicketRows.correctedCount = result.correctedCount;
+    updateLoading('Menyiapkan tabel audit...', 5, 4);
     renderAuditDoubleTicketRows();
     showToast(
       auditDoubleTicketRows.length
@@ -3593,6 +4005,14 @@
         : 'Tidak ditemukan mistake adjustment.',
       auditDoubleTicketRows.length ? 'error' : 'success'
     );
+    updateLoading('Audit selesai.', null, 5);
+    } catch (error) {
+      setLoadingError(error.message || 'Audit gagal.');
+      showToast(error.message || 'Audit gagal.', 'error');
+    } finally {
+      hideLoading();
+      setButtonLoading(auditBtn, false);
+    }
   }
 
   function auditReset() {
@@ -3936,8 +4356,8 @@
     readFileToTextarea('adjustFile', 'bonusAdjustRaw', async text => {
       const dateValue = document.getElementById('bonusDate').value;
       if (!dateValue) return;
-      const targetDate = bonusPadDateFromInput(dateValue);
-      buildAdjustmentDoneRows(text, [], targetDate, 'BONUS HARIAN ' + bonusDisplayDate(dateValue));
+      const rows = extractApprovedBonusHarianFromAdjustment(text, dateValue);
+      bonusAdjustmentDoneCache[dateValue] = new Set(rows.map(row => row.login_key));
       renderBonusDoneInfo();
     });
   });
@@ -3952,8 +4372,8 @@
     readFileToTextarea('adjustFile', 'bonusAdjustRaw', async text => {
       const dateValue = document.getElementById('bonusDate').value;
       if (!dateValue) return;
-      const targetDate = bonusPadDateFromInput(dateValue);
-      buildAdjustmentDoneRows(text, [], targetDate, 'BONUS HARIAN ' + bonusDisplayDate(dateValue));
+      const rows = extractApprovedBonusHarianFromAdjustment(text, dateValue);
+      bonusAdjustmentDoneCache[dateValue] = new Set(rows.map(row => row.login_key));
       renderBonusDoneInfo();
     });
   });
