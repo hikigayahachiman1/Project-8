@@ -1183,6 +1183,96 @@
   #panel-audit .card::after { background: linear-gradient(90deg, var(--accent-2), var(--danger), var(--accent)); }
   #panel-admin-operators .card::after { background: linear-gradient(90deg, var(--warning), var(--danger), var(--accent-2)); }
 
+  .admin-module-card {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .admin-module-card::before {
+    content: '';
+    position: absolute;
+    width: 260px;
+    height: 260px;
+    right: -110px;
+    top: -120px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(255,200,87,0.16), transparent 64%);
+    pointer-events: none;
+  }
+
+  .module-download-box {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 18px;
+    padding: 16px;
+    border: 1px solid rgba(143,178,255,0.20);
+    border-radius: 22px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.085), rgba(255,255,255,0.035)),
+      rgba(5, 9, 22, 0.58);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.08),
+      0 18px 44px rgba(0,0,0,0.22);
+  }
+
+  .module-icon {
+    width: 54px;
+    height: 54px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    border-radius: 18px;
+    background: linear-gradient(135deg, var(--warning), var(--danger));
+    color: #18070b;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    font-weight: 800;
+    box-shadow: 0 0 24px rgba(255,200,87,0.22);
+  }
+
+  .module-info {
+    min-width: 0;
+    flex: 1;
+    display: grid;
+    gap: 5px;
+  }
+
+  .module-info strong {
+    color: var(--ink);
+    font-size: 0.98rem;
+  }
+
+  .module-info span {
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+  }
+
+  .module-download-btn {
+    width: auto;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 11px 16px;
+    border-radius: 15px;
+    border: 1px solid rgba(255,200,87,0.38);
+    background: linear-gradient(135deg, rgba(255,200,87,0.92), rgba(255,79,139,0.82));
+    color: #17070c;
+    font-weight: 800;
+    text-decoration: none;
+    box-shadow: 0 12px 28px rgba(255,200,87,0.16);
+    transition: transform 0.18s, box-shadow 0.18s, filter 0.18s;
+  }
+
+  .module-download-btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    box-shadow: 0 16px 34px rgba(255,200,87,0.22);
+  }
+
   .card:hover {
     transform: translateY(-2px);
   }
@@ -1551,6 +1641,9 @@
     .loading-card { flex-direction: column; padding: 24px 22px; border-radius: 26px; }
     .loading-orbit { width: 52px; height: 52px; }
     .loading-title { font-size: 1.45rem; }
+    .module-download-box { flex-direction: column; align-items: stretch; }
+    .module-icon { width: 48px; height: 48px; }
+    .module-download-btn { width: 100%; }
     .date-panel { width: 100%; align-items: stretch; }
     .datetime-panel { min-width: 0; text-align: left; }
     .controls { align-items: stretch; }
@@ -1566,7 +1659,7 @@
     <div class="login-shell">
       <div class="login-card">
         <div class="login-accent-line"></div>
-        <h2>LOGIN</h2>
+        <h2>Login Operator</h2>
         <p>Masukkan username dan password.</p>
         <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
         <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
@@ -1599,7 +1692,7 @@
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
-      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Dasboard</button>
+      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
     </div>
 
     <div id="operatorInfo" class="operator-info" style="display:none;"></div>
@@ -1852,6 +1945,34 @@
 
     <section class="tool-panel" id="panel-admin-operators">
       <div class="bonus-grid">
+        <section class="card admin-module-card" id="adminModuleCard">
+          <div class="card-title">Modul Panduan Admin & Operator</div>
+          <div class="card-desc">
+            Download panduan penggunaan tools untuk Admin, Superadmin, dan Operator.
+            Modul ini berisi alur kerja, SOP harian, fitur dashboard, Audit Bonus, dan cara menghindari double bonus.
+          </div>
+
+          <div class="module-download-box">
+            <div class="module-icon">PDF</div>
+            <div class="module-info">
+              <strong>Modul Admin & Operator</strong>
+              <span>QRIS Bonus Control - Panduan internal</span>
+            </div>
+            <a
+              id="adminModuleDownloadBtn"
+              class="module-download-btn"
+              href="./Modul_Admin_Operator_QRIS_Bonus_Control.pdf"
+              download="Modul_Admin_Operator_QRIS_Bonus_Control.pdf"
+            >
+              Download Modul
+            </a>
+          </div>
+
+          <div class="source-note">
+            File ini hanya ditampilkan untuk Admin dan Superadmin.
+          </div>
+        </section>
+
         <section class="card">
           <div class="card-title">Tambah Operator</div>
           <div class="card-desc">Buat akun operator baru. Password akan di-hash di server dan tidak pernah disimpan polos.</div>
@@ -2139,6 +2260,7 @@
     const auditTab = document.getElementById('auditTab');
     const unlockBtn = document.getElementById('unlockAuditBtn');
     const adminTab = document.getElementById('adminOperatorsTab');
+    const adminModuleCard = document.getElementById('adminModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
     if (hasAuditAccess()) {
       unlockBtn.style.display = 'none';
@@ -2153,9 +2275,11 @@
 
     if (isAdmin()) {
       adminTab.style.display = '';
+      if (adminModuleCard) adminModuleCard.style.display = '';
       if (superRoleOption) superRoleOption.style.display = isSuperAdmin() ? '' : 'none';
     } else {
       adminTab.style.display = 'none';
+      if (adminModuleCard) adminModuleCard.style.display = 'none';
       if (superRoleOption) superRoleOption.style.display = 'none';
       if (document.getElementById('panel-admin-operators').classList.contains('active')) {
         document.querySelector('[data-panel="parser"]').click();
@@ -4436,6 +4560,12 @@
   document.getElementById('bonusDate').addEventListener('change', renderBonusDoneInfo);
   document.getElementById('unlockAuditBtn').addEventListener('click', unlockAudit);
   document.getElementById('adminOperatorCreateBtn').addEventListener('click', adminCreateOperator);
+  const moduleDownloadBtn = document.getElementById('adminModuleDownloadBtn');
+  if (moduleDownloadBtn) {
+    moduleDownloadBtn.addEventListener('click', () => {
+      showToast('Modul panduan sedang didownload.', 'success');
+    });
+  }
   document.getElementById('operatorLoginBtn').addEventListener('click', loginOperator);
   document.getElementById('operatorPassword').addEventListener('keydown', event => {
     if (event.key === 'Enter') loginOperator();
