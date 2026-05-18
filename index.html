@@ -2550,10 +2550,10 @@
     }
   }
 
-  async function syncAdjustmentApprovedToDatabase(adjustRaw) {
+  async function syncAdjustmentApprovedToDatabase(adjustRaw, options = {}) {
     const rows = extractApprovedBonusHarianForDatabase(adjustRaw);
     if (rows.length === 0) {
-      showToast('Tidak ada Adjustment Approved baru untuk disinkronkan.', 'success');
+      if (!options.silent) showToast('Tidak ada Adjustment Approved baru untuk disinkronkan.', 'success');
       return {
         success: true,
         status: 'no_adjustment_approved',
@@ -2566,7 +2566,7 @@
     const result = await syncAdjustmentApprovedDone(rows);
     if (result.unauthorized) return result;
     if (result.success) {
-      showToast(`Sinkron Adjustment Approved: ${result.syncedCount || 0} ID tersimpan ke database pusat.`, 'success');
+      if (!options.silent) showToast(`Sinkron Adjustment Approved: ${result.syncedCount || 0} ID tersimpan ke database pusat.`, 'success');
     }
     return result;
   }
@@ -2868,7 +2868,19 @@
       .trim();
   }
 
+  function detectDelimiter(text) {
+    const firstLine = String(text || '').split(/\r?\n/).find(line => line.trim()) || '';
+    const tabCount = (firstLine.match(/\t/g) || []).length;
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    const semicolonCount = (firstLine.match(/;/g) || []).length;
+
+    if (tabCount > commaCount && tabCount >= semicolonCount) return '\t';
+    if (semicolonCount > commaCount && semicolonCount >= tabCount) return ';';
+    return ',';
+  }
+
   function parseCsvRows(text) {
+    const delimiter = detectDelimiter(text);
     const rows = [];
     let row = [];
     let cell = '';
@@ -2883,7 +2895,7 @@
         i++;
       } else if (char === '"') {
         inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
+      } else if (char === delimiter && !inQuotes) {
         row.push(cleanCell(cell));
         cell = '';
       } else if ((char === '\n' || char === '\r') && !inQuotes) {
@@ -2917,7 +2929,8 @@
 
   function looksLikeCsv(text) {
     const firstLine = String(text || '').split(/\r?\n/).find(line => line.trim());
-    return /(^|\uFEFF)Group\s*,|Application Time|Login ID|Adjustment ID/i.test(firstLine || '');
+    const delimiterPattern = '[,;\\t]';
+    return new RegExp(`(^|\\uFEFF)Group\\s*${delimiterPattern}|Application Time|Login ID|Adjustment ID`, 'i').test(firstLine || '');
   }
 
   function readSelectedFile(inputId) {
@@ -2955,8 +2968,9 @@
       document.getElementById(textareaId).value = text;
       updateLoading('Memasukkan data ke form...', 2, 1);
       showToast(`${file.name} berhasil diimport.`, 'success');
-      if (afterRead) afterRead(text);
       updateLoading('File selesai dibaca.', null, 2);
+      hideLoading();
+      if (afterRead) await afterRead(text);
       return text;
     } catch (error) {
       setLoadingError(error.message || 'Gagal membaca file.', 1);
@@ -3009,30 +3023,56 @@
     return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
   }
 
-  function bonusGmt7InputDate(dateText) {
-    return dateInputFromSlashDate(bonusGmt7Date(dateText));
-  }
-
-  function addDaysToInputDate(value, days) {
-    const date = new Date(`${value}T00:00:00`);
-    if (Number.isNaN(date.getTime())) return '';
-    date.setDate(date.getDate() + days);
+  function dateInputFromDate(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 
-  function getAdjustmentSyncDateRangeWib() {
-    const endDate = getTodayWibInputValue();
-    return {
-      startDate: addDaysToInputDate(endDate, -2),
-      endDate
-    };
+  function bonusGmt7InputDate(dateText) {
+    return dateInputFromSlashDate(bonusGmt7Date(dateText));
   }
 
-  function isInputDateInRange(value, startDate, endDate) {
-    return Boolean(value && startDate && endDate && value >= startDate && value <= endDate);
+  function getNowWibDate() {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+      hour12: false
+    }).formatToParts(new Date());
+
+    const map = {};
+    parts.forEach(part => {
+      if (part.type !== 'literal') map[part.type] = part.value;
+    });
+
+    return new Date(+map.year, +map.month - 1, +map.day, +map.hour, +map.minute, +map.second);
+  }
+
+  function getAdjustmentSyncWindowWib() {
+    const endAt = getNowWibDate();
+    const startAt = new Date(endAt.getTime() - 48 * 60 * 60 * 1000);
+    return { startAt, endAt };
+  }
+
+  function adjustmentDateTimeGmt8ToWib(dateText) {
+    const sourceDate = parseDate(String(dateText || '').trim());
+    if (!sourceDate || sourceDate.getTime() === 0) return null;
+    sourceDate.setHours(sourceDate.getHours() - 1);
+    return sourceDate;
+  }
+
+  function isAdjustmentWithinLast48Hours(recordDateTimeWib) {
+    if (!(recordDateTimeWib instanceof Date) || Number.isNaN(recordDateTimeWib.getTime())) return false;
+    const { startAt, endAt } = getAdjustmentSyncWindowWib();
+    return recordDateTimeWib >= startAt && recordDateTimeWib <= endAt;
   }
 
   function bonusMatchGmt7Date(dateText, targetDate) {
@@ -3097,6 +3137,7 @@
         const remark = String(firstValue(row, ['Remark', 'Remarks']) || '').trim();
         const approvedTime = String(firstValue(row, ['Approved Time', 'Approve Time']) || '').trim();
         const dateCreated = String(firstValue(row, ['Date Created', 'Created Time']) || '').trim();
+        const adjustedDateTime = adjustmentDateTimeGmt8ToWib(approvedTime || dateCreated);
         return {
           login_id: loginId,
           login_key: normalizeLoginId(loginId),
@@ -3110,7 +3151,8 @@
           created_by: String(firstValue(row, ['Create By', 'Created By']) || '').trim(),
           approved_time: approvedTime,
           approved_by: String(firstValue(row, ['Approved By', 'Approve By']) || '').trim(),
-          adjusted_bonus_date: bonusGmt7InputDate(approvedTime || dateCreated),
+          adjusted_bonus_datetime_wib: adjustedDateTime,
+          adjusted_bonus_date: dateInputFromDate(adjustedDateTime),
           raw_record: Object.values(row).join('\n')
         };
       }).filter(row => isValidAdjustmentLoginId(row.login_id));
@@ -3167,6 +3209,8 @@
       const approvedTime = approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '';
       const dateCreated = dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '';
 
+      const adjustedDateTime = adjustmentDateTimeGmt8ToWib(approvedTime || dateCreated);
+
       records.push({
         login_id: loginId,
         login_key: normalizeLoginId(loginId),
@@ -3180,11 +3224,78 @@
         created_by: dateCreatedIndex !== -1 && !isBoDateLine(lines[dateCreatedIndex + 1]) ? (lines[dateCreatedIndex + 1] || '') : '',
         approved_time: approvedTime,
         approved_by: approvedTimeIndex !== -1 ? (lines[approvedTimeIndex + 1] || '') : '',
-        adjusted_bonus_date: bonusGmt7InputDate(approvedTime || dateCreated),
+        adjusted_bonus_datetime_wib: adjustedDateTime,
+        adjusted_bonus_date: dateInputFromDate(adjustedDateTime),
         raw_record: lines.slice(Math.max(0, i - 5), Math.min(lines.length, recordEnd + 1)).join('\n')
       });
 
       if (recordEnd > i) i = recordEnd;
+    }
+
+    if (records.length > 0) return records;
+
+    for (let i = 1; i < lines.length - 8; i++) {
+      if (!/^\d+@\d+$/.test(lines[i])) continue;
+      if (!/^\d{5,}$/.test(lines[i + 1] || '')) continue;
+
+      const currencyIndex = [i + 2, i + 3, i + 4].find(index => String(lines[index] || '').toUpperCase() === 'IDR');
+      if (currencyIndex === undefined) continue;
+
+      const loginId = lines[i - 1] || '';
+      if (!isValidAdjustmentLoginId(loginId)) continue;
+
+      const searchEnd = Math.min(lines.length - 1, currencyIndex + 22);
+      let statusIndex = -1;
+      for (let j = currencyIndex + 5; j <= searchEnd; j++) {
+        if (isBoStatusLine(lines[j])) {
+          statusIndex = j;
+          break;
+        }
+      }
+      if (statusIndex === -1) continue;
+
+      let dateCreatedIndex = -1;
+      for (let j = statusIndex + 1; j <= searchEnd; j++) {
+        if (isBoDateLine(lines[j])) {
+          dateCreatedIndex = j;
+          break;
+        }
+      }
+
+      let approvedTimeIndex = -1;
+      if (dateCreatedIndex !== -1) {
+        for (let j = dateCreatedIndex + 1; j <= searchEnd; j++) {
+          if (isBoDateLine(lines[j])) {
+            approvedTimeIndex = j;
+            break;
+          }
+        }
+      }
+
+      const transactionNumber = lines.slice(currencyIndex + 5, statusIndex).join(' ').trim();
+      const remarkEnd = dateCreatedIndex === -1 ? Math.min(searchEnd + 1, statusIndex + 5) : dateCreatedIndex;
+      const remark = lines.slice(statusIndex + 1, remarkEnd).join(' ').trim() || transactionNumber;
+      const approvedTime = approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '';
+      const dateCreated = dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '';
+      const adjustedDateTime = adjustmentDateTimeGmt8ToWib(approvedTime || dateCreated);
+
+      records.push({
+        login_id: loginId,
+        login_key: normalizeLoginId(loginId),
+        member_id: lines[i] || '',
+        adjustment_id: lines[i + 1] || '',
+        adjustment_amount: lines[currencyIndex + 3] || '',
+        status: lines[statusIndex] || '',
+        transaction_number: transactionNumber,
+        remark,
+        date_created: dateCreated,
+        created_by: dateCreatedIndex !== -1 && !isBoDateLine(lines[dateCreatedIndex + 1]) ? (lines[dateCreatedIndex + 1] || '') : '',
+        approved_time: approvedTime,
+        approved_by: approvedTimeIndex !== -1 ? (lines[approvedTimeIndex + 1] || '') : '',
+        adjusted_bonus_datetime_wib: adjustedDateTime,
+        adjusted_bonus_date: dateInputFromDate(adjustedDateTime),
+        raw_record: lines.slice(Math.max(0, i - 4), Math.min(lines.length, (approvedTimeIndex !== -1 ? approvedTimeIndex + 2 : searchEnd + 1))).join('\n')
+      });
     }
 
     return records;
@@ -3219,17 +3330,18 @@
       isValidAdjustmentLoginId(record.login_id || loginKey) &&
       status === 'APPROVED' &&
       isBonusHarianAdjustmentText(combinedText) &&
-      record.adjusted_bonus_date
+      record.adjusted_bonus_date &&
+      record.adjusted_bonus_datetime_wib instanceof Date &&
+      !Number.isNaN(record.adjusted_bonus_datetime_wib.getTime())
     );
   }
 
   function extractApprovedBonusHarianForDatabase(raw) {
-    const { startDate, endDate } = getAdjustmentSyncDateRangeWib();
     const map = new Map();
 
     parseAdjustmentBoRecords(raw).forEach(record => {
       if (!isApprovedBonusHarianRecord(record)) return;
-      if (!isInputDateInRange(record.adjusted_bonus_date, startDate, endDate)) return;
+      if (!isAdjustmentWithinLast48Hours(record.adjusted_bonus_datetime_wib)) return;
 
       const row = rowFromApprovedBonusHarianRecord(record);
       map.set(`${row.bonus_date}|${row.login_key}|BONUS_HARIAN`, row);
@@ -3402,7 +3514,7 @@
     const adjustmentAlreadySet = new Set(adjustmentApprovedRows.map(row => row.login_key));
     bonusAdjustmentDoneCache[dateValue] = adjustmentAlreadySet;
     updateLoading('Sinkron data Approved ke database pusat...', 1, 0);
-    const syncResult = await syncAdjustmentApprovedToDatabase(adjustRaw);
+    const syncResult = await syncAdjustmentApprovedToDatabase(adjustRaw, { silent: true });
     if (syncResult.unauthorized) return;
     updateLoading('Mengambil data sudah bonus dari database pusat...', 2, 1);
     const remoteDone = await fetchRemoteBonusDone(dateValue);
@@ -3656,6 +3768,71 @@
     copyToClipboard(text, 'Login ID dan bonus');
   }
 
+  let adjustmentSyncDebounce = null;
+
+  async function handleAdjustmentRawUpdated(raw, options = {}) {
+    if (globalLoadingActive && options.source === 'manual_input') return;
+    const value = String(raw || '');
+    const dateValue = document.getElementById('bonusDate').value;
+
+    if (dateValue) {
+      const rowsForDate = extractApprovedBonusHarianForDate(value, dateValue);
+      bonusAdjustmentDoneCache[dateValue] = new Set(rowsForDate.map(row => row.login_key));
+      renderBonusDoneInfo();
+    }
+
+    const rowsForDatabase = extractApprovedBonusHarianForDatabase(value);
+    if (!rowsForDatabase.length) {
+      showToast('Tidak ada BONUS HARIAN Approved baru dalam 48 jam terakhir.', 'success');
+      return;
+    }
+
+    if (!currentOperator) {
+      showToast('Login operator diperlukan untuk sinkron database pusat.', 'error');
+      return;
+    }
+
+    showLoading(
+      'Sinkron Adjustment Approved',
+      'Menyimpan data sudah bonus ke database pusat...',
+      [
+        'Membaca raw Adjustment',
+        'Mendeteksi BONUS HARIAN Approved',
+        'Menyimpan ke database pusat',
+        'Memperbarui data sudah bonus'
+      ]
+    );
+
+    try {
+      updateLoading('Membaca raw Adjustment...', 0);
+      updateLoading('Mendeteksi BONUS HARIAN Approved...', 1, 0);
+      updateLoading('Menyimpan ke database pusat...', 2, 1);
+      const result = await syncAdjustmentApprovedDone(rowsForDatabase);
+      updateLoading('Memperbarui data sudah bonus...', 3, 2);
+
+      const dates = Array.isArray(result.dates)
+        ? result.dates
+        : [...new Set(rowsForDatabase.map(row => row.bonus_date).filter(Boolean))];
+      dates.forEach(date => delete bonusRemoteDoneCache[date]);
+
+      if (dateValue && dates.includes(dateValue)) {
+        await fetchRemoteBonusDone(dateValue);
+        renderBonusDoneInfo();
+      }
+
+      const count = result.syncedCount || rowsForDatabase.length;
+      const message = options.source === 'manual_input'
+        ? `Adjustment Approved berhasil disinkronkan: ${count} ID dari 48 jam terakhir.`
+        : `Adjustment Approved berhasil dibaca dan disinkronkan: ${count} ID.`;
+      showToast(message, 'success');
+    } catch (error) {
+      setLoadingError(error.message || 'Gagal sinkron Adjustment Approved.');
+      showToast('Data Adjustment terbaca lokal, tetapi gagal disinkronkan ke database pusat.', 'error');
+    } finally {
+      hideLoading();
+    }
+  }
+
   async function markBonusRowsDone() {
     const dateValue = document.getElementById('bonusDate').value;
     if (!dateValue) {
@@ -3802,7 +3979,6 @@
 
   function isApprovedStatus(statusText) {
     const status = normalizeText(statusText);
-    if (!status) return true;
     return status === 'APPROVED';
   }
 
@@ -4287,27 +4463,27 @@
   document.getElementById('auditResetBtn').addEventListener('click', auditReset);
 
   function parseInput(raw) {
-    if (looksLikeCsv(raw) && /Application Time/i.test(raw)) {
+    if (looksLikeCsv(raw) && /(Application Time|Apply Time|Date Created|Deposit Amount|Nominal)/i.test(raw)) {
       const rows = csvRecords(raw);
       const records = [];
       let skippedBlocks = 0;
 
       rows.forEach(row => {
-        const loginId = row['Login ID'];
-        const namaRekening = row['Member Name'] || row['Member Acct Name'];
-        const applicationTime = row['Application Time (GMT+8)'] || row['Application Time'];
-        const payment = row['Payment'];
-        const method = row['Payment Method '] || row['Payment Method'];
-        const currency = row['Currency'];
-        const nominal = row['Amount'];
-        const potonganQris = row['Fee'];
-        const status = row['Status'];
+        const loginId = firstValue(row, ['Login ID', 'LoginID', 'User ID', 'USER ID']);
+        const namaRekening = firstValue(row, ['Member Name', 'Member Acct Name', 'Nama Rekening', 'Account Name']);
+        const applicationTime = firstValue(row, ['Application Time (GMT+8)', 'Application Time', 'Apply Time', 'Date Created']);
+        const payment = firstValue(row, ['Payment', 'Channel']);
+        const method = firstValue(row, ['Payment Method', 'Payment Method ', 'Method']);
+        const currency = firstValue(row, ['Currency']);
+        const nominal = firstValue(row, ['Amount', 'Nominal', 'Deposit Amount']);
+        const potonganQris = firstValue(row, ['Fee', 'QRIS Fee', 'Potongan QRIS']);
+        const status = firstValue(row, ['Status']);
 
         if (!applicationTime || !loginId || !nominal) return;
-        if (payment && payment !== 'QRIS IM') return;
-        if (method && method !== 'QRis') return;
-        if (currency && currency !== 'IDR') return;
-        if (/^MAGNUM188/i.test(loginId) || /@\d+$/.test(loginId)) {
+        if (payment && String(payment).trim().toUpperCase() !== 'QRIS IM') return;
+        if (method && String(method).trim().toUpperCase() !== 'QRIS') return;
+        if (currency && String(currency).trim().toUpperCase() !== 'IDR') return;
+        if (/^MAGNUM188/i.test(loginId) || /@\d+$/.test(loginId) || !isValidAdjustmentLoginId(loginId)) {
           skippedBlocks++;
           return;
         }
@@ -4578,11 +4754,7 @@
 
   document.getElementById('importAdjustBtn').addEventListener('click', () => {
     readFileToTextarea('adjustFile', 'bonusAdjustRaw', async text => {
-      const dateValue = document.getElementById('bonusDate').value;
-      if (!dateValue) return;
-      const rows = extractApprovedBonusHarianFromAdjustment(text, dateValue);
-      bonusAdjustmentDoneCache[dateValue] = new Set(rows.map(row => row.login_key));
-      renderBonusDoneInfo();
+      await handleAdjustmentRawUpdated(text, { source: 'import_file' });
     });
   });
 
@@ -4594,12 +4766,18 @@
 
   document.getElementById('adjustFile').addEventListener('change', () => {
     readFileToTextarea('adjustFile', 'bonusAdjustRaw', async text => {
-      const dateValue = document.getElementById('bonusDate').value;
-      if (!dateValue) return;
-      const rows = extractApprovedBonusHarianFromAdjustment(text, dateValue);
-      bonusAdjustmentDoneCache[dateValue] = new Set(rows.map(row => row.login_key));
-      renderBonusDoneInfo();
+      await handleAdjustmentRawUpdated(text, { source: 'import_file' });
     });
+  });
+
+  document.getElementById('bonusAdjustRaw').addEventListener('input', () => {
+    clearTimeout(adjustmentSyncDebounce);
+    adjustmentSyncDebounce = setTimeout(() => {
+      const raw = document.getElementById('bonusAdjustRaw').value;
+      if (raw.trim().length > 100) {
+        handleAdjustmentRawUpdated(raw, { source: 'manual_input' });
+      }
+    }, 1200);
   });
 
   document.getElementById('parseBtn').addEventListener('click', async () => {
