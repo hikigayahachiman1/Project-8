@@ -1273,6 +1273,99 @@
     box-shadow: 0 16px 34px rgba(255,200,87,0.22);
   }
 
+  .monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px;
+    margin: 18px 0;
+  }
+
+  .monitor-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin: 16px 0 18px;
+  }
+
+  .monitor-filter-row .bonus-date {
+    border-radius: 16px;
+  }
+
+  .monitor-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 84px;
+    border-radius: 999px;
+    padding: 6px 10px;
+    border: 1px solid rgba(143,178,255,0.24);
+    background: rgba(255,255,255,0.08);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .monitor-status.pending {
+    color: var(--warning);
+    border-color: rgba(255,200,87,0.44);
+    background: rgba(255,200,87,0.12);
+  }
+
+  .monitor-status.done {
+    color: var(--accent-3);
+    border-color: rgba(0,255,168,0.36);
+    background: rgba(0,255,168,0.10);
+  }
+
+  .monitor-status.expired {
+    color: #ffb3c1;
+    border-color: rgba(255,79,139,0.46);
+    background: rgba(255,79,139,0.14);
+  }
+
+  .monitor-status.empty {
+    color: var(--ink-soft);
+    border-color: rgba(143,178,255,0.22);
+  }
+
+  .monitor-detail-panel {
+    margin-top: 18px;
+    padding: 18px;
+    border: 1px solid rgba(143,178,255,0.20);
+    border-radius: 22px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.075), rgba(255,255,255,0.028)),
+      rgba(5, 9, 22, 0.52);
+  }
+
+  .monitor-detail-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .monitor-detail-title {
+    display: grid;
+    gap: 4px;
+  }
+
+  .monitor-detail-title strong {
+    color: var(--ink);
+    font-size: 1rem;
+  }
+
+  .monitor-detail-title span {
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+  }
+
   .card:hover {
     transform: translateY(-2px);
   }
@@ -1659,7 +1752,7 @@
     <div class="login-shell">
       <div class="login-card">
         <div class="login-accent-line"></div>
-        <h2>Login Acess</h2>
+        <h2>Login Operator</h2>
         <p>Masukkan username dan password.</p>
         <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
         <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
@@ -1692,7 +1785,8 @@
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
-      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Dashboard</button>
+      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
+      <button class="tool-tab" id="bonusMonitoringTab" data-panel="bonus-monitoring" style="display:none;">Monitoring Bonus Operator</button>
     </div>
 
     <div id="operatorInfo" class="operator-info" style="display:none;"></div>
@@ -2016,6 +2110,103 @@
       </div>
     </section>
 
+    <section class="tool-panel" id="panel-bonus-monitoring">
+      <div class="bonus-grid">
+        <section class="card">
+          <div class="card-title">Monitoring Bonus Operator</div>
+          <div class="card-desc">Pantau batch Bonus Harian terakhir dari database pusat dan bantu finalisasi batch PENDING jika operator lupa menandai selesai.</div>
+
+          <div class="monitor-grid">
+            <div class="stat">
+              <div class="stat-label">PENDING Aktif</div>
+              <div class="stat-value" id="monitorActivePendingCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">PENDING Expired</div>
+              <div class="stat-value" id="monitorExpiredPendingCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">DONE Hari Ini</div>
+              <div class="stat-value" id="monitorDoneTodayCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Total Batch</div>
+              <div class="stat-value" id="monitorTotalBatchCount">0</div>
+            </div>
+          </div>
+
+          <div class="monitor-filter-row">
+            <input id="monitorBonusDateFilter" class="bonus-date" type="date" title="Tanggal bonus">
+            <input id="monitorOperatorFilter" class="bonus-date" type="text" placeholder="Filter operator">
+            <select id="monitorStatusFilter" class="bonus-date">
+              <option value="">Semua Status</option>
+              <option value="PENDING">PENDING Aktif</option>
+              <option value="EXPIRED">PENDING Expired</option>
+              <option value="DONE">DONE</option>
+              <option value="EMPTY">EMPTY</option>
+            </select>
+            <button id="monitorRefreshBtn" class="primary">Refresh Monitoring</button>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tanggal Bonus</th>
+                  <th>Operator</th>
+                  <th>Claim Owner</th>
+                  <th>Status</th>
+                  <th class="num">Jumlah ID</th>
+                  <th class="num">Total Bonus</th>
+                  <th>Dibuat</th>
+                  <th>Update</th>
+                  <th>Sisa Pending</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="monitorBatchTable">
+                <tr><td colspan="10" class="empty">Klik refresh untuk memuat riwayat proses operator.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div id="monitorDetailPanel" class="monitor-detail-panel" style="display:none;">
+            <div class="monitor-detail-head">
+              <div class="monitor-detail-title">
+                <strong id="monitorDetailTitle">Detail Batch</strong>
+                <span id="monitorDetailMeta">Pilih batch untuk melihat detail.</span>
+              </div>
+              <div class="row-actions">
+                <button id="monitorFinalizeBtn" class="danger" style="display:none;">Bantu Tandai Sudah Dibonuskan</button>
+                <button id="monitorCloseDetailBtn" class="ghost">Tutup Detail</button>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Login ID</th>
+                    <th>Bonus Date</th>
+                    <th>Bonus Type</th>
+                    <th class="num">Bonus Amount</th>
+                    <th>Status</th>
+                    <th>Source</th>
+                    <th>Operator</th>
+                    <th>Created / Updated</th>
+                    <th>Remark</th>
+                  </tr>
+                </thead>
+                <tbody id="monitorDetailTable">
+                  <tr><td colspan="9" class="empty">Belum ada detail batch.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
     <footer>
       Tool lokal · Semua proses dilakukan di browser Anda · Tidak ada data yang dikirim ke server !
       <p>By Hachiman</p>
@@ -2082,6 +2273,8 @@
   let adminOperatorRows = [];
   let currentLoadingSteps = [];
   let globalLoadingActive = false;
+  let bonusMonitorBatches = [];
+  let bonusMonitorSelectedBatch = null;
 
   function showLoading(title = 'Memproses...', message = 'Mohon tunggu sebentar.', steps = []) {
     const overlay = document.getElementById('globalLoading');
@@ -2260,6 +2453,7 @@
     const auditTab = document.getElementById('auditTab');
     const unlockBtn = document.getElementById('unlockAuditBtn');
     const adminTab = document.getElementById('adminOperatorsTab');
+    const monitorTab = document.getElementById('bonusMonitoringTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
     if (hasAuditAccess()) {
@@ -2275,15 +2469,21 @@
 
     if (isAdmin()) {
       adminTab.style.display = '';
+      if (monitorTab) monitorTab.style.display = '';
       if (adminModuleCard) adminModuleCard.style.display = '';
       if (superRoleOption) superRoleOption.style.display = isSuperAdmin() ? '' : 'none';
     } else {
       adminTab.style.display = 'none';
+      if (monitorTab) monitorTab.style.display = 'none';
       if (adminModuleCard) adminModuleCard.style.display = 'none';
       if (superRoleOption) superRoleOption.style.display = 'none';
       if (document.getElementById('panel-admin-operators').classList.contains('active')) {
         document.querySelector('[data-panel="parser"]').click();
         if (currentOperator) showToast('Akses admin dibatasi.', 'error');
+      }
+      if (document.getElementById('panel-bonus-monitoring').classList.contains('active')) {
+        document.querySelector('[data-panel="parser"]').click();
+        if (currentOperator) showToast('Akses monitoring dibatasi.', 'error');
       }
     }
   }
@@ -2360,11 +2560,16 @@
         showToast('Akses admin dibatasi.', 'error');
         return;
       }
+      if (target === 'bonus-monitoring' && !isAdmin()) {
+        showToast('Akses monitoring dibatasi.', 'error');
+        return;
+      }
       document.querySelectorAll('.tool-tab').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tool-panel').forEach(panel => panel.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('panel-' + target).classList.add('active');
       if (target === 'admin-operators') adminFetchOperators();
+      if (target === 'bonus-monitoring') adminFetchBonusMonitoring();
     });
   });
 
@@ -2745,8 +2950,8 @@
     }
 
     if (response.status === 403) {
-      showToast('Anda tidak punya akses Admin Operator.', 'error');
-      throw new Error('Anda tidak punya akses Admin Operator.');
+      showToast('Anda tidak punya akses admin.', 'error');
+      throw new Error('Anda tidak punya akses admin.');
     }
 
     if (!response.ok || result.success !== true) {
@@ -2754,6 +2959,222 @@
     }
 
     return result;
+  }
+
+  async function adminBonusApi(action, payload = {}) {
+    return adminApi('/api/bonus-done', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...payload })
+    });
+  }
+
+  function monitorStatusClass(status) {
+    const value = String(status || '').toLowerCase();
+    if (value === 'pending') return 'pending';
+    if (value === 'done') return 'done';
+    if (value === 'expired') return 'expired';
+    if (value === 'empty') return 'empty';
+    return '';
+  }
+
+  function monitorStatusLabel(batch) {
+    const status = String(batch.display_status || batch.lock_status || '-').toUpperCase();
+    if (status === 'EXPIRED') return 'PENDING EXPIRED';
+    return status;
+  }
+
+  function formatMonitorRemaining(ms) {
+    const value = Number(ms) || 0;
+    if (value <= 0) return '00:00';
+    return formatCountdown(value);
+  }
+
+  function renderBonusMonitorStats(batches) {
+    const today = getTodayWibInputValue();
+    const activePending = batches.filter(batch => batch.display_status === 'PENDING').length;
+    const expiredPending = batches.filter(batch => batch.display_status === 'EXPIRED').length;
+    const doneToday = batches.filter(batch => batch.display_status === 'DONE' && String(batch.bonus_date) === today).length;
+    document.getElementById('monitorActivePendingCount').textContent = activePending;
+    document.getElementById('monitorExpiredPendingCount').textContent = expiredPending;
+    document.getElementById('monitorDoneTodayCount').textContent = doneToday;
+    document.getElementById('monitorTotalBatchCount').textContent = batches.length;
+  }
+
+  function renderBonusMonitorBatches(batches) {
+    const table = document.getElementById('monitorBatchTable');
+    if (!table) return;
+
+    bonusMonitorBatches = batches || [];
+    renderBonusMonitorStats(bonusMonitorBatches);
+
+    if (!bonusMonitorBatches.length) {
+      table.innerHTML = '<tr><td colspan="10" class="empty">Belum ada batch bonus yang cocok dengan filter.</td></tr>';
+      return;
+    }
+
+    table.innerHTML = bonusMonitorBatches.map(batch => {
+      const status = monitorStatusLabel(batch);
+      const pendingText = batch.display_status === 'PENDING'
+        ? formatMonitorRemaining(batch.pending_remaining_ms)
+        : (batch.display_status === 'EXPIRED' ? 'Kedaluwarsa' : '-');
+      return `
+        <tr>
+          <td class="time-cell">${escapeHtml(String(batch.bonus_date || '-'))}</td>
+          <td>${escapeHtml(batch.operator_name || 'Operator')}</td>
+          <td class="user-id">${escapeHtml(batch.claim_owner || '-')}</td>
+          <td><span class="monitor-status ${monitorStatusClass(batch.display_status)}">${escapeHtml(status)}</span></td>
+          <td class="num">${Number(batch.row_count) || 0}</td>
+          <td class="num">${Number(batch.total_bonus) || 0}</td>
+          <td class="time-cell">${escapeHtml(formatAdminDate(batch.started_at || batch.created_at))}</td>
+          <td class="time-cell">${escapeHtml(formatAdminDate(batch.updated_at))}</td>
+          <td class="time-cell">${escapeHtml(pendingText)}</td>
+          <td><button onclick="adminOpenBonusBatchDetail(${Number(batch.id)})">Detail</button></td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function adminFetchBonusMonitoring() {
+    if (!isAdmin()) {
+      showToast('Akses monitoring dibatasi.', 'error');
+      return;
+    }
+
+    const date = document.getElementById('monitorBonusDateFilter')?.value || '';
+    const operator = document.getElementById('monitorOperatorFilter')?.value || '';
+    const status = document.getElementById('monitorStatusFilter')?.value || '';
+
+    showLoading('Memuat Monitoring Bonus', 'Mengambil data dari database pusat...', [
+      'Menghubungi server',
+      'Memuat riwayat proses operator',
+      'Menghitung status batch'
+    ]);
+
+    try {
+      updateLoading('Menghubungi server...', 0);
+      const result = await adminBonusApi('admin_list_bonus_batches', {
+        date,
+        operator,
+        status,
+        limit: 80
+      });
+      updateLoading('Memuat riwayat proses operator...', 1, 0);
+      renderBonusMonitorBatches(result.batches || []);
+      updateLoading('Monitoring siap ditampilkan.', null, 2);
+    } catch (error) {
+      setLoadingError(error.message || 'Gagal memuat monitoring.', 1);
+      const table = document.getElementById('monitorBatchTable');
+      if (table) table.innerHTML = `<tr><td colspan="10" class="empty">${escapeHtml(error.message || 'Gagal memuat monitoring.')}</td></tr>`;
+      showToast(error.message || 'Gagal memuat monitoring bonus.', 'error');
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function renderBonusMonitorDetail(batch, rows) {
+    const panel = document.getElementById('monitorDetailPanel');
+    const table = document.getElementById('monitorDetailTable');
+    const title = document.getElementById('monitorDetailTitle');
+    const meta = document.getElementById('monitorDetailMeta');
+    const finalizeBtn = document.getElementById('monitorFinalizeBtn');
+    if (!panel || !table || !title || !meta || !finalizeBtn) return;
+
+    bonusMonitorSelectedBatch = batch || null;
+    panel.style.display = 'block';
+    title.textContent = `Detail Batch ${batch ? batch.bonus_date : ''}`;
+    meta.textContent = batch
+      ? `${batch.operator_name || 'Operator'} - ${batch.claim_owner || '-'} - ${monitorStatusLabel(batch)}`
+      : 'Pilih batch untuk melihat detail.';
+
+    finalizeBtn.style.display = batch && batch.lock_status === 'PENDING' ? '' : 'none';
+
+    if (!rows || !rows.length) {
+      table.innerHTML = '<tr><td colspan="9" class="empty">Tidak ada ID tersimpan pada batch ini.</td></tr>';
+      return;
+    }
+
+    table.innerHTML = rows.map(row => `
+      <tr>
+        <td class="user-id">${escapeHtml(row.login_key || row.login_id || '-')}</td>
+        <td class="time-cell">${escapeHtml(row.bonus_date || '-')}</td>
+        <td>${escapeHtml(row.bonus_type || '-')}</td>
+        <td class="num">${Number(row.bonus_amount) || 0}</td>
+        <td><span class="monitor-status ${monitorStatusClass(row.bonus_status)}">${escapeHtml(row.bonus_status || '-')}</span></td>
+        <td>${escapeHtml(row.source || '-')}</td>
+        <td>${escapeHtml(row.operator_name || '-')}</td>
+        <td class="time-cell">${escapeHtml(formatAdminDate(row.created_at))}<br>${escapeHtml(formatAdminDate(row.updated_at))}</td>
+        <td class="remark-cell">${escapeHtml(row.remark || '-')}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function adminOpenBonusBatchDetail(lockId) {
+    if (!isAdmin()) return;
+
+    showLoading('Memuat Detail Batch', 'Mengambil daftar ID dari database pusat...', [
+      'Menghubungi server',
+      'Memuat detail batch',
+      'Menyiapkan tabel detail'
+    ]);
+
+    try {
+      updateLoading('Menghubungi server...', 0);
+      const result = await adminBonusApi('admin_get_bonus_batch_detail', { lock_id: lockId });
+      updateLoading('Memuat detail batch...', 1, 0);
+      renderBonusMonitorDetail(result.batch, result.rows || []);
+      updateLoading('Detail siap ditampilkan.', null, 2);
+    } catch (error) {
+      setLoadingError(error.message || 'Gagal memuat detail.', 1);
+      showToast(error.message || 'Gagal memuat detail batch.', 'error');
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function adminFinalizeSelectedBonusBatch() {
+    if (!isAdmin() || !bonusMonitorSelectedBatch) return;
+
+    const ok = window.confirm('Pastikan bonus ini benar-benar sudah diinput di BO. Setelah ditandai DONE, batch akan dianggap selesai di database pusat.');
+    if (!ok) return;
+
+    const note = window.prompt('Catatan admin opsional:', 'Admin bantu tandai selesai') || '';
+    const finalizeBtn = document.getElementById('monitorFinalizeBtn');
+    setButtonLoading(finalizeBtn, true, 'Memfinalisasi...');
+    showLoading('Admin Bantu Tandai Selesai', 'Menyimpan status DONE ke database pusat...', [
+      'Validasi batch PENDING',
+      'Mengubah rows menjadi DONE',
+      'Memuat ulang monitoring'
+    ]);
+
+    try {
+      updateLoading('Validasi batch PENDING...', 0);
+      const result = await adminBonusApi('admin_finalize_pending_batch', {
+        lock_id: bonusMonitorSelectedBatch.id,
+        note
+      });
+      updateLoading('Mengubah rows menjadi DONE...', 1, 0);
+      showToast(`Batch berhasil ditandai DONE. ${result.doneCount || 0} ID diperbarui.`, 'success');
+      updateLoading('Memuat ulang monitoring...', 2, 1);
+      await adminFetchBonusMonitoring();
+      if (bonusMonitorSelectedBatch && bonusMonitorSelectedBatch.id) {
+        await adminOpenBonusBatchDetail(bonusMonitorSelectedBatch.id);
+      }
+    } catch (error) {
+      setLoadingError(error.message || 'Gagal finalisasi batch.', 1);
+      showToast(error.message || 'Gagal finalisasi batch.', 'error');
+    } finally {
+      hideLoading();
+      setButtonLoading(finalizeBtn, false);
+    }
+  }
+
+  function adminCloseBonusBatchDetail() {
+    bonusMonitorSelectedBatch = null;
+    const panel = document.getElementById('monitorDetailPanel');
+    const table = document.getElementById('monitorDetailTable');
+    if (panel) panel.style.display = 'none';
+    if (table) table.innerHTML = '<tr><td colspan="9" class="empty">Belum ada detail batch.</td></tr>';
   }
 
   async function adminFetchOperators() {
@@ -4560,6 +4981,11 @@
   document.getElementById('bonusDate').addEventListener('change', renderBonusDoneInfo);
   document.getElementById('unlockAuditBtn').addEventListener('click', unlockAudit);
   document.getElementById('adminOperatorCreateBtn').addEventListener('click', adminCreateOperator);
+  document.getElementById('monitorRefreshBtn').addEventListener('click', adminFetchBonusMonitoring);
+  document.getElementById('monitorStatusFilter').addEventListener('change', adminFetchBonusMonitoring);
+  document.getElementById('monitorBonusDateFilter').addEventListener('change', adminFetchBonusMonitoring);
+  document.getElementById('monitorFinalizeBtn').addEventListener('click', adminFinalizeSelectedBonusBatch);
+  document.getElementById('monitorCloseDetailBtn').addEventListener('click', adminCloseBonusBatchDetail);
   const moduleDownloadBtn = document.getElementById('adminModuleDownloadBtn');
   if (moduleDownloadBtn) {
     moduleDownloadBtn.addEventListener('click', () => {

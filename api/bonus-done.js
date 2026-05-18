@@ -91,6 +91,20 @@ function operatorNameFromOperator(operator, fallback) {
   return operator ? normalizeText(operator.display_name || operator.username) : normalizeText(fallback);
 }
 
+function isAdminOperator(operator) {
+  return operator && ['admin', 'superadmin'].includes(operator.role);
+}
+
+async function getAdminOperatorFromRequest(req) {
+  const operator = await getOperatorFromRequest(req, true);
+  if (!isAdminOperator(operator)) {
+    const error = new Error('Akses admin dibatasi.');
+    error.statusCode = 403;
+    throw error;
+  }
+  return operator;
+}
+
 function dedupeRows(rows, date, now, pendingExpiresAt, expiresAt, claimOwner, claimBatchId, operatorName) {
   const map = new Map();
 
@@ -155,6 +169,51 @@ function dedupeAdjustmentApprovedRows(rows, now, expiresAt, operatorName, fallba
 
 function loginIdsFromRows(rows) {
   return [...new Set((rows || []).map(row => normalizeLoginId(row.login_key || row.login_id)).filter(Boolean))];
+}
+
+function decorateBatch(lock, rows, serverTime) {
+  const batchRows = rows || [];
+  const nowMs = new Date(serverTime).getTime();
+  const pendingExpiresMs = lock && lock.pending_expires_at ? new Date(lock.pending_expires_at).getTime() : 0;
+  const isExpired = lock && lock.lock_status === 'PENDING' && (!pendingExpiresMs || pendingExpiresMs <= nowMs);
+  const displayStatus = isExpired ? 'EXPIRED' : (lock.lock_status || '-');
+  const totalBonus = batchRows.reduce((sum, row) => sum + (Number(row.bonus_amount) || 0), 0);
+
+  return {
+    ...lock,
+    display_status: displayStatus,
+    row_count: batchRows.length,
+    total_bonus: totalBonus,
+    pending_remaining_ms: lock && lock.lock_status === 'PENDING' && pendingExpiresMs
+      ? Math.max(0, pendingExpiresMs - nowMs)
+      : 0
+  };
+}
+
+async function safeUpdateBonusRowsMetadata(match, values) {
+  const { error } = await supabase
+    .from('bonus_done_daily')
+    .update(values)
+    .match(match);
+
+  if (error && error.code !== '42703') throw error;
+}
+
+async function safeUpdateLockMetadata(lockId, values) {
+  const { error } = await supabase
+    .from('bonus_process_locks')
+    .update(values)
+    .eq('id', lockId);
+
+  if (error && error.code !== '42703') throw error;
+}
+
+async function safeInsertAdminAction(payload) {
+  const { error } = await supabase
+    .from('bonus_admin_actions')
+    .insert(payload);
+
+  if (error && !['42P01', '42703'].includes(error.code)) throw error;
 }
 
 async function deleteExpiredRows() {
@@ -605,6 +664,234 @@ async function handleSyncAdjustmentApproved(req, body, res) {
   });
 }
 
+async function handleAdminListBonusBatches(req, body, res) {
+  await getAdminOperatorFromRequest(req);
+  await deleteExpiredRows();
+
+  const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 150);
+  const date = String(body.date || '').trim();
+  const operatorFilter = normalizeText(body.operator || '').toUpperCase();
+  const statusFilter = normalizeText(body.status || '').toUpperCase();
+  const serverTime = new Date().toISOString();
+
+  let query = supabase
+    .from('bonus_process_locks')
+    .select('*')
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+
+  if (date && isValidDate(date)) query = query.eq('bonus_date', date);
+  if (statusFilter && !['EXPIRED', 'ALL'].includes(statusFilter)) query = query.eq('lock_status', statusFilter);
+
+  const { data: locks, error: lockError } = await query;
+  if (lockError) throw lockError;
+
+  const lockRows = locks || [];
+  if (lockRows.length === 0) {
+    return res.status(200).json({
+      success: true,
+      status: 'admin_batches',
+      batches: [],
+      serverTime
+    });
+  }
+
+  const dates = [...new Set(lockRows.map(lock => lock.bonus_date).filter(Boolean))];
+  const owners = [...new Set(lockRows.map(lock => lock.claim_owner).filter(Boolean))];
+
+  const { data: rows, error: rowError } = await supabase
+    .from('bonus_done_daily')
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, done_at, pending_expires_at, created_at, updated_at')
+    .in('bonus_date', dates)
+    .in('claim_owner', owners)
+    .eq('bonus_type', 'BONUS_HARIAN');
+
+  if (rowError) throw rowError;
+
+  const rowMap = new Map();
+  (rows || []).forEach(row => {
+    const key = `${row.bonus_date}|${row.claim_owner}|${row.claim_batch_id || ''}`;
+    if (!rowMap.has(key)) rowMap.set(key, []);
+    rowMap.get(key).push(row);
+  });
+
+  let batches = lockRows.map(lock => {
+    const key = `${lock.bonus_date}|${lock.claim_owner}|${lock.claim_batch_id || ''}`;
+    return decorateBatch(lock, rowMap.get(key) || [], serverTime);
+  });
+
+  if (operatorFilter) {
+    batches = batches.filter(batch => {
+      const name = normalizeText(batch.operator_name || '').toUpperCase();
+      const owner = normalizeText(batch.claim_owner || '').toUpperCase();
+      return name.includes(operatorFilter) || owner.includes(operatorFilter);
+    });
+  }
+
+  if (statusFilter === 'EXPIRED') {
+    batches = batches.filter(batch => batch.display_status === 'EXPIRED');
+  } else if (statusFilter && statusFilter !== 'ALL') {
+    batches = batches.filter(batch => batch.display_status === statusFilter);
+  }
+
+  return res.status(200).json({
+    success: true,
+    status: 'admin_batches',
+    batches,
+    serverTime
+  });
+}
+
+async function fetchLockById(lockId) {
+  const { data, error } = await supabase
+    .from('bonus_process_locks')
+    .select('*')
+    .eq('id', lockId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
+async function fetchRowsForLock(lock) {
+  if (!lock) return [];
+
+  let query = supabase
+    .from('bonus_done_daily')
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, done_at, pending_expires_at, created_at, updated_at')
+    .eq('bonus_date', lock.bonus_date)
+    .eq('claim_owner', lock.claim_owner)
+    .eq('bonus_type', 'BONUS_HARIAN')
+    .order('created_at', { ascending: true });
+
+  if (lock.claim_batch_id) query = query.eq('claim_batch_id', lock.claim_batch_id);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+async function handleAdminGetBonusBatchDetail(req, body, res) {
+  await getAdminOperatorFromRequest(req);
+  const lockId = Number(body.lock_id || body.id);
+  if (!Number.isFinite(lockId) || lockId <= 0) {
+    return res.status(400).json({ success: false, error: 'lock_id wajib diisi.' });
+  }
+
+  const serverTime = new Date().toISOString();
+  const lock = await fetchLockById(lockId);
+  if (!lock) {
+    return res.status(404).json({ success: false, error: 'Batch tidak ditemukan.' });
+  }
+
+  const rows = await fetchRowsForLock(lock);
+
+  return res.status(200).json({
+    success: true,
+    status: 'admin_batch_detail',
+    batch: decorateBatch(lock, rows, serverTime),
+    rows,
+    serverTime
+  });
+}
+
+async function handleAdminFinalizePendingBatch(req, body, res) {
+  const admin = await getAdminOperatorFromRequest(req);
+  const lockId = Number(body.lock_id || body.id);
+  const note = normalizeText(body.note || '');
+
+  if (!Number.isFinite(lockId) || lockId <= 0) {
+    return res.status(400).json({ success: false, error: 'lock_id wajib diisi.' });
+  }
+
+  const lock = await fetchLockById(lockId);
+  if (!lock) {
+    return res.status(404).json({ success: false, error: 'Batch tidak ditemukan.' });
+  }
+
+  if (lock.lock_status !== 'PENDING') {
+    return res.status(409).json({
+      success: false,
+      status: 'not_pending',
+      message: 'Batch ini sudah tidak berstatus PENDING.'
+    });
+  }
+
+  const now = new Date().toISOString();
+  const adminId = String(admin.id);
+  const adminName = operatorNameFromOperator(admin);
+
+  const { data: updatedRows, error: rowError } = await supabase
+    .from('bonus_done_daily')
+    .update({
+      bonus_status: 'DONE',
+      done_at: now,
+      updated_at: now,
+      done_by_name: adminName
+    })
+    .eq('bonus_date', lock.bonus_date)
+    .eq('claim_owner', lock.claim_owner)
+    .eq('claim_batch_id', lock.claim_batch_id)
+    .eq('bonus_status', 'PENDING')
+    .eq('bonus_type', 'BONUS_HARIAN')
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, done_at, done_by_name');
+
+  if (rowError) throw rowError;
+
+  const doneRows = updatedRows || [];
+
+  const { data: updatedLock, error: lockError } = await supabase
+    .from('bonus_process_locks')
+    .update({
+      lock_status: 'DONE',
+      done_at: now,
+      updated_at: now,
+      done_by_name: adminName
+    })
+    .eq('id', lock.id)
+    .eq('lock_status', 'PENDING')
+    .select('*')
+    .maybeSingle();
+
+  if (lockError) throw lockError;
+
+  const metadata = {
+    finalized_by_admin_id: adminId,
+    finalized_by_admin_name: adminName,
+    finalized_at: now,
+    finalized_note: note
+  };
+
+  await safeUpdateLockMetadata(lock.id, metadata);
+  await safeUpdateBonusRowsMetadata({
+    bonus_date: lock.bonus_date,
+    claim_owner: lock.claim_owner,
+    claim_batch_id: lock.claim_batch_id,
+    bonus_type: 'BONUS_HARIAN'
+  }, metadata);
+  await safeInsertAdminAction({
+    action_type: 'admin_finalize_pending_batch',
+    bonus_date: lock.bonus_date,
+    claim_owner: lock.claim_owner,
+    operator_name: lock.operator_name || '',
+    admin_id: adminId,
+    admin_name: adminName,
+    affected_rows: doneRows.length,
+    note
+  });
+
+  return res.status(200).json({
+    success: true,
+    status: 'admin_finalized',
+    doneCount: doneRows.length,
+    loginIds: loginIdsFromRows(doneRows),
+    rows: doneRows,
+    lock: updatedLock || { ...lock, lock_status: 'DONE', done_at: now, done_by_name: adminName },
+    serverTime: now,
+    message: 'Batch berhasil ditandai selesai oleh admin.'
+  });
+}
+
 async function handleGet(req, res) {
   const operator = await getOperatorFromRequest(req, false);
   const date = String(req.query.date || '');
@@ -659,7 +946,7 @@ export default async function handler(req, res) {
     if (!supabase) {
       return res.status(500).json({
         success: false,
-        error: 'SUPABASE_URL atau SUPABASE_SERVICE_ROLE_KEY belum diset.'
+        error: 'Konfigurasi database pusat belum lengkap.'
       });
     }
 
@@ -674,6 +961,9 @@ export default async function handler(req, res) {
       if (action === 'claim_batch') return await handleClaimBatch(req, body, res);
       if (action === 'done') return await handleDone(req, body, res);
       if (action === 'sync_adjustment_approved') return await handleSyncAdjustmentApproved(req, body, res);
+      if (action === 'admin_list_bonus_batches') return await handleAdminListBonusBatches(req, body, res);
+      if (action === 'admin_get_bonus_batch_detail') return await handleAdminGetBonusBatchDetail(req, body, res);
+      if (action === 'admin_finalize_pending_batch') return await handleAdminFinalizePendingBatch(req, body, res);
 
       return res.status(400).json({
         success: false,
