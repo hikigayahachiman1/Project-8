@@ -2174,9 +2174,55 @@
       return result;
     } catch (error) {
       bonusRemoteStatus = 'offline';
-      showToast('Supabase tidak terhubung, Adjustment Approved hanya dipakai lokal.', 'error');
+      showToast('Gagal sync Adjustment Approved ke Supabase. Browser tetap memakai raw Adjustment lokal, tetapi operator lain belum terlindungi.', 'error');
       return { success: false };
     }
+  }
+
+  function extractApprovedBonusHarianFromAdjustment(dateValue, loginKeys = []) {
+    const raw = document.getElementById('bonusAdjustRaw').value || '';
+    if (!raw.trim()) return [];
+
+    const targetDate = bonusPadDateFromInput(dateValue);
+    const fallbackRemark = 'BONUS HARIAN ' + bonusDisplayDate(dateValue);
+    const syncLoginKeys = looksLikeCsv(raw) ? [] : loginKeys;
+    const rows = buildAdjustmentDoneRows(raw, syncLoginKeys, targetDate, fallbackRemark);
+    const map = new Map();
+
+    rows.forEach(row => {
+      const loginKey = String(row.login_key || row.login_id || '').trim().toUpperCase();
+      if (!loginKey) return;
+      map.set(loginKey, {
+        login_id: loginKey,
+        login_key: loginKey,
+        bonus_type: 'BONUS_HARIAN',
+        bonus_amount: Number.isFinite(Number(row.bonus_amount)) ? Number(row.bonus_amount) : null,
+        remark: row.remark || fallbackRemark,
+        source: 'adjustment_approved'
+      });
+    });
+
+    return [...map.values()];
+  }
+
+  async function syncAdjustmentApprovedToSupabase(dateValue, loginKeys = []) {
+    const rows = extractApprovedBonusHarianFromAdjustment(dateValue, loginKeys);
+    if (rows.length === 0) {
+      showToast('Tidak ada Adjustment Approved baru untuk disync.', 'success');
+      return {
+        success: true,
+        status: 'no_adjustment_approved',
+        syncedCount: 0,
+        loginIds: []
+      };
+    }
+
+    const result = await syncAdjustmentApprovedDone(dateValue, rows);
+    if (result.unauthorized) return result;
+    if (result.success) {
+      showToast(`Sync Adjustment Approved: ${result.syncedCount || 0} ID sudah dikonfirmasi ke Supabase.`, 'success');
+    }
+    return result;
   }
 
   async function finalizeRemoteBonusBatch(dateValue) {
@@ -2826,12 +2872,10 @@
       }
     });
 
-    const already = bonusParseAlready(adjustRaw, Object.keys(byLogin), targetDate);
-    const adjustmentApprovedRows = buildAdjustmentDoneRows(adjustRaw, Object.keys(byLogin), targetDate, bonusRemark);
-    if (adjustmentApprovedRows.length) {
-      const syncResult = await syncAdjustmentApprovedDone(dateValue, adjustmentApprovedRows);
-      if (syncResult.unauthorized) return;
-    }
+    const loginKeys = Object.keys(byLogin);
+    const already = bonusParseAlready(adjustRaw, loginKeys, targetDate);
+    const syncResult = await syncAdjustmentApprovedToSupabase(dateValue, loginKeys);
+    if (syncResult.unauthorized) return;
     const remoteDone = await fetchRemoteBonusDone(dateValue);
     const localDone = getBonusDoneSet(dateValue);
     const candidateRows = Object.entries(byLogin).map(([key, info]) => {

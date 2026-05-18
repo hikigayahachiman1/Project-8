@@ -576,8 +576,10 @@ async function handleSyncAdjustmentApproved(req, body, res) {
   if (payload.length === 0) {
     return res.status(200).json({
       success: true,
+      status: 'no_adjustment_approved',
       syncedCount: 0,
-      loginIds: []
+      loginIds: [],
+      serverTime: now
     });
   }
 
@@ -635,8 +637,10 @@ async function handleSyncAdjustmentApproved(req, body, res) {
 
   return res.status(200).json({
     success: true,
+    status: 'synced_adjustment_approved',
     syncedCount: loginIds.length,
-    loginIds
+    loginIds,
+    serverTime: now
   });
 }
 
