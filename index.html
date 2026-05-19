@@ -1188,6 +1188,25 @@
     overflow: hidden;
   }
 
+  .operator-module-card {
+    position: relative;
+    overflow: hidden;
+    margin: 0 0 22px;
+    border-color: rgba(39,245,255,0.24);
+  }
+
+  .operator-module-card::before {
+    content: '';
+    position: absolute;
+    width: 260px;
+    height: 260px;
+    right: -120px;
+    top: -120px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(39,245,255,0.16), transparent 64%);
+    pointer-events: none;
+  }
+
   .admin-module-card::before {
     content: '';
     position: absolute;
@@ -1791,6 +1810,29 @@
 
     <div id="operatorInfo" class="operator-info" style="display:none;"></div>
 
+    <section class="card operator-module-card" id="operatorModuleCard" style="display:none;">
+      <div class="card-title">Modul Kerja Operator & Audit</div>
+      <div class="card-desc">
+        Panduan singkat untuk menjalankan Parser QRIS, Adjustment, Bonus Harian, Final DONE, dan Audit.
+      </div>
+
+      <div class="module-download-box">
+        <div class="module-icon">PDF</div>
+        <div class="module-info">
+          <strong>Modul Operator & Audit</strong>
+          <span>QRIS Bonus Control - Panduan kerja harian</span>
+        </div>
+        <a
+          id="operatorModuleDownloadBtn"
+          class="module-download-btn"
+          href="./Modul_Operator_Audit_QRIS_Bonus_Control.pdf"
+          download="Modul_Operator_Audit_QRIS_Bonus_Control.pdf"
+        >
+          Download Modul
+        </a>
+      </div>
+    </section>
+
     <section class="tool-panel active" id="panel-parser">
     <div class="grid">
       <!-- INPUT -->
@@ -2040,23 +2082,22 @@
     <section class="tool-panel" id="panel-admin-operators">
       <div class="bonus-grid">
         <section class="card admin-module-card" id="adminModuleCard">
-          <div class="card-title">Modul Panduan Admin & Operator</div>
+          <div class="card-title">Modul Panduan Admin & Superadmin</div>
           <div class="card-desc">
-            Download panduan penggunaan tools untuk Admin, Superadmin, dan Operator.
-            Modul ini berisi alur kerja, SOP harian, fitur dashboard, Audit Bonus, dan cara menghindari double bonus.
+            Panduan lengkap struktur role, SOP harian, monitoring operator, backup claim, audit, dan troubleshooting.
           </div>
 
           <div class="module-download-box">
             <div class="module-icon">PDF</div>
             <div class="module-info">
-              <strong>Modul Admin & Operator</strong>
+              <strong>Modul Admin & Superadmin</strong>
               <span>QRIS Bonus Control - Panduan internal</span>
             </div>
             <a
               id="adminModuleDownloadBtn"
               class="module-download-btn"
-              href="./Modul_Admin_Operator_QRIS_Bonus_Control.pdf"
-              download="Modul_Admin_Operator_QRIS_Bonus_Control.pdf"
+              href="./Modul_Admin_Superadmin_QRIS_Bonus_Control.pdf"
+              download="Modul_Admin_Superadmin_QRIS_Bonus_Control.pdf"
             >
               Download Modul
             </a>
@@ -2457,7 +2498,12 @@
     const adminTab = document.getElementById('adminOperatorsTab');
     const monitorTab = document.getElementById('bonusMonitoringTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
+    const operatorModuleCard = document.getElementById('operatorModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
+    if (operatorModuleCard) {
+      operatorModuleCard.style.display = currentOperator && ['operator', 'audit'].includes(currentOperator.role) ? '' : 'none';
+    }
+
     if (hasAuditAccess()) {
       unlockBtn.style.display = 'none';
       auditTab.style.display = '';
@@ -5072,6 +5118,12 @@
   if (moduleDownloadBtn) {
     moduleDownloadBtn.addEventListener('click', () => {
       showToast('Modul panduan sedang didownload.', 'success');
+    });
+  }
+  const operatorModuleDownloadBtn = document.getElementById('operatorModuleDownloadBtn');
+  if (operatorModuleDownloadBtn) {
+    operatorModuleDownloadBtn.addEventListener('click', () => {
+      showToast('Modul kerja sedang didownload.', 'success');
     });
   }
   document.getElementById('operatorLoginBtn').addEventListener('click', loginOperator);
