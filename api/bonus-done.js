@@ -892,17 +892,24 @@ async function handleAdminFinalizePendingBatch(req, body, res) {
   });
 }
 
-async function handleAdminLogOperatorHistoryCopy(req, body, res) {
+function claimCopyRows(rows) {
+  return (rows || []).filter(row => {
+    const amount = Number(row.bonus_amount);
+    const bonusType = normalizeText(row.bonus_type || 'BONUS_HARIAN').toUpperCase();
+    const loginId = normalizeLoginId(row.login_key || row.login_id);
+    return loginId
+      && bonusType === 'BONUS_HARIAN'
+      && amount > 0
+      && [5, 10].includes(amount);
+  });
+}
+
+async function handleAdminLogOperatorClaimCopy(req, body, res) {
   const admin = await getAdminOperatorFromRequest(req);
   const lockId = Number(body.lock_id || body.id);
-  const format = normalizeText(body.format || '').toUpperCase();
 
   if (!Number.isFinite(lockId) || lockId <= 0) {
     return res.status(400).json({ success: false, error: 'lock_id wajib diisi.' });
-  }
-
-  if (!['TEXT', 'CSV'].includes(format)) {
-    return res.status(400).json({ success: false, error: 'Format copy tidak valid.' });
   }
 
   const lock = await fetchLockById(lockId);
@@ -911,23 +918,24 @@ async function handleAdminLogOperatorHistoryCopy(req, body, res) {
   }
 
   const rows = await fetchRowsForLock(lock);
+  const copyRows = claimCopyRows(rows);
   const adminName = operatorNameFromOperator(admin);
 
   await safeInsertAdminAction({
-    action_type: format === 'CSV' ? 'ADMIN_COPY_OPERATOR_HISTORY_CSV' : 'ADMIN_COPY_OPERATOR_HISTORY_TEXT',
+    action_type: 'ADMIN_COPY_OPERATOR_CLAIM_TEXT',
     bonus_date: lock.bonus_date,
     claim_owner: lock.claim_owner,
     operator_name: lock.operator_name || '',
     admin_id: String(admin.id),
     admin_name: adminName,
-    affected_rows: rows.length,
-    note: 'Admin menyalin riwayat pekerjaan operator untuk backup'
+    affected_rows: copyRows.length,
+    note: 'Admin menyalin ID dan bonus claim operator untuk backup'
   });
 
   return res.status(200).json({
     success: true,
-    status: 'admin_copy_logged',
-    affectedRows: rows.length,
+    status: 'admin_claim_copy_logged',
+    affectedRows: copyRows.length,
     serverTime: new Date().toISOString()
   });
 }
@@ -1004,7 +1012,7 @@ export default async function handler(req, res) {
       if (action === 'admin_list_bonus_batches') return await handleAdminListBonusBatches(req, body, res);
       if (action === 'admin_get_bonus_batch_detail') return await handleAdminGetBonusBatchDetail(req, body, res);
       if (action === 'admin_finalize_pending_batch') return await handleAdminFinalizePendingBatch(req, body, res);
-      if (action === 'admin_log_operator_history_copy') return await handleAdminLogOperatorHistoryCopy(req, body, res);
+      if (action === 'admin_log_operator_claim_copy') return await handleAdminLogOperatorClaimCopy(req, body, res);
 
       return res.status(400).json({
         success: false,
