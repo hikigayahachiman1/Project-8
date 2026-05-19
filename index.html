@@ -303,6 +303,33 @@
     font-size: 0.78rem;
   }
 
+  .mini-module-link {
+    width: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 8px 11px;
+    border: 1px solid rgba(39,245,255,0.30);
+    border-radius: 999px;
+    background: rgba(39,245,255,0.08);
+    color: var(--ink);
+    text-decoration: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 850;
+    white-space: nowrap;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+    transition: transform 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  }
+
+  .mini-module-link:hover {
+    transform: translateY(-1px);
+    border-color: rgba(39,245,255,0.58);
+    background: rgba(39,245,255,0.14);
+    box-shadow: 0 0 18px rgba(39,245,255,0.12), inset 0 1px 0 rgba(255,255,255,0.12);
+  }
+
   .container {
     max-width: 1320px;
     margin: 0 auto;
@@ -1810,29 +1837,6 @@
 
     <div id="operatorInfo" class="operator-info" style="display:none;"></div>
 
-    <section class="card operator-module-card" id="operatorModuleCard" style="display:none;">
-      <div class="card-title">Modul Kerja Operator & Audit</div>
-      <div class="card-desc">
-        Panduan singkat untuk menjalankan Parser QRIS, Adjustment, Bonus Harian, Final DONE, dan Audit.
-      </div>
-
-      <div class="module-download-box">
-        <div class="module-icon">PDF</div>
-        <div class="module-info">
-          <strong>Modul Operator & Audit</strong>
-          <span>QRIS Bonus Control - Panduan kerja harian</span>
-        </div>
-        <a
-          id="operatorModuleDownloadBtn"
-          class="module-download-btn"
-          href="./Modul-kerja-operator.pdf"
-          download="Modul-kerja-operator.pdf"
-        >
-          Download Modul
-        </a>
-      </div>
-    </section>
-
     <section class="tool-panel active" id="panel-parser">
     <div class="grid">
       <!-- INPUT -->
@@ -2082,9 +2086,9 @@
     <section class="tool-panel" id="panel-admin-operators">
       <div class="bonus-grid">
         <section class="card admin-module-card" id="adminModuleCard">
-          <div class="card-title">Modul Panduan Admin & Superadmin</div>
+          <div class="card-title">Modul Panduan Admin & Operator</div>
           <div class="card-desc">
-            Panduan lengkap struktur role, SOP harian, monitoring operator, backup claim, audit, dan troubleshooting.
+            Panduan SOP, audit, admin operator, dan monitoring bonus operator.
           </div>
 
           <div class="module-download-box">
@@ -2096,8 +2100,8 @@
             <a
               id="adminModuleDownloadBtn"
               class="module-download-btn"
-              href="./Modul_Admin_Superadmin_QRIS_Bonus_Control.pdf"
-              download="Modul_Admin_Superadmin_QRIS_Bonus_Control.pdf"
+              href="./Modul_Admin_Operator_QRIS_Bonus_Control_Monitoring.pdf"
+              download="Modul_Admin_Operator_QRIS_Bonus_Control_Monitoring.pdf"
             >
               Download Modul
             </a>
@@ -2306,6 +2310,8 @@
   const BONUS_CLAIM_OWNER_KEY = 'qris_bonus_claim_owner_v1';
   const OPERATOR_TOKEN_KEY = 'qris_operator_token_v1';
   const OPERATOR_PROFILE_KEY = 'qris_operator_profile_v1';
+  const OPERATOR_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+  const OPERATOR_SESSION_TOUCH_THROTTLE_MS = 60 * 1000;
   const bonusRemoteDoneCache = {};
   const bonusAdjustmentDoneCache = {};
   let bonusRemoteStatus = 'idle';
@@ -2318,6 +2324,8 @@
   let bonusMonitorBatches = [];
   let bonusMonitorSelectedBatch = null;
   let bonusMonitorSelectedRows = [];
+  let operatorIdleTimer = null;
+  let operatorLastSessionTouchAt = 0;
 
   function showLoading(title = 'Memproses...', message = 'Mohon tunggu sebentar.', steps = []) {
     const overlay = document.getElementById('globalLoading');
@@ -2424,6 +2432,12 @@
     localStorage.removeItem(OPERATOR_TOKEN_KEY);
     localStorage.removeItem(OPERATOR_PROFILE_KEY);
     currentOperator = null;
+    stopOperatorActivityTracking();
+    const info = document.getElementById('operatorInfo');
+    if (info) {
+      info.style.display = 'none';
+      info.innerHTML = '';
+    }
   }
 
   function hasAuditAccess() {
@@ -2453,7 +2467,79 @@
   function handleOperatorUnauthorized() {
     clearOperatorSession();
     showOperatorLogin();
-    showToast('Session operator expired, silakan login ulang.', 'error');
+    applyRoleAccess();
+    showToast('Sesi berakhir atau sudah tidak aktif. Silakan login kembali.', 'error');
+  }
+
+  async function requestOperatorLogout() {
+    const token = getOperatorToken();
+    if (!token) return;
+    try {
+      await fetch('/api/operator-session', {
+        method: 'POST',
+        headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ action: 'logout' })
+      });
+    } catch (error) {
+      // Logout lokal tetap dilakukan agar komputer bersama tidak menyimpan sesi.
+    }
+  }
+
+  async function logoutOperator(message = '') {
+    await requestOperatorLogout();
+    clearOperatorSession();
+    showOperatorLogin();
+    applyRoleAccess();
+    if (message) showToast(message, 'error');
+  }
+
+  async function touchOperatorSession(force = false) {
+    if (!currentOperator || !getOperatorToken()) return;
+    const now = Date.now();
+    if (!force && now - operatorLastSessionTouchAt < OPERATOR_SESSION_TOUCH_THROTTLE_MS) return;
+    operatorLastSessionTouchAt = now;
+    try {
+      const response = await fetch('/api/operator-session', {
+        headers: operatorAuthHeaders()
+      });
+      if (response.status === 401) handleOperatorUnauthorized();
+    } catch (error) {
+      // Jangan ganggu kerja operator hanya karena update last_seen_at sesaat gagal.
+    }
+  }
+
+  function handleOperatorActivity() {
+    if (!currentOperator) return;
+    resetOperatorIdleTimer();
+    touchOperatorSession(false);
+  }
+
+  function resetOperatorIdleTimer() {
+    if (operatorIdleTimer) clearTimeout(operatorIdleTimer);
+    if (!currentOperator) return;
+    operatorIdleTimer = setTimeout(() => {
+      logoutOperator('Sesi berakhir karena tidak ada aktivitas selama 2 jam. Silakan login kembali.');
+    }, OPERATOR_IDLE_TIMEOUT_MS);
+  }
+
+  function startOperatorActivityTracking() {
+    stopOperatorActivityTracking();
+    ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click', 'paste', 'input'].forEach(eventName => {
+      window.addEventListener(eventName, handleOperatorActivity, { passive: true });
+    });
+    operatorLastSessionTouchAt = 0;
+    resetOperatorIdleTimer();
+    touchOperatorSession(true);
+  }
+
+  function stopOperatorActivityTracking() {
+    if (operatorIdleTimer) {
+      clearTimeout(operatorIdleTimer);
+      operatorIdleTimer = null;
+    }
+    ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click', 'paste', 'input'].forEach(eventName => {
+      window.removeEventListener(eventName, handleOperatorActivity);
+    });
   }
 
   function showOperatorLogin() {
@@ -2473,6 +2559,7 @@
     info.style.display = 'flex';
     const displayName = currentOperator.display_name || currentOperator.username || 'Operator';
     const initial = String(displayName).trim().charAt(0).toUpperCase() || 'O';
+    const showWorkModule = ['operator', 'audit'].includes(currentOperator.role);
     info.innerHTML = `
       <div class="operator-left">
         <div class="operator-avatar">${escapeHtml(initial)}</div>
@@ -2484,10 +2571,19 @@
           </div>
         </div>
       </div>
+      ${showWorkModule ? `
+        <a
+          class="mini-module-link"
+          href="./Modul_Operator_Audit_QRIS_Bonus_Control.pdf"
+          target="_blank"
+          rel="noopener"
+          title="Download panduan kerja operator dan audit"
+        >PDF Modul Kerja</a>
+      ` : ''}
       <button id="operatorLogoutBtn" class="logout-btn">Logout</button>
     `;
-    document.getElementById('operatorLogoutBtn').addEventListener('click', () => {
-      clearOperatorSession();
+    document.getElementById('operatorLogoutBtn').addEventListener('click', async () => {
+      await logoutOperator();
       window.location.reload();
     });
   }
@@ -2498,12 +2594,7 @@
     const adminTab = document.getElementById('adminOperatorsTab');
     const monitorTab = document.getElementById('bonusMonitoringTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
-    const operatorModuleCard = document.getElementById('operatorModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
-    if (operatorModuleCard) {
-      operatorModuleCard.style.display = currentOperator && ['operator', 'audit'].includes(currentOperator.role) ? '' : 'none';
-    }
-
     if (hasAuditAccess()) {
       unlockBtn.style.display = 'none';
       auditTab.style.display = '';
@@ -2557,6 +2648,7 @@
       hideOperatorLogin();
       renderOperatorInfo();
       applyRoleAccess();
+      startOperatorActivityTracking();
       return true;
     } catch (error) {
       clearOperatorSession();
@@ -2582,12 +2674,13 @@
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.success !== true) {
-        throw new Error(result.error || 'Username atau password salah.');
+        throw new Error(result.message || result.error || 'Username atau password salah.');
       }
       saveOperatorSession(result.token, result.operator);
       hideOperatorLogin();
       renderOperatorInfo();
       applyRoleAccess();
+      startOperatorActivityTracking();
       showToast('Login operator berhasil.', 'success');
     } catch (error) {
       errorBox.textContent = error.message || 'Username atau password salah.';
