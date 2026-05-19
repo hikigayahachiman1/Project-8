@@ -2177,6 +2177,8 @@
                 <span id="monitorDetailMeta">Pilih batch untuk melihat detail.</span>
               </div>
               <div class="row-actions">
+                <button id="monitorCopyTextBtn" class="success" style="display:none;">Copy Text</button>
+                <button id="monitorCopyCsvBtn" class="ghost" style="display:none;">Copy CSV</button>
                 <button id="monitorFinalizeBtn" class="danger" style="display:none;">Bantu Tandai Sudah Dibonuskan</button>
                 <button id="monitorCloseDetailBtn" class="ghost">Tutup Detail</button>
               </div>
@@ -2275,6 +2277,7 @@
   let globalLoadingActive = false;
   let bonusMonitorBatches = [];
   let bonusMonitorSelectedBatch = null;
+  let bonusMonitorSelectedRows = [];
 
   function showLoading(title = 'Memproses...', message = 'Mohon tunggu sebentar.', steps = []) {
     const overlay = document.getElementById('globalLoading');
@@ -3078,9 +3081,12 @@
     const title = document.getElementById('monitorDetailTitle');
     const meta = document.getElementById('monitorDetailMeta');
     const finalizeBtn = document.getElementById('monitorFinalizeBtn');
-    if (!panel || !table || !title || !meta || !finalizeBtn) return;
+    const copyTextBtn = document.getElementById('monitorCopyTextBtn');
+    const copyCsvBtn = document.getElementById('monitorCopyCsvBtn');
+    if (!panel || !table || !title || !meta || !finalizeBtn || !copyTextBtn || !copyCsvBtn) return;
 
     bonusMonitorSelectedBatch = batch || null;
+    bonusMonitorSelectedRows = rows || [];
     panel.style.display = 'block';
     title.textContent = `Detail Batch ${batch ? batch.bonus_date : ''}`;
     meta.textContent = batch
@@ -3088,6 +3094,8 @@
       : 'Pilih batch untuk melihat detail.';
 
     finalizeBtn.style.display = batch && batch.lock_status === 'PENDING' ? '' : 'none';
+    copyTextBtn.style.display = batch && bonusMonitorSelectedRows.length ? '' : 'none';
+    copyCsvBtn.style.display = batch && bonusMonitorSelectedRows.length ? '' : 'none';
 
     if (!rows || !rows.length) {
       table.innerHTML = '<tr><td colspan="9" class="empty">Tidak ada ID tersimpan pada batch ini.</td></tr>';
@@ -3169,12 +3177,127 @@
     }
   }
 
+  function csvCell(value) {
+    const text = String(value ?? '');
+    if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+    return text;
+  }
+
+  function buildBonusMonitorHistoryText() {
+    const batch = bonusMonitorSelectedBatch;
+    const rows = bonusMonitorSelectedRows || [];
+    if (!batch || !rows.length) return '';
+
+    const lines = [
+      'RIWAYAT BONUS OPERATOR',
+      `Tanggal bonus: ${batch.bonus_date || '-'}`,
+      `Nama operator: ${batch.operator_name || '-'}`,
+      `Claim owner: ${batch.claim_owner || '-'}`,
+      `Status batch: ${monitorStatusLabel(batch)}`,
+      `Total ID: ${rows.length}`,
+      `Total bonus: ${Number(batch.total_bonus) || rows.reduce((sum, row) => sum + (Number(row.bonus_amount) || 0), 0)}`,
+      `Created at: ${formatAdminDate(batch.started_at || batch.created_at)}`,
+      `Updated at: ${formatAdminDate(batch.updated_at)}`,
+      '',
+      'Daftar ID:'
+    ];
+
+    rows.forEach((row, index) => {
+      lines.push(`${index + 1}. ${row.login_key || row.login_id || '-'} | ${Number(row.bonus_amount) || 0} | ${row.bonus_status || '-'} | ${row.source || '-'} | ${formatAdminDate(row.created_at)} / ${formatAdminDate(row.updated_at)}`);
+    });
+
+    return lines.join('\n');
+  }
+
+  function buildBonusMonitorHistoryCsv() {
+    const rows = bonusMonitorSelectedRows || [];
+    const headers = [
+      'bonus_date',
+      'operator_name',
+      'claim_owner',
+      'login_id',
+      'bonus_type',
+      'bonus_amount',
+      'bonus_status',
+      'source',
+      'created_at',
+      'updated_at'
+    ];
+
+    const csvRows = rows.map(row => [
+      row.bonus_date || '',
+      row.operator_name || '',
+      row.claim_owner || '',
+      row.login_key || row.login_id || '',
+      row.bonus_type || '',
+      Number(row.bonus_amount) || 0,
+      row.bonus_status || '',
+      row.source || '',
+      row.created_at || '',
+      row.updated_at || ''
+    ].map(csvCell).join(','));
+
+    return [headers.join(','), ...csvRows].join('\n');
+  }
+
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (!ok) throw new Error('Browser tidak mengizinkan copy otomatis.');
+  }
+
+  async function adminLogBonusHistoryCopy(format) {
+    if (!bonusMonitorSelectedBatch) return;
+    await adminBonusApi('admin_log_operator_history_copy', {
+      lock_id: bonusMonitorSelectedBatch.id,
+      format
+    });
+  }
+
+  async function adminCopyBonusHistory(format) {
+    if (!isAdmin() || !bonusMonitorSelectedBatch || !bonusMonitorSelectedRows.length) {
+      showToast('Tidak ada riwayat operator untuk disalin.', 'error');
+      return;
+    }
+
+    const normalizedFormat = String(format || '').toUpperCase();
+    const text = normalizedFormat === 'CSV'
+      ? buildBonusMonitorHistoryCsv()
+      : buildBonusMonitorHistoryText();
+
+    try {
+      await copyTextToClipboard(text);
+      await adminLogBonusHistoryCopy(normalizedFormat);
+      showToast('Riwayat operator berhasil disalin untuk backup.', 'success');
+    } catch (error) {
+      showToast(error.message || 'Gagal menyalin riwayat operator.', 'error');
+    }
+  }
+
   function adminCloseBonusBatchDetail() {
     bonusMonitorSelectedBatch = null;
+    bonusMonitorSelectedRows = [];
     const panel = document.getElementById('monitorDetailPanel');
     const table = document.getElementById('monitorDetailTable');
+    const copyTextBtn = document.getElementById('monitorCopyTextBtn');
+    const copyCsvBtn = document.getElementById('monitorCopyCsvBtn');
     if (panel) panel.style.display = 'none';
     if (table) table.innerHTML = '<tr><td colspan="9" class="empty">Belum ada detail batch.</td></tr>';
+    if (copyTextBtn) copyTextBtn.style.display = 'none';
+    if (copyCsvBtn) copyCsvBtn.style.display = 'none';
   }
 
   async function adminFetchOperators() {
@@ -4986,6 +5109,8 @@
   document.getElementById('monitorBonusDateFilter').addEventListener('change', adminFetchBonusMonitoring);
   document.getElementById('monitorFinalizeBtn').addEventListener('click', adminFinalizeSelectedBonusBatch);
   document.getElementById('monitorCloseDetailBtn').addEventListener('click', adminCloseBonusBatchDetail);
+  document.getElementById('monitorCopyTextBtn').addEventListener('click', () => adminCopyBonusHistory('TEXT'));
+  document.getElementById('monitorCopyCsvBtn').addEventListener('click', () => adminCopyBonusHistory('CSV'));
   const moduleDownloadBtn = document.getElementById('adminModuleDownloadBtn');
   if (moduleDownloadBtn) {
     moduleDownloadBtn.addEventListener('click', () => {

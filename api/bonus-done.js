@@ -892,6 +892,46 @@ async function handleAdminFinalizePendingBatch(req, body, res) {
   });
 }
 
+async function handleAdminLogOperatorHistoryCopy(req, body, res) {
+  const admin = await getAdminOperatorFromRequest(req);
+  const lockId = Number(body.lock_id || body.id);
+  const format = normalizeText(body.format || '').toUpperCase();
+
+  if (!Number.isFinite(lockId) || lockId <= 0) {
+    return res.status(400).json({ success: false, error: 'lock_id wajib diisi.' });
+  }
+
+  if (!['TEXT', 'CSV'].includes(format)) {
+    return res.status(400).json({ success: false, error: 'Format copy tidak valid.' });
+  }
+
+  const lock = await fetchLockById(lockId);
+  if (!lock) {
+    return res.status(404).json({ success: false, error: 'Batch tidak ditemukan.' });
+  }
+
+  const rows = await fetchRowsForLock(lock);
+  const adminName = operatorNameFromOperator(admin);
+
+  await safeInsertAdminAction({
+    action_type: format === 'CSV' ? 'ADMIN_COPY_OPERATOR_HISTORY_CSV' : 'ADMIN_COPY_OPERATOR_HISTORY_TEXT',
+    bonus_date: lock.bonus_date,
+    claim_owner: lock.claim_owner,
+    operator_name: lock.operator_name || '',
+    admin_id: String(admin.id),
+    admin_name: adminName,
+    affected_rows: rows.length,
+    note: 'Admin menyalin riwayat pekerjaan operator untuk backup'
+  });
+
+  return res.status(200).json({
+    success: true,
+    status: 'admin_copy_logged',
+    affectedRows: rows.length,
+    serverTime: new Date().toISOString()
+  });
+}
+
 async function handleGet(req, res) {
   const operator = await getOperatorFromRequest(req, false);
   const date = String(req.query.date || '');
@@ -964,6 +1004,7 @@ export default async function handler(req, res) {
       if (action === 'admin_list_bonus_batches') return await handleAdminListBonusBatches(req, body, res);
       if (action === 'admin_get_bonus_batch_detail') return await handleAdminGetBonusBatchDetail(req, body, res);
       if (action === 'admin_finalize_pending_batch') return await handleAdminFinalizePendingBatch(req, body, res);
+      if (action === 'admin_log_operator_history_copy') return await handleAdminLogOperatorHistoryCopy(req, body, res);
 
       return res.status(400).json({
         success: false,
