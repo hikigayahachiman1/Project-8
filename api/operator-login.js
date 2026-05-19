@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomUUID } from 'crypto';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -11,6 +12,8 @@ const supabase = supabaseUrl && serviceRoleKey
       auth: { persistSession: false }
     })
   : null;
+
+const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
@@ -26,6 +29,42 @@ function operatorResponse(operator) {
   };
 }
 
+function sessionCutoffIso() {
+  return new Date(Date.now() - SESSION_IDLE_MS).toISOString();
+}
+
+async function cleanupExpiredSessions(operatorId = null) {
+  const now = new Date().toISOString();
+  let query = supabase
+    .from('operator_active_sessions')
+    .update({
+      is_active: false,
+      expired_at: now
+    })
+    .eq('is_active', true)
+    .lt('last_seen_at', sessionCutoffIso());
+
+  if (operatorId) query = query.eq('operator_id', String(operatorId));
+
+  const { error } = await query;
+  if (error) throw error;
+}
+
+async function findActiveSession(operatorId) {
+  const { data, error } = await supabase
+    .from('operator_active_sessions')
+    .select('id, last_seen_at')
+    .eq('operator_id', String(operatorId))
+    .eq('is_active', true)
+    .gte('last_seen_at', sessionCutoffIso())
+    .order('last_seen_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') {
@@ -34,7 +73,7 @@ export default async function handler(req, res) {
     }
 
     if (!supabase) {
-      return res.status(500).json({ success: false, error: 'SUPABASE_URL atau SUPABASE_SERVICE_ROLE_KEY belum diset.' });
+      return res.status(500).json({ success: false, error: 'Konfigurasi database pusat belum lengkap.' });
     }
 
     if (!sessionSecret) {
@@ -68,9 +107,37 @@ export default async function handler(req, res) {
       return res.status(401).json({ success: false, error: invalidMessage });
     }
 
+    await cleanupExpiredSessions(operator.id);
+    const activeSession = await findActiveSession(operator.id);
+    if (activeSession) {
+      return res.status(409).json({
+        success: false,
+        error: 'ACTIVE_SESSION_EXISTS',
+        message: 'Akun ini masih aktif di perangkat/browser lain. Silakan logout dari sesi sebelumnya atau tunggu sesi berakhir.'
+      });
+    }
+
+    const sessionTokenId = randomUUID();
+    const now = new Date().toISOString();
+
+    const { error: sessionError } = await supabase
+      .from('operator_active_sessions')
+      .insert({
+        operator_id: String(operator.id),
+        username: operator.username,
+        display_name: operator.display_name,
+        role: operator.role,
+        session_token_id: sessionTokenId,
+        is_active: true,
+        last_seen_at: now,
+        created_at: now
+      });
+
+    if (sessionError) throw sessionError;
+
     await supabase
       .from('operators')
-      .update({ last_login_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({ last_login_at: now, updated_at: now })
       .eq('id', operator.id);
 
     const safeOperator = operatorResponse(operator);
@@ -79,7 +146,8 @@ export default async function handler(req, res) {
       username: operator.username,
       display_name: operator.display_name,
       role: operator.role,
-      is_protected: Boolean(operator.is_protected)
+      is_protected: Boolean(operator.is_protected),
+      session_token_id: sessionTokenId
     }, sessionSecret, { expiresIn: '12h' });
 
     return res.status(200).json({
