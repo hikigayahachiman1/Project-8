@@ -39,8 +39,7 @@ async function cleanupExpiredSessions(operatorId = null) {
     .from('operator_active_sessions')
     .update({
       is_active: false,
-      expired_at: now,
-      expired_reason: 'IDLE_EXPIRED'
+      expired_at: now
     })
     .eq('is_active', true)
     .lt('last_seen_at', sessionCutoffIso());
@@ -64,30 +63,6 @@ async function findActiveSession(operatorId) {
 
   if (error) throw error;
   return data || null;
-}
-
-async function expireActiveSessionsForOperator(operatorId, reason) {
-  const { data, error } = await supabase
-    .from('operator_active_sessions')
-    .update({
-      is_active: false,
-      expired_at: new Date().toISOString(),
-      expired_reason: reason
-    })
-    .eq('operator_id', String(operatorId))
-    .eq('is_active', true)
-    .select('id');
-
-  if (error) throw error;
-  return data || [];
-}
-
-async function insertOperatorAdminAction(payload) {
-  const { error } = await supabase
-    .from('operator_admin_actions')
-    .insert(payload);
-
-  if (error && !['42P01', '42703'].includes(error.code)) throw error;
 }
 
 export default async function handler(req, res) {
@@ -133,32 +108,13 @@ export default async function handler(req, res) {
     }
 
     await cleanupExpiredSessions(operator.id);
-    if (operator.role === 'superadmin') {
-      const replacedSessions = await expireActiveSessionsForOperator(operator.id, 'SUPERADMIN_REPLACED_OWN_SESSION');
-      if (replacedSessions.length) {
-        await insertOperatorAdminAction({
-          action_type: 'SUPERADMIN_REPLACED_OWN_SESSION',
-          actor_operator_id: String(operator.id),
-          actor_username: operator.username,
-          actor_role: operator.role,
-          target_operator_id: String(operator.id),
-          target_username: operator.username,
-          target_role: operator.role,
-          note: 'Superadmin login ulang dan mengganti sesi aktif lama.',
-          affected_rows: replacedSessions.length
-        });
-      }
-    } else {
-      const activeSession = await findActiveSession(operator.id);
-      if (activeSession) {
-        return res.status(409).json({
-          success: false,
-          error: 'ACTIVE_SESSION_EXISTS',
-          message: operator.role === 'admin'
-            ? 'Akun admin ini masih aktif di perangkat/browser lain. Silakan logout dari sesi sebelumnya atau hubungi superadmin.'
-            : 'Akun ini masih aktif di perangkat/browser lain. Silakan logout dari sesi sebelumnya atau hubungi admin.'
-        });
-      }
+    const activeSession = await findActiveSession(operator.id);
+    if (activeSession) {
+      return res.status(409).json({
+        success: false,
+        error: 'ACTIVE_SESSION_EXISTS',
+        message: 'Akun ini masih aktif di perangkat/browser lain. Silakan logout dari sesi sebelumnya atau tunggu sesi berakhir.'
+      });
     }
 
     const sessionTokenId = randomUUID();

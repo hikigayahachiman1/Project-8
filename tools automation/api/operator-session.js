@@ -39,8 +39,7 @@ async function cleanupExpiredSessions(operatorId = null) {
     .from('operator_active_sessions')
     .update({
       is_active: false,
-      expired_at: now,
-      expired_reason: 'IDLE_EXPIRED'
+      expired_at: now
     })
     .eq('is_active', true)
     .lt('last_seen_at', sessionCutoffIso());
@@ -105,16 +104,12 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'Action tidak dikenal.' });
       }
 
-      const reason = String(body.reason || '').trim() === 'IDLE_TIMEOUT'
-        ? 'IDLE_EXPIRED'
-        : 'USER_LOGOUT';
       const now = new Date().toISOString();
       const { error: logoutError } = await supabase
         .from('operator_active_sessions')
         .update({
           is_active: false,
-          expired_at: now,
-          expired_reason: reason
+          expired_at: now
         })
         .eq('operator_id', String(payload.operator_id))
         .eq('session_token_id', String(payload.session_token_id));

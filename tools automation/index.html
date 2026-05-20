@@ -2142,13 +2142,12 @@
                   <th>Nama</th>
                   <th>Role</th>
                   <th>Status</th>
-                  <th>Status Sesi</th>
                   <th>Last Login</th>
                   <th>Aksi</th>
                 </tr>
               </thead>
               <tbody id="adminOperatorTable">
-                <tr><td colspan="7" class="empty">Login sebagai admin untuk melihat operator.</td></tr>
+                <tr><td colspan="6" class="empty">Login sebagai admin untuk melihat operator.</td></tr>
               </tbody>
             </table>
           </div>
@@ -2472,22 +2471,22 @@
     showToast('Sesi berakhir atau sudah tidak aktif. Silakan login kembali.', 'error');
   }
 
-  async function requestOperatorLogout(reason = 'USER_LOGOUT') {
+  async function requestOperatorLogout() {
     const token = getOperatorToken();
     if (!token) return;
     try {
       await fetch('/api/operator-session', {
         method: 'POST',
         headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ action: 'logout', reason })
+        body: JSON.stringify({ action: 'logout' })
       });
     } catch (error) {
       // Logout lokal tetap dilakukan agar komputer bersama tidak menyimpan sesi.
     }
   }
 
-  async function logoutOperator(message = '', reason = 'USER_LOGOUT') {
-    await requestOperatorLogout(reason);
+  async function logoutOperator(message = '') {
+    await requestOperatorLogout();
     clearOperatorSession();
     showOperatorLogin();
     applyRoleAccess();
@@ -2519,7 +2518,7 @@
     if (operatorIdleTimer) clearTimeout(operatorIdleTimer);
     if (!currentOperator) return;
     operatorIdleTimer = setTimeout(() => {
-      logoutOperator('Sesi berakhir karena tidak ada aktivitas selama 2 jam. Silakan login kembali.', 'IDLE_TIMEOUT');
+      logoutOperator('Sesi berakhir karena tidak ada aktivitas selama 2 jam. Silakan login kembali.');
     }, OPERATOR_IDLE_TIMEOUT_MS);
   }
 
@@ -3417,7 +3416,7 @@
     } catch (error) {
       setLoadingError(error.message || 'Gagal memuat operator.', 1);
       const table = document.getElementById('adminOperatorTable');
-      if (table) table.innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(error.message || 'Gagal memuat operator.')}</td></tr>`;
+      if (table) table.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(error.message || 'Gagal memuat operator.')}</td></tr>`;
     } finally {
       hideLoading();
     }
@@ -3547,75 +3546,11 @@
     }
   }
 
-  function adminCanForceLogout(operator) {
-    if (!isAdmin() || !operator) return false;
-    if (isSuperAdmin()) return true;
-    if (operator.is_protected || operator.role === 'admin' || operator.role === 'superadmin') return false;
-    return ['operator', 'audit'].includes(operator.role);
-  }
-
-  async function adminForceLogoutOperator(id) {
-    if (!isAdmin()) return;
-    const operator = adminOperatorRows.find(row => Number(row.id) === Number(id));
-    if (!operator) return;
-
-    if (!adminCanForceLogout(operator)) {
-      showToast('Anda tidak memiliki akses untuk melepas sesi akun ini.', 'error');
-      return;
-    }
-
-    const ok = window.confirm('Akun ini akan dipaksa logout dari perangkat/browser yang sedang aktif. Gunakan hanya jika akun terkunci, browser tertutup, atau user lupa logout.');
-    if (!ok) return;
-
-    const reason = window.prompt('Alasan paksa logout:', 'Akun nyangkut / browser tertutup / lupa logout');
-    if (reason === null) return;
-
-    showLoading('Melepas Sesi Aktif', 'Mengirim perintah ke database pusat...', [
-      'Validasi akses admin',
-      'Melepas sesi aktif',
-      'Memuat ulang daftar operator'
-    ]);
-
-    try {
-      updateLoading('Melepas sesi aktif...', 1, 0);
-      await adminApi('/api/operators', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'force_logout_operator',
-          operator_id: id,
-          reason
-        })
-      });
-      updateLoading('Memuat ulang daftar operator...', 2, 1);
-      showToast('Sesi aktif berhasil dilepas. Akun bisa login kembali.', 'success');
-      await adminFetchOperators();
-    } catch (error) {
-      setLoadingError(error.message || 'Gagal melepas sesi aktif.', 1);
-      showToast(error.message || 'Anda tidak memiliki akses untuk melepas sesi akun ini.', 'error');
-    } finally {
-      hideLoading();
-    }
-  }
-
   function formatAdminDate(value) {
     if (!value) return '-';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return '-';
     return d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', hour12: false });
-  }
-
-  function formatSessionLastSeen(value) {
-    if (!value) return '-';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return '-';
-    const diffMs = Date.now() - d.getTime();
-    const minutes = Math.max(0, Math.floor(diffMs / 60000));
-    if (minutes < 1) return 'baru saja';
-    if (minutes < 60) return `${minutes} menit lalu`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours} jam lalu`;
-    return formatAdminDate(value);
   }
 
   function renderAdminOperators(operators) {
@@ -3624,15 +3559,13 @@
     adminOperatorRows = operators || [];
 
     if (!operators.length) {
-      table.innerHTML = '<tr><td colspan="7" class="empty">Belum ada operator.</td></tr>';
+      table.innerHTML = '<tr><td colspan="6" class="empty">Belum ada operator.</td></tr>';
       return;
     }
 
     table.innerHTML = operators.map(operator => {
       const protectedAccount = operator.role === 'superadmin' || operator.is_protected;
       const lockedForAdmin = protectedAccount && !isSuperAdmin();
-      const canForceLogout = adminCanForceLogout(operator) && operator.active_session_count > 0;
-      const sessionStatus = operator.active_session_count > 0 ? 'Aktif' : (operator.session_status || 'Tidak aktif');
       return `
         <tr>
           <td class="user-id">${escapeHtml(operator.username)}</td>
@@ -3642,17 +3575,12 @@
             ${operator.is_protected ? '<span class="role-badge protected">Protected</span>' : ''}
           </td>
           <td><span class="status-badge ${operator.is_active ? 'active' : 'inactive'}">${operator.is_active ? 'Aktif' : 'Nonaktif'}</span></td>
-          <td>
-            <span class="status-badge ${operator.active_session_count > 0 ? 'active' : 'inactive'}">${escapeHtml(sessionStatus)}</span>
-            <div class="source-note">${escapeHtml(formatSessionLastSeen(operator.session_last_seen_at))}</div>
-          </td>
           <td class="time-cell">${escapeHtml(formatAdminDate(operator.last_login_at))}</td>
           <td>
             <div class="row-actions">
               <button ${lockedForAdmin ? 'disabled' : ''} onclick="adminEditOperator(${operator.id})">Edit</button>
               <button ${lockedForAdmin ? 'disabled' : ''} onclick="adminResetPassword(${operator.id})">Reset Password</button>
               <button ${lockedForAdmin ? 'disabled' : ''} class="${operator.is_active ? 'danger' : 'success'}" onclick="adminSetOperatorActive(${operator.id}, ${operator.is_active ? 'false' : 'true'})">${operator.is_active ? 'Nonaktifkan' : 'Aktifkan'}</button>
-              ${canForceLogout ? `<button class="danger" onclick="adminForceLogoutOperator(${operator.id})">Paksa Logout</button>` : ''}
             </div>
           </td>
         </tr>

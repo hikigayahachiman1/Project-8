@@ -13,7 +13,6 @@ const supabase = supabaseUrl && serviceRoleKey
   : null;
 
 const validRoles = new Set(['operator', 'audit', 'admin', 'superadmin']);
-const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
 
 function bearerToken(req) {
   const header = req.headers.authorization || req.headers.Authorization || '';
@@ -35,46 +34,13 @@ function safeOperator(row) {
     is_protected: Boolean(row.is_protected),
     last_login_at: row.last_login_at,
     created_at: row.created_at,
-    updated_at: row.updated_at,
-    session_status: row.session_status || 'Tidak aktif',
-    session_last_seen_at: row.session_last_seen_at || null,
-    active_session_count: row.active_session_count || 0
+    updated_at: row.updated_at
   };
-}
-
-function sessionCutoffIso() {
-  return new Date(Date.now() - SESSION_IDLE_MS).toISOString();
-}
-
-async function cleanupExpiredSessions(operatorId = null) {
-  const now = new Date().toISOString();
-  let query = supabase
-    .from('operator_active_sessions')
-    .update({
-      is_active: false,
-      expired_at: now,
-      expired_reason: 'IDLE_EXPIRED'
-    })
-    .eq('is_active', true)
-    .lt('last_seen_at', sessionCutoffIso());
-
-  if (operatorId) query = query.eq('operator_id', String(operatorId));
-
-  const { error } = await query;
-  if (error) throw error;
-}
-
-async function insertOperatorAdminAction(payload) {
-  const { error } = await supabase
-    .from('operator_admin_actions')
-    .insert(payload);
-
-  if (error && !['42P01', '42703'].includes(error.code)) throw error;
 }
 
 async function requireAdmin(req) {
   if (!supabase) {
-    const error = new Error('Konfigurasi database pusat belum lengkap.');
+    const error = new Error('SUPABASE_URL atau SUPABASE_SERVICE_ROLE_KEY belum diset.');
     error.statusCode = 500;
     throw error;
   }
@@ -97,30 +63,6 @@ async function requireAdmin(req) {
     payload = jwt.verify(token, sessionSecret);
   } catch (error) {
     const authError = new Error('Session tidak valid.');
-    authError.statusCode = 401;
-    throw authError;
-  }
-
-  if (!payload.operator_id || !payload.session_token_id) {
-    const authError = new Error('Session tidak valid.');
-    authError.statusCode = 401;
-    throw authError;
-  }
-
-  await cleanupExpiredSessions(payload.operator_id);
-
-  const { data: activeSession, error: sessionError } = await supabase
-    .from('operator_active_sessions')
-    .select('id')
-    .eq('operator_id', String(payload.operator_id))
-    .eq('session_token_id', String(payload.session_token_id))
-    .eq('is_active', true)
-    .gte('last_seen_at', sessionCutoffIso())
-    .maybeSingle();
-
-  if (sessionError) throw sessionError;
-  if (!activeSession) {
-    const authError = new Error('Sesi berakhir atau sudah tidak aktif. Silakan login kembali.');
     authError.statusCode = 401;
     throw authError;
   }
@@ -149,8 +91,6 @@ async function requireAdmin(req) {
 }
 
 async function listOperators(res) {
-  await cleanupExpiredSessions();
-
   const { data, error } = await supabase
     .from('operators')
     .select('id, username, display_name, role, is_active, is_protected, last_login_at, created_at, updated_at')
@@ -158,50 +98,9 @@ async function listOperators(res) {
 
   if (error) throw error;
 
-  const operatorIds = (data || []).map(row => String(row.id));
-  let sessionRows = [];
-  if (operatorIds.length) {
-    const { data: sessions, error: sessionError } = await supabase
-      .from('operator_active_sessions')
-      .select('operator_id, is_active, last_seen_at, expired_at')
-      .in('operator_id', operatorIds)
-      .order('last_seen_at', { ascending: false });
-
-    if (sessionError) throw sessionError;
-    sessionRows = sessions || [];
-  }
-
-  const sessionMap = new Map();
-  sessionRows.forEach(session => {
-    const key = String(session.operator_id);
-    if (!sessionMap.has(key)) {
-      sessionMap.set(key, {
-        activeCount: 0,
-        lastSeenAt: session.last_seen_at || null,
-        status: session.is_active ? 'Aktif' : 'Expired'
-      });
-    }
-    const item = sessionMap.get(key);
-    if (session.is_active) {
-      item.activeCount += 1;
-      item.status = 'Aktif';
-      if (!item.lastSeenAt || new Date(session.last_seen_at).getTime() > new Date(item.lastSeenAt).getTime()) {
-        item.lastSeenAt = session.last_seen_at;
-      }
-    }
-  });
-
   return res.status(200).json({
     success: true,
-    operators: (data || []).map(row => {
-      const session = sessionMap.get(String(row.id));
-      return safeOperator({
-        ...row,
-        session_status: session ? session.status : 'Tidak aktif',
-        session_last_seen_at: session ? session.lastSeenAt : null,
-        active_session_count: session ? session.activeCount : 0
-      });
-    })
+    operators: (data || []).map(safeOperator)
   });
 }
 
@@ -383,69 +282,6 @@ async function disableOperator(requester, req, res) {
   return res.status(200).json({ success: true });
 }
 
-function canForceLogout(requester, target) {
-  if (!requester || !target) return false;
-  if (requester.role === 'superadmin') return true;
-  if (requester.role !== 'admin') return false;
-  if (target.is_protected || target.role === 'admin' || target.role === 'superadmin') return false;
-  return ['operator', 'audit'].includes(target.role);
-}
-
-async function forceLogoutOperator(requester, body, res) {
-  const targetId = Number(body.operator_id || body.id);
-  const reason = String(body.reason || 'Paksa logout oleh admin').trim();
-
-  if (!Number.isFinite(targetId) || targetId <= 0) {
-    return res.status(400).json({ success: false, error: 'ID operator tidak valid.' });
-  }
-
-  const { data: target, error: targetError } = await supabase
-    .from('operators')
-    .select('id, username, display_name, role, is_protected')
-    .eq('id', targetId)
-    .maybeSingle();
-
-  if (targetError) throw targetError;
-  if (!target) return res.status(404).json({ success: false, error: 'Operator tidak ditemukan.' });
-
-  if (!canForceLogout(requester, target)) {
-    return res.status(403).json({ success: false, error: 'Anda tidak memiliki akses untuk melepas sesi akun ini.' });
-  }
-
-  const now = new Date().toISOString();
-  const { data: sessions, error: sessionError } = await supabase
-    .from('operator_active_sessions')
-    .update({
-      is_active: false,
-      expired_at: now,
-      expired_reason: 'FORCE_LOGOUT_BY_ADMIN'
-    })
-    .eq('operator_id', String(target.id))
-    .eq('is_active', true)
-    .select('id');
-
-  if (sessionError) throw sessionError;
-
-  await insertOperatorAdminAction({
-    action_type: 'FORCE_LOGOUT_SESSION',
-    actor_operator_id: String(requester.id),
-    actor_username: requester.username,
-    actor_role: requester.role,
-    target_operator_id: String(target.id),
-    target_username: target.username,
-    target_role: target.role,
-    note: reason,
-    affected_rows: (sessions || []).length
-  });
-
-  return res.status(200).json({
-    success: true,
-    ok: true,
-    message: 'Sesi aktif berhasil dilepas. Akun bisa login kembali.',
-    affected_sessions: (sessions || []).length
-  });
-}
-
 export default async function handler(req, res) {
   try {
     const requester = await requireAdmin(req);
@@ -454,11 +290,7 @@ export default async function handler(req, res) {
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body;
 
-    if (req.method === 'POST') {
-      const action = String(body.action || '').trim();
-      if (action === 'force_logout_operator') return await forceLogoutOperator(requester, body, res);
-      return await createOperator(requester, body, res);
-    }
+    if (req.method === 'POST') return await createOperator(requester, body, res);
     if (req.method === 'PUT') return await updateOperator(requester, body, res);
     if (req.method === 'DELETE') return await disableOperator(requester, req, res);
 
