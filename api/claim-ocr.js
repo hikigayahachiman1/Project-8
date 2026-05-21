@@ -257,7 +257,12 @@ export function extractTicketIds(text) {
 
 export function extractMoneyCandidates(text) {
   const normalized = normalizeOcrText(text);
-  const matches = normalized.match(/-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d{1,3}(?:\.\d{3})+(?:[,.]\d+)?|-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d+(?:[,.]\d+)?/gi) || [];
+  const matches = normalized.split('\n').flatMap(line => {
+    const hasMoneyPrefix = /\b(?:rp|ap|ro|rd|bp)\b/i.test(line);
+    const looksLikeDateTime = /\b\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?\b/.test(line) || /\b\d{1,2}[.:]\d{2}(?:[.:]\d{2})?\b/.test(line);
+    if (!hasMoneyPrefix && looksLikeDateTime) return [];
+    return line.match(/-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d{1,3}(?:\.\d{3})+(?:[,.]\d+)?|-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d+(?:[,.]\d+)?/gi) || [];
+  });
   return [...new Set(matches
     .map(item => item.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
@@ -331,12 +336,12 @@ export function pickSmallestPositiveWin(values) {
 }
 
 function detectProvider(rawText, requestedProvider = '') {
-  const normalized = normalizeOcrText(rawText);
-  if (/(gates of olympus|sweet bonanza|starlight princess|pragmatic|super scatter)/i.test(normalized)) {
-    return 'PRAGMATIC';
-  }
   const requested = String(requestedProvider || '').trim().toUpperCase();
   if (requested === 'PG' || requested === 'PRAGMATIC') return requested;
+  const normalized = normalizeOcrText(rawText);
+  if (/(gates of olympus|sweet bonanza|starlight princess|pragmatic|super scatter|id sesi bermain|jumlah dimenangkan)/i.test(normalized)) {
+    return 'PRAGMATIC';
+  }
   return 'PG';
 }
 
@@ -350,12 +355,17 @@ function buildPragmaticDetectedRows(ticketIds, balances, bets, wins) {
   const rowCount = Math.max(ticketIds.length, bets.length, wins.length, 1);
   const rows = [];
   for (let index = 0; index < rowCount; index += 1) {
+    const bet = bets[index] || '';
+    const win = wins[index] || '';
+    const baseAmount = normalizeWinToBaseAmount(win);
     rows.push({
-      row_index: index + 1,
+      row_index: index,
       ticket_id: ticketIds[index] || '',
       balance: balances[index] || '',
-      bet: bets[index] || '',
-      win: wins[index] || ''
+      bet,
+      bett_output: parseBetToBettOutput(bet),
+      win,
+      base_amount: Number.isFinite(baseAmount) ? baseAmount : null
     });
   }
   return rows;
@@ -399,6 +409,7 @@ export function parsePragmaticHistoryOcr(rawText) {
   const base_amount = normalizeWinToBaseAmount(selected_win);
 
   return {
+    provider: 'PRAGMATIC',
     ticket_id,
     bet,
     bett_output: parseBetToBettOutput(bet),
@@ -406,20 +417,22 @@ export function parsePragmaticHistoryOcr(rawText) {
     selected_win,
     base_amount: Number.isFinite(base_amount) ? base_amount : null,
     detected_provider: 'PRAGMATIC',
-    selected_row_index: selectedRow.row_index || 1,
+    parser_used: 'parsePragmaticHistoryOcr',
+    selected_row_index: selectedRow.row_index || 0,
     ticket_ids: ticketIds,
     bet_candidates: bets,
+    win_list: wins,
+    debug: {
+      ticket_list: ticketIds,
+      bet_list: bets,
+      win_list: wins
+    },
     detected_rows: detectedRows
   };
 }
 
-export function parseHistoryOcr(rawText, provider = '') {
+export function parsePgHistoryOcr(rawText) {
   const normalized = normalizeOcrText(rawText);
-  const detectedProvider = detectProvider(normalized, provider);
-  if (detectedProvider === 'PRAGMATIC') {
-    return parsePragmaticHistoryOcr(normalized);
-  }
-
   const ticket_id = extractTicketId(normalized);
   const bet = extractBet(normalized);
   const bett_output = parseBetToBettOutput(bet);
@@ -428,6 +441,7 @@ export function parseHistoryOcr(rawText, provider = '') {
   const base_amount = normalizeWinToBaseAmount(selected_win);
 
   return {
+    provider: 'PG',
     ticket_id,
     bet,
     bett_output,
@@ -435,16 +449,39 @@ export function parseHistoryOcr(rawText, provider = '') {
     selected_win,
     base_amount: Number.isFinite(base_amount) ? base_amount : null,
     detected_provider: 'PG',
-    selected_row_index: 1,
+    parser_used: 'parsePgHistoryOcr',
+    selected_row_index: 0,
     ticket_ids: extractTicketIds(normalized),
     bet_candidates: bet ? [bet] : [],
+    win_list: win_candidates,
+    debug: {
+      ticket_list: extractTicketIds(normalized),
+      bet_list: bet ? [bet] : [],
+      win_list: win_candidates
+    },
     detected_rows: [{
-      row_index: 1,
+      row_index: 0,
       ticket_id,
       bet,
-      win: selected_win
+      bett_output,
+      win: selected_win,
+      base_amount: Number.isFinite(base_amount) ? base_amount : null
     }]
   };
+}
+
+export function parseGenericHistoryOcr(rawText) {
+  return parsePgHistoryOcr(rawText);
+}
+
+export function parseHistoryOcr(rawText, provider = '') {
+  const normalized = normalizeOcrText(rawText);
+  const detectedProvider = detectProvider(normalized, provider);
+  if (detectedProvider === 'PRAGMATIC') {
+    return parsePragmaticHistoryOcr(normalized);
+  }
+  if (detectedProvider === 'PG') return parsePgHistoryOcr(normalized);
+  return parseGenericHistoryOcr(normalized);
 }
 
 async function callOcrApi(fileBuffer, fileName, mimeType) {

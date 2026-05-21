@@ -1186,6 +1186,39 @@
     transform: translateY(-1px);
   }
 
+  .tool-tab.locked {
+    opacity: 0.55;
+    border-style: dashed;
+    cursor: not-allowed;
+    filter: grayscale(0.35);
+  }
+
+  .tool-tab.locked::before {
+    content: "🔒 ";
+  }
+
+  .tool-tab.superadmin-bypass::after {
+    content: "LOCKED - SUPERADMIN ACCESS";
+    display: inline-flex;
+    margin-left: 8px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: rgba(255,200,87,0.18);
+    color: #ffe0a3;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+  }
+
+  .locked-access-note {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255,200,87,0.34);
+    border-radius: 16px;
+    background: rgba(255,200,87,0.10);
+    color: #ffe0a3;
+    font-weight: 800;
+  }
+
   .card {
     background:
       linear-gradient(145deg, rgba(255,255,255,0.105), rgba(255,255,255,0.035)),
@@ -2386,6 +2419,29 @@
           </div>
         </section>
 
+        <section class="card" id="featureLockCard">
+          <div class="card-title">Kontrol Akses Menu</div>
+          <div class="card-desc">Superadmin bisa mengunci menu sementara saat fitur sedang diperbaiki. Admin dapat melihat status, tetapi tidak dapat mengubah kunci.</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Menu</th>
+                  <th>Status</th>
+                  <th>Alasan</th>
+                  <th>Updated By</th>
+                  <th>Updated At</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="featureLockTable">
+                <tr><td colspan="6" class="empty">Memuat status kunci menu...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="locked-access-note" id="featureLockAdminNote" style="display:none;">Hanya Superadmin yang dapat mengubah kunci menu.</div>
+        </section>
+
         <section class="card">
           <div class="card-title">Daftar Operator</div>
           <div class="card-desc">Kelola role, status aktif, dan reset password operator.</div>
@@ -2581,6 +2637,24 @@
   let bonusMonitorSelectedBatch = null;
   let bonusMonitorSelectedRows = [];
   let claimLastParsedOcr = null;
+  let featureAccessLocks = {};
+  const FEATURE_TAB_MAP = {
+    parser: 'parser',
+    bonus: 'bonus',
+    'claim-mahjong': 'claim_mahjong',
+    audit: 'audit',
+    'admin-operators': 'admin_operators',
+    'bonus-monitoring': 'monitoring_bonus'
+  };
+  const FEATURE_NAMES = {
+    parser: 'Parser QRIS',
+    bonus: 'Bonus Harian',
+    claim_mahjong: 'Klaim Mahjong',
+    audit: 'Audit Bonus',
+    admin_operators: 'Admin Operator',
+    monitoring_bonus: 'Monitoring Bonus Operator',
+    module_guide: 'Modul Panduan'
+  };
   let operatorIdleTimer = null;
   let operatorLastSessionTouchAt = 0;
 
@@ -2845,6 +2919,110 @@
     });
   }
 
+  function featureKeyForPanel(panel) {
+    return FEATURE_TAB_MAP[panel] || panel;
+  }
+
+  function isFeatureLocked(featureKey) {
+    return Boolean(featureAccessLocks[featureKey]?.is_locked);
+  }
+
+  function canCurrentOperatorOpenFeature(featureKey) {
+    return !isFeatureLocked(featureKey) || isSuperAdmin();
+  }
+
+  async function fetchFeatureLocks() {
+    if (!getOperatorToken()) return;
+    try {
+      const response = await fetch('/api/feature-locks', { headers: operatorAuthHeaders() });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok !== true) throw new Error(result.message || 'Gagal memuat kunci menu.');
+      featureAccessLocks = {};
+      (result.locks || []).forEach(lock => {
+        featureAccessLocks[lock.feature_key] = lock;
+      });
+      renderFeatureLocks();
+      renderFeatureLockTable();
+    } catch (error) {
+      featureAccessLocks = {};
+      renderFeatureLocks();
+    }
+  }
+
+  function renderFeatureLocks() {
+    document.querySelectorAll('.tool-tab[data-panel]').forEach(tab => {
+      const featureKey = featureKeyForPanel(tab.dataset.panel);
+      const locked = isFeatureLocked(featureKey);
+      tab.classList.toggle('locked', locked && !isSuperAdmin());
+      tab.classList.toggle('superadmin-bypass', locked && isSuperAdmin());
+      tab.title = locked
+        ? (isSuperAdmin() ? 'Dikunci untuk role lain. Superadmin tetap bisa akses.' : 'Dikunci sementara oleh Superadmin')
+        : '';
+    });
+  }
+
+  function renderFeatureLockTable() {
+    const table = document.getElementById('featureLockTable');
+    const note = document.getElementById('featureLockAdminNote');
+    if (!table) return;
+    if (note) note.style.display = isSuperAdmin() ? 'none' : '';
+
+    const keys = ['parser', 'bonus', 'claim_mahjong', 'audit', 'admin_operators', 'monitoring_bonus', 'module_guide'];
+    table.innerHTML = keys.map(key => {
+      const lock = featureAccessLocks[key] || { feature_key: key, feature_name: FEATURE_NAMES[key], is_locked: false };
+      const disabled = isSuperAdmin() ? '' : 'disabled';
+      const status = lock.is_locked ? 'Terkunci' : 'Terbuka';
+      return `
+        <tr>
+          <td>${escapeHtml(lock.feature_name || FEATURE_NAMES[key] || key)}</td>
+          <td><span class="role-badge ${lock.is_locked ? 'inactive' : 'active'}">${escapeHtml(status)}</span></td>
+          <td>${escapeHtml(lock.locked_reason || '-')}</td>
+          <td>${escapeHtml(lock.updated_by_username || '-')}</td>
+          <td class="time-cell">${escapeHtml(lock.updated_at ? formatAdminDate(lock.updated_at) : '-')}</td>
+          <td class="row-actions">
+            <button ${disabled} onclick="setFeatureLock('${escapeHtml(key)}', true)">Kunci</button>
+            <button ${disabled} class="ghost" onclick="setFeatureLock('${escapeHtml(key)}', false)">Buka Kunci</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function setFeatureLock(featureKey, isLocked) {
+    if (!isSuperAdmin()) {
+      showToast('Hanya Superadmin yang dapat mengubah kunci menu.', 'error');
+      return;
+    }
+    const reason = isLocked
+      ? window.prompt('Alasan kunci menu:', featureAccessLocks[featureKey]?.locked_reason || 'Sedang perbaikan')
+      : '';
+    if (isLocked && reason === null) return;
+
+    try {
+      const response = await fetch('/api/feature-locks', {
+        method: 'POST',
+        headers: { ...operatorAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_lock',
+          feature_key: featureKey,
+          is_locked: isLocked,
+          locked_reason: reason || ''
+        })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok !== true) throw new Error(result.message || 'Gagal mengubah kunci menu.');
+      featureAccessLocks = {};
+      (result.locks || []).forEach(lock => {
+        featureAccessLocks[lock.feature_key] = lock;
+      });
+      renderFeatureLocks();
+      renderFeatureLockTable();
+      showToast(isLocked ? 'Menu berhasil dikunci.' : 'Menu berhasil dibuka kembali.', 'success');
+    } catch (error) {
+      showToast(error.message || 'Gagal mengubah kunci menu.', 'error');
+    }
+  }
+
   function applyRoleAccess() {
     const auditTab = document.getElementById('auditTab');
     const unlockBtn = document.getElementById('unlockAuditBtn');
@@ -2882,12 +3060,15 @@
         if (currentOperator) showToast('Akses monitoring dibatasi.', 'error');
       }
     }
+    renderFeatureLocks();
+    renderFeatureLockTable();
   }
 
   async function verifyOperatorSession() {
     const token = getOperatorToken();
     if (!token) {
       showOperatorLogin();
+      featureAccessLocks = {};
       applyRoleAccess();
       return false;
     }
@@ -2904,12 +3085,14 @@
       localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(result.operator));
       hideOperatorLogin();
       renderOperatorInfo();
+      await fetchFeatureLocks();
       applyRoleAccess();
       startOperatorActivityTracking();
       return true;
     } catch (error) {
       clearOperatorSession();
       showOperatorLogin();
+      featureAccessLocks = {};
       applyRoleAccess();
       return false;
     }
@@ -2936,6 +3119,7 @@
       saveOperatorSession(result.token, result.operator);
       hideOperatorLogin();
       renderOperatorInfo();
+      await fetchFeatureLocks();
       applyRoleAccess();
       startOperatorActivityTracking();
       showToast('Login operator berhasil.', 'success');
@@ -2962,11 +3146,19 @@
         showToast('Akses monitoring dibatasi.', 'error');
         return;
       }
+      const featureKey = featureKeyForPanel(target);
+      if (!canCurrentOperatorOpenFeature(featureKey)) {
+        showToast('Fitur ini sedang dikunci sementara oleh Superadmin untuk perbaikan.', 'error');
+        return;
+      }
       document.querySelectorAll('.tool-tab').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tool-panel').forEach(panel => panel.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('panel-' + target).classList.add('active');
-      if (target === 'admin-operators') adminFetchOperators();
+      if (target === 'admin-operators') {
+        adminFetchOperators();
+        fetchFeatureLocks();
+      }
       if (target === 'bonus-monitoring') adminFetchBonusMonitoring();
     });
   });
@@ -3105,6 +3297,30 @@
     claimUpdateBuyspinWarning();
   }
 
+  function claimRecalculateAll() {
+    claimUpdateProviderDefaults(false);
+    claimUpdateCalculatedFields();
+  }
+
+  function claimResetClaimOutputOnly() {
+    const output = document.getElementById('claimOutput');
+    const warning = document.getElementById('claimBuyspinWarning');
+    if (output) output.value = '';
+    if (warning) warning.classList.remove('show');
+  }
+
+  function claimResetBeforeOcr() {
+    claimLastParsedOcr = null;
+    ['claimTicketId', 'claimBetInput', 'claimBettOutput', 'claimWinCandidates', 'claimSelectedWin', 'claimBaseAmount', 'claimJpResult', 'claimOcrText'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    delete document.getElementById('claimBettOutput').dataset.manualEdit;
+    claimRenderDetectedSummary(null);
+    claimResetClaimOutputOnly();
+    claimSetStatus('');
+  }
+
   function claimUpdateProviderDefaults(forceScatter = false) {
     const scatter = document.getElementById('claimScatterCount');
     if (!scatter) return;
@@ -3195,29 +3411,34 @@
     throw lastError || new Error('OCR gagal membaca history. Silakan isi manual.');
   }
 
-  function claimApplyOcrResult(data) {
-    const parsed = data && data.parsed ? data.parsed : {};
+  function claimApplyParsedResult(parsed, rawText = '') {
+    if (!parsed) return;
     claimLastParsedOcr = parsed;
-    if (parsed.detected_provider && ['PG', 'PRAGMATIC'].includes(parsed.detected_provider)) {
+    const parsedProvider = parsed.provider || parsed.detected_provider;
+    if (parsedProvider && ['PG', 'PRAGMATIC'].includes(parsedProvider)) {
       const providerEl = document.getElementById('claimProvider');
-      if (providerEl && providerEl.value !== parsed.detected_provider) {
-        providerEl.value = parsed.detected_provider;
+      if (providerEl && providerEl.value !== parsedProvider) {
+        providerEl.value = parsedProvider;
         claimUpdateProviderDefaults(true);
       }
     }
-    const selectedRow = (parsed.detected_rows || [])[0] || {};
+    const selectedIndex = Number.isFinite(Number(parsed.selected_row_index)) ? Number(parsed.selected_row_index) : 0;
+    const selectedRow = (parsed.detected_rows || [])[selectedIndex] || (parsed.detected_rows || [])[0] || {};
+    const debug = parsed.debug || {};
     const detectionNote = [
+      `Provider selected: ${claimCurrentProvider() || '-'}`,
       `Provider detected: ${parsed.detected_provider || claimCurrentProvider() || '-'}`,
-      `Selected row: ${parsed.selected_row_index || 1}`,
+      `Parser used: ${parsed.parser_used || '-'}`,
+      `Selected row: ${selectedIndex + 1}`,
       `Ticket: ${parsed.ticket_id || '-'}`,
       `Bet: ${parsed.bet || '-'}`,
       `Win: ${parsed.selected_win || '-'}`,
-      `Ticket list: ${(parsed.ticket_ids || []).join(', ') || '-'}`,
-      `Bet list: ${(parsed.bet_candidates || []).join(', ') || '-'}`,
-      `Win list: ${(parsed.win_candidates || []).join(', ') || '-'}`,
-      selectedRow.balance ? `Balance row 1: ${selectedRow.balance}` : ''
+      `Ticket list: ${(debug.ticket_list || parsed.ticket_ids || []).join(', ') || '-'}`,
+      `Bet list: ${(debug.bet_list || parsed.bet_candidates || []).join(', ') || '-'}`,
+      `Win list: ${(debug.win_list || parsed.win_candidates || []).join(', ') || '-'}`,
+      selectedRow.balance ? `Balance row ${selectedIndex + 1}: ${selectedRow.balance}` : ''
     ].filter(Boolean).join('\n');
-    document.getElementById('claimOcrText').value = `${detectionNote}\n\n--- RAW OCR ---\n${data.raw_text || ''}`;
+    document.getElementById('claimOcrText').value = `${detectionNote}\n\n--- RAW OCR ---\n${rawText || ''}`;
     claimRenderDetectedSummary(parsed);
     if (parsed.ticket_id) document.getElementById('claimTicketId').value = parsed.ticket_id;
     if (parsed.bet) document.getElementById('claimBetInput').value = parsed.bet;
@@ -3226,7 +3447,12 @@
       document.getElementById('claimWinCandidates').value = parsed.win_candidates.join('\n');
     }
     if (parsed.selected_win) document.getElementById('claimSelectedWin').value = parsed.selected_win;
-    claimUpdateCalculatedFields();
+    claimRecalculateAll();
+  }
+
+  function claimApplyOcrResult(data) {
+    const parsed = data && data.parsed ? data.parsed : {};
+    claimApplyParsedResult(parsed, data.raw_text || '');
   }
 
   function claimRenderDetectedSummary(parsed) {
@@ -3238,9 +3464,10 @@
       return;
     }
     wrap.style.display = 'flex';
+    const displayRow = Number.isFinite(Number(parsed.selected_row_index)) ? Number(parsed.selected_row_index) + 1 : 1;
     wrap.innerHTML = [
       `Provider: ${parsed.detected_provider || '-'}`,
-      `Row: ${parsed.selected_row_index || 1}`,
+      `Row: ${displayRow}`,
       `Ticket: ${parsed.ticket_id || '-'}`,
       `Bet: ${parsed.bet || '-'}`,
       `Win: ${parsed.selected_win || '-'}`
@@ -3258,12 +3485,12 @@
     if (row.ticket_id) document.getElementById('claimTicketId').value = row.ticket_id;
     if (row.bet) {
       document.getElementById('claimBetInput').value = row.bet;
-      document.getElementById('claimBettOutput').value = claimParseBetToBettOutput(row.bet);
+      document.getElementById('claimBettOutput').value = row.bett_output || claimParseBetToBettOutput(row.bet);
     }
     if (row.win) {
       document.getElementById('claimSelectedWin').value = row.win;
     }
-    claimUpdateCalculatedFields();
+    claimRecalculateAll();
     showToast('Baris teratas OCR sudah dipakai.', 'success');
   }
 
@@ -3276,6 +3503,7 @@
     }
 
     try {
+      claimResetBeforeOcr();
       setButtonLoading(btn, true, 'Membaca OCR...');
       claimSetStatus('Membaca history dengan OCR...');
       showLoading('Klaim Mahjong Helper', 'Membaca history dengan OCR...', [
