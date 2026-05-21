@@ -2460,6 +2460,7 @@
           </div>
           <div class="bonus-actions">
             <button id="adminOperatorCreateBtn" class="primary">Tambah Operator</button>
+            <button id="adminOperatorRefreshBtn" class="ghost">Refresh Admin</button>
           </div>
         </section>
 
@@ -2547,6 +2548,7 @@
               <option value="EMPTY">EMPTY</option>
             </select>
             <button id="monitorRefreshBtn" class="primary">Refresh Monitoring</button>
+            <button id="monitorLoadMoreBtn" class="ghost" style="display:none;">Load More</button>
           </div>
 
           <div class="table-wrap">
@@ -2680,11 +2682,26 @@
   let bonusMonitorBatches = [];
   let bonusMonitorSelectedBatch = null;
   let bonusMonitorSelectedRows = [];
+  let adminOperatorsCache = {
+    rows: [],
+    loadedAt: 0,
+    ttlMs: 60000
+  };
+  let bonusMonitoringCache = {
+    key: '',
+    batches: [],
+    loadedAt: 0,
+    ttlMs: 30000
+  };
+  const BONUS_MONITORING_LIMIT = 50;
+  let bonusMonitoringPage = 1;
   let claimLastParsedOcr = null;
   let claimHistoryFile = null;
   let claimScatterFile = null;
   let activePasteTarget = 'history';
   let featureAccessLocks = {};
+  let featureLocksLoadedAt = 0;
+  const FEATURE_LOCK_TTL_MS = 60000;
   const FEATURE_TAB_MAP = {
     parser: 'parser',
     bonus: 'bonus',
@@ -2704,6 +2721,18 @@
   };
   let operatorIdleTimer = null;
   let operatorLastSessionTouchAt = 0;
+
+  function isDevRuntime() {
+    return ['localhost', '127.0.0.1', ''].includes(window.location.hostname) || window.location.protocol === 'file:';
+  }
+
+  function devTimeStart(label) {
+    if (isDevRuntime() && console.time) console.time(label);
+  }
+
+  function devTimeEnd(label) {
+    if (isDevRuntime() && console.timeEnd) console.timeEnd(label);
+  }
 
   function showLoading(title = 'Memproses...', message = 'Mohon tunggu sebentar.', steps = []) {
     const overlay = document.getElementById('globalLoading');
@@ -2978,8 +3007,13 @@
     return !isFeatureLocked(featureKey) || isSuperAdmin();
   }
 
-  async function fetchFeatureLocks() {
+  async function fetchFeatureLocks(force = false) {
     if (!getOperatorToken()) return;
+    if (!force && featureLocksLoadedAt && Date.now() - featureLocksLoadedAt < FEATURE_LOCK_TTL_MS) {
+      renderFeatureLocks();
+      renderFeatureLockTable();
+      return;
+    }
     try {
       const response = await fetch('/api/feature-locks', { headers: operatorAuthHeaders() });
       const result = await response.json().catch(() => ({}));
@@ -2988,6 +3022,7 @@
       (result.locks || []).forEach(lock => {
         featureAccessLocks[lock.feature_key] = lock;
       });
+      featureLocksLoadedAt = Date.now();
       renderFeatureLocks();
       renderFeatureLockTable();
     } catch (error) {
@@ -3062,6 +3097,7 @@
       (result.locks || []).forEach(lock => {
         featureAccessLocks[lock.feature_key] = lock;
       });
+      featureLocksLoadedAt = Date.now();
       renderFeatureLocks();
       renderFeatureLockTable();
       showToast(isLocked ? 'Menu berhasil dikunci.' : 'Menu berhasil dibuka kembali.', 'success');
@@ -4019,6 +4055,9 @@
   document.getElementById('bonusDate').value = getTodayWibInputValue();
   document.getElementById('auditStartDate').value = getTodayWibInputValue();
   document.getElementById('auditEndDate').value = getTodayWibInputValue();
+  if (document.getElementById('monitorBonusDateFilter')) {
+    document.getElementById('monitorBonusDateFilter').value = getTodayWibInputValue();
+  }
 
   function getBonusDoneStore() {
     try {
@@ -4422,40 +4461,120 @@
     }).join('');
   }
 
-  async function adminFetchBonusMonitoring() {
+  function setBonusMonitorTableLoading(message = 'Memuat monitoring...') {
+    const table = document.getElementById('monitorBatchTable');
+    if (table) table.innerHTML = `<tr><td colspan="10" class="empty">${escapeHtml(message)}</td></tr>`;
+  }
+
+  function getBonusMonitoringFilters(page = bonusMonitoringPage) {
+    return {
+      date: document.getElementById('monitorBonusDateFilter')?.value || getTodayWibInputValue(),
+      operator: document.getElementById('monitorOperatorFilter')?.value || '',
+      status: document.getElementById('monitorStatusFilter')?.value || '',
+      limit: BONUS_MONITORING_LIMIT,
+      page
+    };
+  }
+
+  function getBonusMonitoringCacheKey(filters) {
+    return [
+      filters.date || '',
+      filters.operator || '',
+      filters.status || '',
+      filters.page || 1,
+      filters.limit || BONUS_MONITORING_LIMIT
+    ].join('|');
+  }
+
+  function applyBonusMonitoringLoadMoreState(result = {}) {
+    const btn = document.getElementById('monitorLoadMoreBtn');
+    if (!btn) return;
+    btn.style.display = result.hasMore ? '' : 'none';
+  }
+
+  async function adminFetchBonusMonitoring(options = {}) {
     if (!isAdmin()) {
       showToast('Akses monitoring dibatasi.', 'error');
       return;
     }
 
-    const date = document.getElementById('monitorBonusDateFilter')?.value || '';
-    const operator = document.getElementById('monitorOperatorFilter')?.value || '';
-    const status = document.getElementById('monitorStatusFilter')?.value || '';
+    const resetPage = options.resetPage === true;
+    if (resetPage) bonusMonitoringPage = 1;
 
-    showLoading('Memuat Monitoring Bonus', 'Mengambil data dari database pusat...', [
-      'Menghubungi server',
-      'Memuat riwayat proses operator',
-      'Menghitung status batch'
-    ]);
+    const filters = getBonusMonitoringFilters(bonusMonitoringPage);
+    const cacheKey = getBonusMonitoringCacheKey(filters);
+    const cacheValid = bonusMonitoringCache.key === cacheKey
+      && Date.now() - bonusMonitoringCache.loadedAt < bonusMonitoringCache.ttlMs;
+
+    if (!options.force && cacheValid) {
+      renderBonusMonitorBatches(bonusMonitoringCache.batches);
+      applyBonusMonitoringLoadMoreState({ hasMore: bonusMonitoringCache.hasMore });
+      return;
+    }
 
     try {
-      updateLoading('Menghubungi server...', 0);
+      devTimeStart('adminFetchBonusMonitoring');
+      setBonusMonitorTableLoading('Memuat monitoring...');
       const result = await adminBonusApi('admin_list_bonus_batches', {
-        date,
-        operator,
-        status,
-        limit: 80
+        date: filters.date,
+        operator: filters.operator,
+        status: filters.status,
+        limit: filters.limit,
+        page: filters.page
       });
-      updateLoading('Memuat riwayat proses operator...', 1, 0);
+
+      bonusMonitoringCache = {
+        key: cacheKey,
+        batches: result.batches || [],
+        loadedAt: Date.now(),
+        ttlMs: bonusMonitoringCache.ttlMs,
+        hasMore: Boolean(result.hasMore)
+      };
       renderBonusMonitorBatches(result.batches || []);
-      updateLoading('Monitoring siap ditampilkan.', null, 2);
+      applyBonusMonitoringLoadMoreState(result);
     } catch (error) {
-      setLoadingError(error.message || 'Gagal memuat monitoring.', 1);
       const table = document.getElementById('monitorBatchTable');
       if (table) table.innerHTML = `<tr><td colspan="10" class="empty">${escapeHtml(error.message || 'Gagal memuat monitoring.')}</td></tr>`;
       showToast(error.message || 'Gagal memuat monitoring bonus.', 'error');
     } finally {
-      hideLoading();
+      devTimeEnd('adminFetchBonusMonitoring');
+    }
+  }
+
+  async function adminLoadMoreBonusMonitoring() {
+    if (!isAdmin()) return;
+    bonusMonitoringPage += 1;
+    const filters = getBonusMonitoringFilters(bonusMonitoringPage);
+    const cacheKey = getBonusMonitoringCacheKey(filters);
+
+    try {
+      devTimeStart('adminFetchBonusMonitoring');
+      const btn = document.getElementById('monitorLoadMoreBtn');
+      setButtonLoading(btn, true, 'Memuat...');
+      const result = await adminBonusApi('admin_list_bonus_batches', {
+        date: filters.date,
+        operator: filters.operator,
+        status: filters.status,
+        limit: filters.limit,
+        page: filters.page
+      });
+      const merged = [...bonusMonitorBatches, ...(result.batches || [])];
+      bonusMonitoringCache = {
+        key: cacheKey,
+        batches: merged,
+        loadedAt: Date.now(),
+        ttlMs: bonusMonitoringCache.ttlMs,
+        hasMore: Boolean(result.hasMore)
+      };
+      renderBonusMonitorBatches(merged);
+      applyBonusMonitoringLoadMoreState(result);
+    } catch (error) {
+      bonusMonitoringPage = Math.max(1, bonusMonitoringPage - 1);
+      showToast(error.message || 'Gagal memuat monitoring lanjutan.', 'error');
+    } finally {
+      const btn = document.getElementById('monitorLoadMoreBtn');
+      setButtonLoading(btn, false);
+      devTimeEnd('adminFetchBonusMonitoring');
     }
   }
 
@@ -4546,7 +4665,8 @@
       updateLoading('Mengubah rows menjadi DONE...', 1, 0);
       showToast(`Batch berhasil ditandai DONE. ${result.doneCount || 0} ID diperbarui.`, 'success');
       updateLoading('Memuat ulang monitoring...', 2, 1);
-      await adminFetchBonusMonitoring();
+      bonusMonitoringCache.loadedAt = 0;
+      await adminFetchBonusMonitoring({ force: true, resetPage: true });
       if (bonusMonitorSelectedBatch && bonusMonitorSelectedBatch.id) {
         await adminOpenBonusBatchDetail(bonusMonitorSelectedBatch.id);
       }
@@ -4643,28 +4763,39 @@
     if (copyClaimBtn) copyClaimBtn.style.display = 'none';
   }
 
-  async function adminFetchOperators() {
+  function setAdminOperatorTableLoading(message = 'Memuat daftar operator...') {
+    const table = document.getElementById('adminOperatorTable');
+    if (table) table.innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(message)}</td></tr>`;
+  }
+
+  async function adminFetchOperators(options = {}) {
     if (!isAdmin()) {
       showToast('Akses admin dibatasi.', 'error');
       return;
     }
 
-    showLoading('Mengambil Data Operator', 'Mengambil data dari sistem pusat...', [
-      'Menghubungi server',
-      'Validasi akses admin',
-      'Memuat daftar operator'
-    ]);
+    const cacheValid = Date.now() - adminOperatorsCache.loadedAt < adminOperatorsCache.ttlMs;
+    if (!options.force && cacheValid) {
+      renderAdminOperators(adminOperatorsCache.rows);
+      return;
+    }
+
     try {
-      updateLoading('Menghubungi server...', 0);
-      const result = await adminApi('/api/operators');
-      updateLoading('Memuat daftar operator...', 2, 1);
-      renderAdminOperators(result.operators || []);
+      devTimeStart('adminFetchOperators');
+      setAdminOperatorTableLoading('Memuat daftar operator...');
+      const result = await adminApi('/api/operators?limit=50&page=1');
+      adminOperatorsCache = {
+        rows: result.operators || [],
+        loadedAt: Date.now(),
+        ttlMs: adminOperatorsCache.ttlMs
+      };
+      renderAdminOperators(adminOperatorsCache.rows);
     } catch (error) {
-      setLoadingError(error.message || 'Gagal memuat operator.', 1);
       const table = document.getElementById('adminOperatorTable');
       if (table) table.innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(error.message || 'Gagal memuat operator.')}</td></tr>`;
+      showToast(error.message || 'Gagal memuat operator.', 'error');
     } finally {
-      hideLoading();
+      devTimeEnd('adminFetchOperators');
     }
   }
 
@@ -4700,7 +4831,8 @@
       document.getElementById('adminOperatorPassword').value = '';
       document.getElementById('adminOperatorRole').value = 'operator';
       showToast('Operator berhasil ditambahkan.', 'success');
-      adminFetchOperators();
+      adminOperatorsCache.loadedAt = 0;
+      await adminFetchOperators({ force: true });
     } catch (error) {
       setLoadingError(error.message || 'Gagal menambah operator.', 1);
       showToast(error.message || 'Gagal menambah operator.', 'error');
@@ -4724,7 +4856,8 @@
         body: JSON.stringify(payload)
       });
       updateLoading('Perubahan tersimpan. Memuat ulang daftar...', 2, 1);
-      await adminFetchOperators();
+      adminOperatorsCache.loadedAt = 0;
+      await adminFetchOperators({ force: true });
     } catch (error) {
       setLoadingError(error.message || 'Gagal menyimpan operator.', 1);
       throw error;
@@ -4834,7 +4967,8 @@
       });
       updateLoading('Memuat ulang daftar operator...', 2, 1);
       showToast('Sesi aktif berhasil dilepas. Akun bisa login kembali.', 'success');
-      await adminFetchOperators();
+      adminOperatorsCache.loadedAt = 0;
+      await adminFetchOperators({ force: true });
     } catch (error) {
       setLoadingError(error.message || 'Gagal melepas sesi aktif.', 1);
       showToast(error.message || 'Anda tidak memiliki akses untuk melepas sesi akun ini.', 'error');
@@ -6518,9 +6652,20 @@
   document.getElementById('bonusDate').addEventListener('change', renderBonusDoneInfo);
   document.getElementById('unlockAuditBtn').addEventListener('click', unlockAudit);
   document.getElementById('adminOperatorCreateBtn').addEventListener('click', adminCreateOperator);
-  document.getElementById('monitorRefreshBtn').addEventListener('click', adminFetchBonusMonitoring);
-  document.getElementById('monitorStatusFilter').addEventListener('change', adminFetchBonusMonitoring);
-  document.getElementById('monitorBonusDateFilter').addEventListener('change', adminFetchBonusMonitoring);
+  document.getElementById('adminOperatorRefreshBtn').addEventListener('click', async () => {
+    adminOperatorsCache.loadedAt = 0;
+    await adminFetchOperators({ force: true });
+    await fetchFeatureLocks(true);
+  });
+  document.getElementById('monitorRefreshBtn').addEventListener('click', () => adminFetchBonusMonitoring({ force: true, resetPage: true }));
+  document.getElementById('monitorLoadMoreBtn').addEventListener('click', adminLoadMoreBonusMonitoring);
+  document.getElementById('monitorStatusFilter').addEventListener('change', () => adminFetchBonusMonitoring({ resetPage: true }));
+  document.getElementById('monitorBonusDateFilter').addEventListener('change', () => adminFetchBonusMonitoring({ resetPage: true }));
+  let monitorOperatorFilterTimer = null;
+  document.getElementById('monitorOperatorFilter').addEventListener('input', () => {
+    clearTimeout(monitorOperatorFilterTimer);
+    monitorOperatorFilterTimer = setTimeout(() => adminFetchBonusMonitoring({ resetPage: true }), 400);
+  });
   document.getElementById('monitorFinalizeBtn').addEventListener('click', adminFinalizeSelectedBonusBatch);
   document.getElementById('monitorCloseDetailBtn').addEventListener('click', adminCloseBonusBatchDetail);
   document.getElementById('monitorCopyClaimBtn').addEventListener('click', adminCopyBonusClaim);

@@ -33,7 +33,7 @@ function safeOperator(row) {
     role: row.role,
     is_active: row.is_active,
     is_protected: Boolean(row.is_protected),
-    last_login_at: row.last_login_at,
+    last_login_at: row.last_login_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
     session_status: row.session_status || 'Tidak aktif',
@@ -148,14 +148,24 @@ async function requireAdmin(req) {
   return operator;
 }
 
-async function listOperators(res) {
-  await cleanupExpiredSessions();
+async function listOperators(req, res) {
+  const limit = Math.min(Math.max(Number(req.query?.limit) || 50, 1), 100);
+  const page = Math.max(Number(req.query?.page) || 1, 1);
+  const search = normalizeUsername(req.query?.search || '');
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('operators')
-    .select('id, username, display_name, role, is_active, is_protected, last_login_at, created_at, updated_at')
-    .order('username', { ascending: true });
+    .select('id, username, display_name, role, is_active, is_protected, created_at, updated_at', { count: 'exact' })
+    .order('username', { ascending: true })
+    .range(from, to);
 
+  if (search) {
+    query = query.or(`username.ilike.%${search}%,display_name.ilike.%${search}%`);
+  }
+
+  const { data, error, count } = await query;
   if (error) throw error;
 
   const operatorIds = (data || []).map(row => String(row.id));
@@ -165,6 +175,8 @@ async function listOperators(res) {
       .from('operator_active_sessions')
       .select('operator_id, is_active, last_seen_at, expired_at')
       .in('operator_id', operatorIds)
+      .eq('is_active', true)
+      .gte('last_seen_at', sessionCutoffIso())
       .order('last_seen_at', { ascending: false });
 
     if (sessionError) throw sessionError;
@@ -178,7 +190,7 @@ async function listOperators(res) {
       sessionMap.set(key, {
         activeCount: 0,
         lastSeenAt: session.last_seen_at || null,
-        status: session.is_active ? 'Aktif' : 'Expired'
+        status: 'Aktif'
       });
     }
     const item = sessionMap.get(key);
@@ -193,6 +205,10 @@ async function listOperators(res) {
 
   return res.status(200).json({
     success: true,
+    page,
+    limit,
+    total: count || 0,
+    hasMore: to + 1 < (count || 0),
     operators: (data || []).map(row => {
       const session = sessionMap.get(String(row.id));
       return safeOperator({
@@ -450,7 +466,7 @@ export default async function handler(req, res) {
   try {
     const requester = await requireAdmin(req);
 
-    if (req.method === 'GET') return await listOperators(res);
+    if (req.method === 'GET') return await listOperators(req, res);
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body;
 

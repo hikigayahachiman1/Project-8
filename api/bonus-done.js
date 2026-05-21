@@ -665,33 +665,44 @@ async function handleSyncAdjustmentApproved(req, body, res) {
 }
 
 async function handleAdminListBonusBatches(req, body, res) {
+  const shouldPerfLog = process.env.NODE_ENV !== 'production';
+  if (shouldPerfLog) console.time('admin_list_bonus_batches');
   await getAdminOperatorFromRequest(req);
-  await deleteExpiredRows();
 
   const limit = Math.min(Math.max(Number(body.limit) || 50, 1), 150);
+  const page = Math.max(Number(body.page) || 1, 1);
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
   const date = String(body.date || '').trim();
-  const operatorFilter = normalizeText(body.operator || '').toUpperCase();
+  const operatorInput = normalizeText(body.operator || '');
+  const operatorFilter = operatorInput.toUpperCase();
   const statusFilter = normalizeText(body.status || '').toUpperCase();
   const serverTime = new Date().toISOString();
 
   let query = supabase
     .from('bonus_process_locks')
-    .select('*')
+    .select('id, bonus_date, claim_owner, claim_batch_id, operator_name, lock_status, started_at, created_at, updated_at, pending_expires_at, done_at, done_by_name', { count: 'exact' })
     .order('updated_at', { ascending: false })
-    .limit(limit);
+    .range(from, to);
 
   if (date && isValidDate(date)) query = query.eq('bonus_date', date);
+  if (operatorInput) query = query.or(`operator_name.ilike.%${operatorInput}%,claim_owner.ilike.%${operatorInput}%`);
+  if (statusFilter === 'EXPIRED') query = query.eq('lock_status', 'PENDING');
   if (statusFilter && !['EXPIRED', 'ALL'].includes(statusFilter)) query = query.eq('lock_status', statusFilter);
 
-  const { data: locks, error: lockError } = await query;
+  const { data: locks, error: lockError, count } = await query;
   if (lockError) throw lockError;
 
   const lockRows = locks || [];
   if (lockRows.length === 0) {
+    if (shouldPerfLog) console.timeEnd('admin_list_bonus_batches');
     return res.status(200).json({
       success: true,
       status: 'admin_batches',
       batches: [],
+      page,
+      limit,
+      hasMore: false,
       serverTime
     });
   }
@@ -701,7 +712,7 @@ async function handleAdminListBonusBatches(req, body, res) {
 
   const { data: rows, error: rowError } = await supabase
     .from('bonus_done_daily')
-    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, done_at, pending_expires_at, created_at, updated_at')
+    .select('bonus_date, bonus_type, bonus_amount, claim_owner, claim_batch_id')
     .in('bonus_date', dates)
     .in('claim_owner', owners)
     .eq('bonus_type', 'BONUS_HARIAN');
@@ -734,10 +745,14 @@ async function handleAdminListBonusBatches(req, body, res) {
     batches = batches.filter(batch => batch.display_status === statusFilter);
   }
 
+  if (shouldPerfLog) console.timeEnd('admin_list_bonus_batches');
   return res.status(200).json({
     success: true,
     status: 'admin_batches',
     batches,
+    page,
+    limit,
+    hasMore: to + 1 < (count || 0),
     serverTime
   });
 }
