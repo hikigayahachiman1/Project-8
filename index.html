@@ -1485,6 +1485,38 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .claim-main-dropzone {
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+    border: 1px dashed rgba(39,245,255,0.34);
+    border-radius: 24px;
+    background:
+      linear-gradient(135deg, rgba(39,245,255,0.075), rgba(155,92,255,0.055)),
+      rgba(3, 7, 18, 0.48);
+    color: var(--ink-soft);
+  }
+
+  .claim-main-dropzone.active {
+    border-color: rgba(255,200,87,0.64);
+    box-shadow: 0 0 0 4px rgba(255,200,87,0.08), 0 0 28px rgba(39,245,255,0.10);
+  }
+
+  .claim-main-head {
+    display: grid;
+    gap: 6px;
+  }
+
+  .claim-main-head strong {
+    color: var(--ink);
+    font-size: 1.02rem;
+  }
+
+  .claim-main-head span {
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+
   .claim-preview-box {
     min-height: 220px;
     display: grid;
@@ -1497,6 +1529,34 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.8rem;
     overflow: hidden;
+  }
+
+  .claim-slot {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid rgba(143,178,255,0.18);
+    border-radius: 20px;
+    background: rgba(2, 7, 18, 0.34);
+    cursor: pointer;
+  }
+
+  .claim-slot.active {
+    border-color: rgba(255,200,87,0.58);
+    box-shadow: 0 0 0 3px rgba(255,200,87,0.08);
+  }
+
+  .claim-slot-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .claim-slot-title {
+    color: var(--ink);
+    font-weight: 800;
   }
 
   .claim-preview-box img {
@@ -2262,37 +2322,37 @@
             <input id="claimType" class="bonus-date" type="text" value="FREESPIN" readonly title="Sementara hanya FREESPIN">
           </div>
 
-          <div class="claim-preview-grid claim-image-grid">
-            <div class="claim-paste-area active" id="claimHistoryPasteArea" tabindex="0" role="button">
-              <strong>History Permainan PG</strong>
-              <span>Klik area ini lalu tekan Ctrl+V untuk paste gambar, atau upload file history PG.</span>
-              <em id="claimHistoryImageStatus" class="claim-image-status">Belum ada gambar</em>
-              <input id="claimHistoryImage" type="file" accept="image/png,image/jpeg,image/webp">
+          <div class="claim-main-dropzone active" id="claimImageDropzone" tabindex="0" role="group">
+            <div class="claim-main-head">
+              <strong>Area Gambar Klaim PG</strong>
+              <span>Paste/upload maksimal 2 gambar: History PG dan Bukti Scatter PG. Klik slot tertentu untuk mengganti gambar.</span>
             </div>
-            <div class="claim-paste-area" id="claimScatterPasteArea" tabindex="0" role="button">
-              <strong>Gambar Scatter PG</strong>
-              <span>Klik area ini lalu tekan Ctrl+V untuk paste gambar scatter. Jika OCR gagal, isi scatter manual.</span>
-              <em id="claimScatterImageStatus" class="claim-image-status">Belum ada gambar</em>
-              <input id="claimScatterImage" type="file" accept="image/png,image/jpeg,image/webp">
+            <div class="claim-preview-grid claim-image-grid">
+              <div class="claim-slot active" id="claimHistorySlot" tabindex="0" role="button">
+                <div class="claim-slot-head">
+                  <span class="claim-slot-title">Gambar 1 - History PG</span>
+                  <em id="claimHistoryImageStatus" class="claim-image-status">Belum ada gambar</em>
+                </div>
+                <div id="claimHistoryPreview" class="claim-preview-box">Belum ada gambar history</div>
+                <button type="button" id="claimPickHistoryBtn" class="ghost">Pilih History</button>
+                <input id="claimHistoryImage" type="file" accept="image/png,image/jpeg,image/webp" style="display:none;">
+              </div>
+              <div class="claim-slot" id="claimScatterSlot" tabindex="0" role="button">
+                <div class="claim-slot-head">
+                  <span class="claim-slot-title">Gambar 2 - Scatter PG</span>
+                  <em id="claimScatterImageStatus" class="claim-image-status">Belum ada gambar</em>
+                </div>
+                <div id="claimScatterPreview" class="claim-preview-box">Belum ada gambar scatter</div>
+                <button type="button" id="claimPickScatterBtn" class="ghost">Pilih Scatter</button>
+                <input id="claimScatterImage" type="file" accept="image/png,image/jpeg,image/webp" style="display:none;">
+              </div>
             </div>
-          </div>
-
-          <div class="bonus-actions">
-            <button id="claimSubmitOcrBtn" class="primary">Kirim ke OCR</button>
-            <button id="claimResetImagesBtn" class="ghost">Reset Gambar</button>
+            <div class="bonus-actions">
+              <button id="claimSubmitOcrBtn" class="primary">Kirim ke OCR</button>
+              <button id="claimResetImagesBtn" class="ghost">Reset Gambar</button>
+            </div>
           </div>
           <div id="claimOcrStatus" class="claim-ocr-status show">Masukkan gambar History PG, lalu klik Kirim ke OCR.</div>
-
-          <div class="claim-preview-grid claim-image-grid">
-            <div>
-              <div class="source-note">Preview History PG</div>
-              <div id="claimHistoryPreview" class="claim-preview-box">Belum ada gambar history</div>
-            </div>
-            <div>
-              <div class="source-note">Preview Scatter PG</div>
-              <div id="claimScatterPreview" class="claim-preview-box">Belum ada gambar scatter</div>
-            </div>
-          </div>
 
           <details class="ocr-box">
             <summary>Raw OCR / Catatan Deteksi</summary>
@@ -3688,8 +3748,9 @@
 
   function claimSetActivePasteTarget(target) {
     activePasteTarget = target === 'scatter' ? 'scatter' : 'history';
-    document.getElementById('claimHistoryPasteArea')?.classList.toggle('active', activePasteTarget === 'history');
-    document.getElementById('claimScatterPasteArea')?.classList.toggle('active', activePasteTarget === 'scatter');
+    document.getElementById('claimHistorySlot')?.classList.toggle('active', activePasteTarget === 'history');
+    document.getElementById('claimScatterSlot')?.classList.toggle('active', activePasteTarget === 'scatter');
+    document.getElementById('claimImageDropzone')?.classList.add('active');
   }
 
   function claimSetPreview(target, dataUrl) {
@@ -3937,6 +3998,12 @@
     showToast('Gambar berhasil ditempel.', 'success');
   }
 
+  function claimResolvePasteTarget() {
+    if (!claimHistoryFile) return 'history';
+    if (!claimScatterFile) return 'scatter';
+    return activePasteTarget || 'history';
+  }
+
   function resetClaimImages() {
     claimHistoryFile = null;
     claimScatterFile = null;
@@ -3966,7 +4033,7 @@
       return;
     }
     event.preventDefault();
-    handleClaimImageFile(file, activePasteTarget || 'history');
+    handleClaimImageFile(file, claimResolvePasteTarget());
   }
 
   function claimGenerateOutput() {
@@ -6702,10 +6769,27 @@
   document.getElementById('monitorFinalizeBtn').addEventListener('click', adminFinalizeSelectedBonusBatch);
   document.getElementById('monitorCloseDetailBtn').addEventListener('click', adminCloseBonusBatchDetail);
   document.getElementById('monitorCopyClaimBtn').addEventListener('click', adminCopyBonusClaim);
-  document.getElementById('claimHistoryPasteArea').addEventListener('click', () => claimSetActivePasteTarget('history'));
-  document.getElementById('claimHistoryPasteArea').addEventListener('focus', () => claimSetActivePasteTarget('history'));
-  document.getElementById('claimScatterPasteArea').addEventListener('click', () => claimSetActivePasteTarget('scatter'));
-  document.getElementById('claimScatterPasteArea').addEventListener('focus', () => claimSetActivePasteTarget('scatter'));
+  document.getElementById('claimImageDropzone').addEventListener('click', () => {
+    if (!claimHistoryFile) claimSetActivePasteTarget('history');
+    else if (!claimScatterFile) claimSetActivePasteTarget('scatter');
+  });
+  document.getElementById('claimImageDropzone').addEventListener('focus', () => {
+    if (!claimHistoryFile) claimSetActivePasteTarget('history');
+  });
+  document.getElementById('claimHistorySlot').addEventListener('click', () => claimSetActivePasteTarget('history'));
+  document.getElementById('claimHistorySlot').addEventListener('focus', () => claimSetActivePasteTarget('history'));
+  document.getElementById('claimScatterSlot').addEventListener('click', () => claimSetActivePasteTarget('scatter'));
+  document.getElementById('claimScatterSlot').addEventListener('focus', () => claimSetActivePasteTarget('scatter'));
+  document.getElementById('claimPickHistoryBtn').addEventListener('click', event => {
+    event.stopPropagation();
+    claimSetActivePasteTarget('history');
+    document.getElementById('claimHistoryImage').click();
+  });
+  document.getElementById('claimPickScatterBtn').addEventListener('click', event => {
+    event.stopPropagation();
+    claimSetActivePasteTarget('scatter');
+    document.getElementById('claimScatterImage').click();
+  });
   document.getElementById('claimHistoryImage').addEventListener('click', event => event.stopPropagation());
   document.getElementById('claimScatterImage').addEventListener('click', event => event.stopPropagation());
   document.getElementById('claimHistoryImage').addEventListener('change', event => handleClaimImageFile(event.target.files?.[0], 'history'));
