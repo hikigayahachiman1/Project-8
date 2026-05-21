@@ -338,12 +338,18 @@ export function pickSmallestPositiveWin(values) {
 }
 
 function detectProvider(rawText, requestedProvider = '') {
-  const requested = String(requestedProvider || '').trim().toUpperCase();
-  if (requested === 'PG' || requested === 'PRAGMATIC') return requested;
   const normalized = normalizeOcrText(rawText);
+  const hasPgStrongMarker = /(verify\.pgsoft\.com|pgsoft|untung|surplus)/i.test(normalized);
+  const hasPgTableShape = /transaksi/i.test(normalized) && /taruhan/i.test(normalized) && !/id sesi bermain|jumlah dimenangkan/i.test(normalized);
+  const hasPgHistoryShape = /riwayat permainan/i.test(normalized) && /transaksi/i.test(normalized);
+  if (hasPgStrongMarker || hasPgTableShape || hasPgHistoryShape) {
+    return 'PG';
+  }
   if (/(gates of olympus|sweet bonanza|starlight princess|pragmatic|super scatter|id sesi bermain|jumlah dimenangkan)/i.test(normalized)) {
     return 'PRAGMATIC';
   }
+  const requested = String(requestedProvider || '').trim().toUpperCase();
+  if (requested === 'PG' || requested === 'PRAGMATIC') return requested;
   return 'PG';
 }
 
@@ -433,13 +439,85 @@ export function parsePragmaticHistoryOcr(rawText) {
   };
 }
 
+function extractPgTicketIds(text) {
+  const normalized = normalizeOcrText(text);
+  const lines = normalized.split('\n');
+  const candidates = [];
+  const digitLines = lines
+    .map(line => ({ line, digits: line.replace(/\D/g, '') }))
+    .filter(item => item.digits.length >= 6 && item.digits.length <= 12)
+    .filter(item => !isLikelyNoiseLine(item.line))
+    .filter(item => !/(?:rp|ap|ro|rd|bp|,|\.|:|\/|-)/i.test(item.line))
+    .filter(item => !/[A-Za-z]/.test(item.line));
+
+  for (let index = 0; index < digitLines.length; index += 1) {
+    const current = digitLines[index].digits;
+    const next = digitLines[index + 1] ? digitLines[index + 1].digits : '';
+    if (next) {
+      const combined = `${current}${next}`;
+      if (combined.length >= 16 && combined.length <= 20) {
+        candidates.push(combined);
+        index += 1;
+        continue;
+      }
+    }
+    if (current.length >= 16 && current.length <= 20) candidates.push(current);
+  }
+
+  const directMatches = normalized.match(/\b\d{16,20}\b/g) || [];
+  directMatches.forEach(match => candidates.push(match));
+
+  return [...new Set(candidates)]
+    .filter(value => value.length >= 16 && value.length <= 20)
+    .filter(value => !/^0+$/.test(value));
+}
+
+function isLikelyPgBet(value) {
+  const amount = parseIndonesianMoney(value);
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  return amount <= 100;
+}
+
+function extractPgMoneyColumns(text) {
+  const normalized = normalizeOcrText(text);
+  const moneyValues = extractMoneyCandidates(normalized, { unique: false })
+    .map(normalizeMoneyLabel)
+    .filter(Boolean);
+  const positiveValues = moneyValues.filter(value => parseIndonesianMoney(value) > 0);
+  const betCandidates = positiveValues.filter(isLikelyPgBet);
+  const bet = betCandidates[0] || positiveValues[0] || '';
+  const betAmount = parseIndonesianMoney(bet);
+
+  let winCandidates = positiveValues.filter(value => {
+    const amount = parseIndonesianMoney(value);
+    if (!Number.isFinite(amount) || amount <= 0) return false;
+    if (Number.isFinite(betAmount) && Math.abs(amount - betAmount) < 0.0001) return false;
+    return !isLikelyPgBet(value) || amount > betAmount;
+  });
+
+  if (!winCandidates.length && bet) {
+    const betIndex = moneyValues.findIndex(value => moneyAmountKey(value) === moneyAmountKey(bet));
+    winCandidates = moneyValues
+      .slice(Math.max(0, betIndex + 1))
+      .filter(value => parseIndonesianMoney(value) > 0)
+      .filter(value => moneyAmountKey(value) !== moneyAmountKey(bet));
+  }
+
+  return {
+    moneyValues,
+    bet,
+    betCandidates,
+    winCandidates: [...new Set(winCandidates)]
+  };
+}
+
 export function parsePgHistoryOcr(rawText) {
   const normalized = normalizeOcrText(rawText);
-  const ticket_id = extractTicketId(normalized);
-  const bet = extractBet(normalized);
+  const ticketIds = extractPgTicketIds(normalized);
+  const { bet, betCandidates, winCandidates } = extractPgMoneyColumns(normalized);
+  const ticket_id = ticketIds[0] || extractTicketId(normalized);
   const bett_output = parseBetToBettOutput(bet);
-  const win_candidates = extractWinCandidates(normalized);
-  const selected_win = pickSmallestPositiveWin(win_candidates);
+  const selected_win = winCandidates[0] || pickSmallestPositiveWin(extractWinCandidates(normalized));
   const base_amount = normalizeWinToBaseAmount(selected_win);
 
   return {
@@ -447,19 +525,19 @@ export function parsePgHistoryOcr(rawText) {
     ticket_id,
     bet,
     bett_output,
-    win_candidates,
+    win_candidates: winCandidates,
     selected_win,
     base_amount: Number.isFinite(base_amount) ? base_amount : null,
     detected_provider: 'PG',
     parser_used: 'parsePgHistoryOcr',
     selected_row_index: 0,
-    ticket_ids: extractTicketIds(normalized),
-    bet_candidates: bet ? [bet] : [],
-    win_list: win_candidates,
+    ticket_ids: ticketIds,
+    bet_candidates: betCandidates,
+    win_list: winCandidates,
     debug: {
-      ticket_list: extractTicketIds(normalized),
-      bet_list: bet ? [bet] : [],
-      win_list: win_candidates
+      ticket_list: ticketIds,
+      bet_list: betCandidates,
+      win_list: winCandidates
     },
     detected_rows: [{
       row_index: 0,

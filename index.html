@@ -2196,7 +2196,6 @@
           <div class="date-row">
             <select id="claimProvider" class="bonus-date">
               <option value="PG">PG</option>
-              <option value="PRAGMATIC">PRAGMATIC</option>
             </select>
             <input id="claimType" class="bonus-date" type="text" value="FREESPIN" readonly title="Sementara hanya FREESPIN">
           </div>
@@ -3005,7 +3004,7 @@
         })
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.ok !== true) throw new Error(result.message || 'Gagal mengubah kunci menu.');
+      if (!response.ok || result.ok !== true) throw new Error(result.message || result.error || 'Gagal mengubah kunci menu.');
       featureAccessLocks = {};
       (result.locks || []).forEach(lock => {
         featureAccessLocks[lock.feature_key] = lock;
@@ -3390,13 +3389,27 @@
 
   function claimApplyParsedResult(parsed, rawText = '') {
     if (!parsed) return;
+    const selectedProviderBeforeOcr = claimCurrentProvider();
     claimLastParsedOcr = parsed;
+    const parsedProvider = parsed.provider || parsed.detected_provider || selectedProviderBeforeOcr;
+    if (parsedProvider === 'PG') {
+      const providerEl = document.getElementById('claimProvider');
+      if (providerEl) providerEl.value = 'PG';
+      claimUpdateProviderDefaults(true);
+      if (selectedProviderBeforeOcr !== 'PG') {
+        showToast('Gambar terdeteksi sebagai PG Soft. Provider otomatis disesuaikan ke PG.', 'error');
+      }
+    } else if (parsedProvider === 'PRAGMATIC') {
+      claimSetStatus('PRAGMATIC sementara dinonaktifkan. Fokus penyelesaian PG Soft dulu.', 'error');
+      showToast('PRAGMATIC sementara dinonaktifkan. Gunakan gambar PG Soft terlebih dahulu.', 'error');
+    }
     const selectedIndex = Number.isFinite(Number(parsed.selected_row_index)) ? Number(parsed.selected_row_index) : 0;
     const selectedRow = (parsed.detected_rows || [])[selectedIndex] || (parsed.detected_rows || [])[0] || {};
     const debug = parsed.debug || {};
     const detectionNote = [
       `Provider selected: ${claimCurrentProvider() || '-'}`,
       `Provider detected: ${parsed.detected_provider || claimCurrentProvider() || '-'}`,
+      parsedProvider !== selectedProviderBeforeOcr ? 'Provider pilihan berbeda dengan gambar. Sistem memakai provider hasil deteksi OCR.' : '',
       `Parser used: ${parsed.parser_used || '-'}`,
       `Selected row: ${selectedIndex + 1}`,
       `Ticket: ${parsed.ticket_id || '-'}`,
@@ -3409,6 +3422,7 @@
     ].filter(Boolean).join('\n');
     document.getElementById('claimOcrText').value = `${detectionNote}\n\n--- RAW OCR ---\n${rawText || ''}`;
     claimRenderDetectedSummary(parsed);
+    if (parsedProvider === 'PRAGMATIC') return;
     if (parsed.ticket_id) document.getElementById('claimTicketId').value = parsed.ticket_id;
     if (parsed.bet) document.getElementById('claimBetInput').value = parsed.bet;
     if (parsed.bett_output) document.getElementById('claimBettOutput').value = parsed.bett_output;
@@ -3491,7 +3505,12 @@
       updateLoading('Mengirim gambar ke OCR...', 2, 1);
       const data = await claimPostOcrImage(processed.blob);
       updateLoading('Mengisi form hasil deteksi...', 3, 2);
+      const detectedProvider = data?.parsed?.provider || data?.parsed?.detected_provider || '';
       claimApplyOcrResult(data);
+      if (detectedProvider === 'PRAGMATIC') {
+        updateLoading('Provider PRAGMATIC terdeteksi dan sementara dinonaktifkan.', null, 3);
+        return;
+      }
       claimSetStatus('OCR selesai. Cek dan koreksi hasil sebelum generate.');
       showToast('OCR selesai. Cek dan koreksi hasil sebelum generate.', 'success');
       updateLoading('OCR selesai.', null, 3);

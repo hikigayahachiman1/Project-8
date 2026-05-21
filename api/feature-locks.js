@@ -228,6 +228,7 @@ export default async function handler(req, res) {
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       ok: false,
+      error: error.code || 'FEATURE_LOCK_ERROR',
       message: error.message || 'Server error.'
     });
   }
