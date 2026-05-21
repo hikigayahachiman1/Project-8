@@ -158,6 +158,12 @@ export function normalizeWinToBaseAmount(value) {
   return Math.floor(amount);
 }
 
+function normalizePgWinToBaseAmount(value) {
+  const amount = parseIndonesianMoney(value);
+  if (!Number.isFinite(amount)) return NaN;
+  return Math.floor(amount);
+}
+
 function parseBetUnit(value) {
   const amount = parseIndonesianMoney(value);
   if (!Number.isFinite(amount)) return NaN;
@@ -518,7 +524,7 @@ export function parsePgHistoryOcr(rawText) {
   const ticket_id = ticketIds[0] || extractTicketId(normalized);
   const bett_output = parseBetToBettOutput(bet);
   const selected_win = winCandidates[0] || pickSmallestPositiveWin(extractWinCandidates(normalized));
-  const base_amount = normalizeWinToBaseAmount(selected_win);
+  const base_amount = normalizePgWinToBaseAmount(selected_win);
 
   return {
     provider: 'PG',

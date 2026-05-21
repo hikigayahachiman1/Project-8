@@ -3324,6 +3324,7 @@
   function claimToJpUnit(value) {
     const amount = claimParseIndonesianMoney(value);
     if (!Number.isFinite(amount)) return NaN;
+    if (claimCurrentProvider() === 'PG') return Math.floor(amount);
     if (claimHasThousandStyle(value)) return Math.floor(amount / 1000);
     return Math.floor(amount);
   }
@@ -3370,7 +3371,14 @@
     const baseNum = Number(base);
     const percentNum = Number(percent);
     if (!Number.isFinite(baseNum) || !Number.isFinite(percentNum)) return '';
-    return Math.floor(baseNum * percentNum / 100);
+    return Math.min(Math.floor(baseNum * percentNum / 100), 300);
+  }
+
+  function claimIsJpCapped(base, percent) {
+    const baseNum = Number(base);
+    const percentNum = Number(percent);
+    if (!Number.isFinite(baseNum) || !Number.isFinite(percentNum)) return false;
+    return Math.floor(baseNum * percentNum / 100) > 300;
   }
 
   function claimUpdateCalculatedFields() {
@@ -3977,7 +3985,12 @@
     if (base >= 150) {
       const jp = result || claimCalculateJpResult(base, 25);
       output += `\nKLAIM FREESPIN TOTAL JP = ${base} x 25% = ${jp} (TICKET ID : ${ticketId})`;
-      claimSetStatus('Output scatter dan FREESPIN berhasil dibuat.');
+      if (claimIsJpCapped(base, 25)) {
+        claimSetStatus('Hasil JP melebihi maksimal 300, output dibatasi menjadi 300.');
+        showToast('Hasil JP melebihi maksimal 300, output dibatasi menjadi 300.', 'success');
+      } else {
+        claimSetStatus('Output scatter dan FREESPIN berhasil dibuat.');
+      }
     } else {
       claimSetStatus('Kemenangan di bawah 150, output FREESPIN tidak dibuat. Hanya output scatter.', 'error');
       showToast('Kemenangan di bawah 150, output FREESPIN tidak dibuat. Hanya output scatter.', 'error');
