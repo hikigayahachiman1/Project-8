@@ -2701,6 +2701,7 @@
   let activePasteTarget = 'history';
   let featureAccessLocks = {};
   let featureLocksLoadedAt = 0;
+  let featureLockWarningShown = false;
   const FEATURE_LOCK_TTL_MS = 60000;
   const FEATURE_TAB_MAP = {
     parser: 'parser',
@@ -3007,6 +3008,20 @@
     return !isFeatureLocked(featureKey) || isSuperAdmin();
   }
 
+  function activateDefaultToolPanel() {
+    const parserTab = document.querySelector('.tool-tab[data-panel="parser"]');
+    const parserPanel = document.getElementById('panel-parser');
+    if (!parserTab || !parserPanel) return;
+    document.querySelectorAll('.tool-tab').forEach(tab => tab.classList.remove('active'));
+    document.querySelectorAll('.tool-panel').forEach(panel => panel.classList.remove('active'));
+    parserTab.classList.add('active');
+    parserPanel.classList.add('active');
+  }
+
+  function fetchFeatureLocksInBackground(force = false) {
+    fetchFeatureLocks(force);
+  }
+
   async function fetchFeatureLocks(force = false) {
     if (!getOperatorToken()) return;
     if (!force && featureLocksLoadedAt && Date.now() - featureLocksLoadedAt < FEATURE_LOCK_TTL_MS) {
@@ -3028,6 +3043,11 @@
     } catch (error) {
       featureAccessLocks = {};
       renderFeatureLocks();
+      renderFeatureLockTable();
+      if (currentOperator && !featureLockWarningShown) {
+        featureLockWarningShown = true;
+        showToast('Status kunci menu gagal dimuat. Menu tetap dapat digunakan sesuai role.', 'error');
+      }
     }
   }
 
@@ -3166,10 +3186,13 @@
       }
       currentOperator = result.operator;
       localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(result.operator));
+      featureAccessLocks = {};
+      featureLocksLoadedAt = 0;
       hideOperatorLogin();
       renderOperatorInfo();
-      await fetchFeatureLocks();
       applyRoleAccess();
+      activateDefaultToolPanel();
+      fetchFeatureLocksInBackground();
       startOperatorActivityTracking();
       return true;
     } catch (error) {
@@ -3200,10 +3223,13 @@
         throw new Error(result.message || result.error || 'Username atau password salah.');
       }
       saveOperatorSession(result.token, result.operator);
+      featureAccessLocks = {};
+      featureLocksLoadedAt = 0;
       hideOperatorLogin();
       renderOperatorInfo();
-      await fetchFeatureLocks();
       applyRoleAccess();
+      activateDefaultToolPanel();
+      fetchFeatureLocksInBackground(true);
       startOperatorActivityTracking();
       showToast('Login operator berhasil.', 'success');
     } catch (error) {
@@ -3240,7 +3266,6 @@
       document.getElementById('panel-' + target).classList.add('active');
       if (target === 'admin-operators') {
         adminFetchOperators();
-        fetchFeatureLocks();
       }
       if (target === 'bonus-monitoring') adminFetchBonusMonitoring();
     });
