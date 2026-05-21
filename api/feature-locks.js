@@ -26,6 +26,26 @@ function bearerToken(req) {
   return match ? match[1] : '';
 }
 
+async function readJsonBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (typeof req.body === 'string') return JSON.parse(req.body || '{}');
+
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  return raw ? JSON.parse(raw) : {};
+}
+
+function isMissingFeatureLocksTable(error) {
+  return error && (error.code === '42P01' || /feature_access_locks/i.test(error.message || ''));
+}
+
+function missingFeatureLocksTableError() {
+  const error = new Error('Table feature_access_locks belum dibuat di database pusat.');
+  error.statusCode = 500;
+  return error;
+}
+
 function sessionCutoffIso() {
   return new Date(Date.now() - SESSION_IDLE_MS).toISOString();
 }
@@ -127,7 +147,10 @@ async function listLocks(res) {
     .select('feature_key, feature_name, is_locked, locked_reason, updated_by_operator_id, updated_by_username, updated_by_role, updated_at, created_at')
     .order('feature_name', { ascending: true });
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingFeatureLocksTable(error)) throw missingFeatureLocksTableError();
+    throw error;
+  }
   return res.status(200).json({ ok: true, locks: mergeDefaults(data || []) });
 }
 
@@ -149,7 +172,7 @@ async function logFeatureLock(operator, featureKey, isLocked, reason) {
   if (error && !['42P01', '42703'].includes(error.code)) throw error;
 }
 
-async function setLock(req, res, operator) {
+async function setLock(res, operator, body) {
   if (operator.role !== 'superadmin') {
     return res.status(403).json({
       ok: false,
@@ -157,7 +180,6 @@ async function setLock(req, res, operator) {
     });
   }
 
-  const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
   const featureKey = String(body.feature_key || '').trim();
   const feature = FEATURES.find(item => item.feature_key === featureKey);
   if (!feature) {
@@ -180,7 +202,10 @@ async function setLock(req, res, operator) {
       updated_at: now
     }, { onConflict: 'feature_key' });
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingFeatureLocksTable(error)) throw missingFeatureLocksTableError();
+    throw error;
+  }
   await logFeatureLock(operator, featureKey, isLocked, reason);
   return listLocks(res);
 }
@@ -195,11 +220,11 @@ export default async function handler(req, res) {
     const operator = await requireOperator(req);
     if (req.method === 'GET') return listLocks(res);
 
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    const body = await readJsonBody(req);
     if (String(body.action || '').trim() !== 'set_lock') {
       return res.status(400).json({ ok: false, message: 'Action tidak dikenal.' });
     }
-    return setLock(req, res, operator);
+    return setLock(res, operator, body);
   } catch (error) {
     return res.status(error.statusCode || 500).json({
       ok: false,

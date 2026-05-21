@@ -255,7 +255,8 @@ export function extractTicketIds(text) {
     .filter(value => !/^0+$/.test(value));
 }
 
-export function extractMoneyCandidates(text) {
+export function extractMoneyCandidates(text, options = {}) {
+  const unique = options.unique !== false;
   const normalized = normalizeOcrText(text);
   const matches = normalized.split('\n').flatMap(line => {
     const hasMoneyPrefix = /\b(?:rp|ap|ro|rd|bp)\b/i.test(line);
@@ -263,13 +264,14 @@ export function extractMoneyCandidates(text) {
     if (!hasMoneyPrefix && looksLikeDateTime) return [];
     return line.match(/-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d{1,3}(?:\.\d{3})+(?:[,.]\d+)?|-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d+(?:[,.]\d+)?/gi) || [];
   });
-  return [...new Set(matches
+  const values = matches
     .map(item => item.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .filter(item => {
       const cleaned = cleanMoneyText(item);
       return /\b(?:rp|ap|ro|rd|bp)\b/i.test(item) || cleaned.includes(',') || /\d{1,3}(?:\.\d{3})+/.test(cleaned);
-    }))];
+    });
+  return unique ? [...new Set(values)] : values;
 }
 
 function moneyAmountKey(value) {
@@ -374,7 +376,7 @@ function buildPragmaticDetectedRows(ticketIds, balances, bets, wins) {
 export function parsePragmaticHistoryOcr(rawText) {
   const normalized = normalizeOcrText(rawText);
   const ticketIds = extractTicketIds(normalized);
-  const moneyValues = extractMoneyCandidates(normalized)
+  const moneyValues = extractMoneyCandidates(normalized, { unique: false })
     .map(normalizeMoneyLabel)
     .filter(value => parseIndonesianMoney(value) >= 0);
 

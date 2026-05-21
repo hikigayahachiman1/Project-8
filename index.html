@@ -2198,10 +2198,7 @@
               <option value="PG">PG</option>
               <option value="PRAGMATIC">PRAGMATIC</option>
             </select>
-            <select id="claimType" class="bonus-date">
-              <option value="FREESPIN">FREESPIN</option>
-              <option value="BUYSPIN">BUYSPIN</option>
-            </select>
+            <input id="claimType" class="bonus-date" type="text" value="FREESPIN" readonly title="Sementara hanya FREESPIN">
           </div>
 
           <div class="file-row">
@@ -2264,15 +2261,13 @@
             </div>
             <div class="field">
               <label for="claimPercent">Persentase JP</label>
-              <input id="claimPercent" type="number" value="25" min="0" step="1">
+              <input id="claimPercent" type="number" value="25" min="0" step="1" readonly>
             </div>
             <div class="field">
               <label for="claimJpResult">Hasil JP</label>
               <input id="claimJpResult" type="text" placeholder="41">
             </div>
           </div>
-
-          <div id="claimBuyspinWarning" class="claim-warning">Dasar hitung BUYSPIN di bawah minimal 300. Cek kembali sebelum digunakan.</div>
 
           <div class="bonus-actions">
             <button id="claimPickTopRowBtn" class="ghost">Ambil Baris Teratas</button>
@@ -2286,7 +2281,7 @@
           <textarea id="claimOutput" class="claim-output-area" placeholder="Klik Generate Output setelah field sudah benar."></textarea>
 
           <div class="hint">
-            <strong>Aturan:</strong> Output selalu 2 baris dan tidak memakai Login ID. FREESPIN 25%, BUYSPIN 20%. PG BUYSPIN memakai kemenangan dikurangi bet, PRAGMATIC BUYSPIN langsung dari kemenangan.
+            <strong>Aturan:</strong> Output selalu 2 baris dan tidak memakai Login ID. Untuk tahap ini Klaim Mahjong hanya memakai FREESPIN 25%.
           </div>
         </section>
       </div>
@@ -3168,7 +3163,7 @@
   }
 
   function claimCurrentType() {
-    return document.getElementById('claimType')?.value || 'FREESPIN';
+    return 'FREESPIN';
   }
 
   function claimSetStatus(message, type = 'info') {
@@ -3255,12 +3250,7 @@
     const selected = document.getElementById('claimSelectedWin')?.value || '';
     const winUnit = claimToJpUnit(selected);
     if (!Number.isFinite(winUnit)) return '';
-    if (claimCurrentType() === 'FREESPIN') return Math.floor(winUnit);
-    if (claimCurrentProvider() === 'PRAGMATIC') return Math.floor(winUnit);
-
-    const betUnit = claimParseBetUnit(document.getElementById('claimBetInput')?.value || '');
-    if (!Number.isFinite(betUnit)) return Math.floor(winUnit);
-    return Math.floor(winUnit - betUnit);
+    return Math.floor(winUnit);
   }
 
   function claimCalculateJpResult(base, percent) {
@@ -3270,17 +3260,8 @@
     return Math.floor(baseNum * percentNum / 100);
   }
 
-  function claimUpdateBuyspinWarning() {
-    const warning = document.getElementById('claimBuyspinWarning');
-    if (!warning) return false;
-    const base = Number(document.getElementById('claimBaseAmount')?.value || '');
-    const shouldWarn = claimCurrentType() === 'BUYSPIN' && Number.isFinite(base) && base < 300;
-    warning.classList.toggle('show', shouldWarn);
-    return shouldWarn;
-  }
-
   function claimUpdateCalculatedFields() {
-    const percent = claimCurrentType() === 'BUYSPIN' ? 20 : 25;
+    const percent = 25;
     const percentEl = document.getElementById('claimPercent');
     const baseEl = document.getElementById('claimBaseAmount');
     const resultEl = document.getElementById('claimJpResult');
@@ -3293,8 +3274,6 @@
     } else {
       resultEl.value = '';
     }
-
-    claimUpdateBuyspinWarning();
   }
 
   function claimRecalculateAll() {
@@ -3304,9 +3283,7 @@
 
   function claimResetClaimOutputOnly() {
     const output = document.getElementById('claimOutput');
-    const warning = document.getElementById('claimBuyspinWarning');
     if (output) output.value = '';
-    if (warning) warning.classList.remove('show');
   }
 
   function claimResetBeforeOcr() {
@@ -3414,14 +3391,6 @@
   function claimApplyParsedResult(parsed, rawText = '') {
     if (!parsed) return;
     claimLastParsedOcr = parsed;
-    const parsedProvider = parsed.provider || parsed.detected_provider;
-    if (parsedProvider && ['PG', 'PRAGMATIC'].includes(parsedProvider)) {
-      const providerEl = document.getElementById('claimProvider');
-      if (providerEl && providerEl.value !== parsedProvider) {
-        providerEl.value = parsedProvider;
-        claimUpdateProviderDefaults(true);
-      }
-    }
     const selectedIndex = Number.isFinite(Number(parsed.selected_row_index)) ? Number(parsed.selected_row_index) : 0;
     const selectedRow = (parsed.detected_rows || [])[selectedIndex] || (parsed.detected_rows || [])[0] || {};
     const debug = parsed.debug || {};
@@ -3557,7 +3526,7 @@
 
   function claimGenerateOutput() {
     const provider = claimCurrentProvider();
-    const claimType = claimCurrentType();
+    const claimType = 'FREESPIN';
     const ticketId = document.getElementById('claimTicketId').value.trim();
     const bettOutput = document.getElementById('claimBettOutput').value.trim();
     const scatter = document.getElementById('claimScatterCount').value.trim();
@@ -3566,16 +3535,11 @@
     const result = document.getElementById('claimJpResult').value.trim();
 
     if (!provider) return showToast('Provider wajib dipilih.', 'error');
-    if (!claimType) return showToast('Jenis klaim wajib dipilih.', 'error');
     if (!ticketId) return showToast('Ticket ID wajib diisi.', 'error');
     if (!bettOutput) return showToast('BETT wajib diisi.', 'error');
     if (!base) return showToast('Nominal dasar wajib diisi.', 'error');
     if (!result) return showToast('Hasil JP wajib diisi.', 'error');
     if (!scatter) return showToast('Jumlah scatter wajib diisi.', 'error');
-
-    if (claimUpdateBuyspinWarning()) {
-      showToast('Dasar hitung BUYSPIN di bawah minimal 300. Cek kembali sebelum digunakan.', 'error');
-    }
 
     const gameName = provider === 'PRAGMATIC' ? 'PRAGMATIC' : 'MAHJONG';
     const line1 = `KLAIM ${scatter} SCATTER ${gameName} BETT : ${bettOutput} (NO TICKET : ${ticketId})`;
@@ -3613,7 +3577,6 @@
     claimSetPreview('claimOriginalPreview', '', 'Belum ada gambar history');
     claimSetPreview('claimProcessedPreview', '', 'Hasil masking/crop akan muncul di sini');
     claimSetStatus('');
-    claimUpdateBuyspinWarning();
     showToast('Form Klaim Mahjong dibersihkan.', 'success');
   }
 
@@ -6209,14 +6172,12 @@
       document.getElementById('claimBaseAmount').value,
       document.getElementById('claimPercent').value
     );
-    claimUpdateBuyspinWarning();
   });
   document.getElementById('claimPercent').addEventListener('input', () => {
     document.getElementById('claimJpResult').value = claimCalculateJpResult(
       document.getElementById('claimBaseAmount').value,
       document.getElementById('claimPercent').value
     );
-    claimUpdateBuyspinWarning();
   });
   claimUpdateProviderDefaults(true);
   claimUpdateCalculatedFields();
