@@ -1209,6 +1209,7 @@
   #panel-bonus .card::after { background: linear-gradient(90deg, var(--accent-3), var(--warning), var(--accent)); }
   #panel-audit .card::after { background: linear-gradient(90deg, var(--accent-2), var(--danger), var(--accent)); }
   #panel-admin-operators .card::after { background: linear-gradient(90deg, var(--warning), var(--danger), var(--accent-2)); }
+  #panel-claim-mahjong .card::after { background: linear-gradient(90deg, var(--warning), var(--accent), var(--accent-2)); }
 
   .admin-module-card {
     position: relative;
@@ -1434,6 +1435,79 @@
   #panel-bonus .card-title::before { background: var(--accent-3); box-shadow: 0 0 18px rgba(0,255,168,0.45); }
   #panel-audit .card-title::before { background: var(--accent-2); box-shadow: 0 0 18px rgba(155,92,255,0.45); }
   #panel-admin-operators .card-title::before { background: var(--warning); box-shadow: 0 0 18px rgba(255,200,87,0.42); }
+  #panel-claim-mahjong .card-title::before { background: var(--warning); box-shadow: 0 0 18px rgba(255,200,87,0.42); }
+
+  .claim-helper-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+    gap: 22px;
+  }
+
+  .claim-preview-grid {
+    display: grid;
+    gap: 14px;
+  }
+
+  .claim-preview-box {
+    min-height: 220px;
+    display: grid;
+    place-items: center;
+    padding: 12px;
+    border: 1px solid rgba(143,178,255,0.18);
+    border-radius: 20px;
+    background: rgba(2, 7, 18, 0.45);
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    overflow: hidden;
+  }
+
+  .claim-preview-box img {
+    width: 100%;
+    max-height: 520px;
+    object-fit: contain;
+    border-radius: 14px;
+  }
+
+  .claim-ocr-status {
+    display: none;
+    margin-top: 12px;
+    padding: 11px 13px;
+    border: 1px solid rgba(39,245,255,0.24);
+    border-radius: 15px;
+    background: rgba(39,245,255,0.08);
+    color: var(--ink-soft);
+    font-size: 0.84rem;
+    font-weight: 800;
+  }
+
+  .claim-ocr-status.show { display: block; }
+
+  .claim-ocr-status.error {
+    border-color: rgba(255,79,139,0.38);
+    background: rgba(255,79,139,0.11);
+    color: #ffb3c1;
+  }
+
+  .claim-output-area {
+    min-height: 130px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 800;
+    line-height: 1.6;
+  }
+
+  .claim-warning {
+    display: none;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255,200,87,0.34);
+    border-radius: 16px;
+    background: rgba(255,200,87,0.10);
+    color: #ffe0a3;
+    font-weight: 800;
+  }
+
+  .claim-warning.show { display: block; }
 
   button.primary {
     background: linear-gradient(135deg, var(--accent), var(--accent-2) 62%, rgba(255,79,139,0.86));
@@ -1773,6 +1847,8 @@
     .operator-info { flex-direction: column; align-items: stretch; }
     .operator-left { align-items: flex-start; }
     .logout-btn { width: 100%; }
+    .claim-helper-grid { grid-template-columns: 1fr; }
+    .claim-preview-box { min-height: 180px; }
     .tool-tabs { border-radius: 22px; }
     .tool-tab { min-width: 0; flex: 1 1 145px; }
     header, .card { border-radius: 22px; padding: 18px; }
@@ -1798,7 +1874,7 @@
     <div class="login-shell">
       <div class="login-card">
         <div class="login-accent-line"></div>
-        <h2>Login</h2>
+        <h2>Login Operator</h2>
         <p>Masukkan username dan password.</p>
         <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
         <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
@@ -1829,9 +1905,10 @@
     <div class="tool-tabs">
       <button class="tool-tab active" data-panel="parser">Parser QRIS</button>
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
+      <button class="tool-tab" data-panel="claim-mahjong">Klaim Mahjong</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
-      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Dashboard</button>
+      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
       <button class="tool-tab" id="bonusMonitoringTab" data-panel="bonus-monitoring" style="display:none;">Monitoring Bonus Operator</button>
     </div>
 
@@ -2004,6 +2081,108 @@
       </div>
     </section>
 
+    <section class="tool-panel" id="panel-claim-mahjong">
+      <div class="claim-helper-grid">
+        <section class="card">
+          <div class="card-title">Klaim Mahjong Helper</div>
+          <div class="card-desc">Upload screenshot history permainan. Gambar hanya dipakai sementara untuk OCR, lalu hasilnya bisa dicek dan diedit manual.</div>
+
+          <div class="date-row">
+            <select id="claimProvider" class="bonus-date">
+              <option value="PG">PG</option>
+              <option value="PRAGMATIC">PRAGMATIC</option>
+            </select>
+            <select id="claimType" class="bonus-date">
+              <option value="FREESPIN">FREESPIN</option>
+              <option value="BUYSPIN">BUYSPIN</option>
+            </select>
+          </div>
+
+          <div class="file-row">
+            <input id="claimHistoryImage" type="file" accept="image/png,image/jpeg,image/webp">
+            <button id="claimOcrRetryBtn" class="primary">Baca OCR Ulang</button>
+          </div>
+          <div id="claimOcrStatus" class="claim-ocr-status">Membaca history dengan OCR...</div>
+
+          <div class="claim-preview-grid">
+            <div>
+              <div class="source-note">Preview original</div>
+              <div id="claimOriginalPreview" class="claim-preview-box">Belum ada gambar history</div>
+            </div>
+            <div>
+              <div class="source-note">Preview gambar yang dikirim ke OCR</div>
+              <div id="claimProcessedPreview" class="claim-preview-box">Hasil masking/crop akan muncul di sini</div>
+            </div>
+          </div>
+
+          <details class="ocr-box">
+            <summary>Raw OCR / Catatan Deteksi</summary>
+            <textarea id="claimOcrText" placeholder="Hasil OCR history akan muncul di sini jika tersedia."></textarea>
+          </details>
+        </section>
+
+        <section class="card">
+          <div class="card-title">Hasil Deteksi / Input Manual</div>
+          <div class="card-desc">Semua field bisa dikoreksi manual sebelum output dipakai.</div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label for="claimTicketId">Ticket ID / ID Sesi Bermain</label>
+              <input id="claimTicketId" type="text" placeholder="2057244238252441600">
+            </div>
+            <div class="field">
+              <label for="claimBetInput">Bet / Taruhan dari History</label>
+              <input id="claimBetInput" type="text" placeholder="1,20 atau Rp 80.000,00">
+            </div>
+            <div class="field">
+              <label for="claimBettOutput">BETT Output</label>
+              <input id="claimBettOutput" type="text" placeholder="1.200 / 80.000">
+            </div>
+            <div class="field">
+              <label for="claimScatterCount">Jumlah Scatter</label>
+              <input id="claimScatterCount" type="number" value="3" min="1" step="1">
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label for="claimWinCandidates">Nominal Kemenangan dari History</label>
+              <textarea id="claimWinCandidates" placeholder="166,56&#10;Rp 323.200,00"></textarea>
+            </div>
+            <div class="field">
+              <label for="claimSelectedWin">Nominal Kemenangan Dipilih</label>
+              <input id="claimSelectedWin" type="text" placeholder="166,56">
+            </div>
+            <div class="field">
+              <label for="claimBaseAmount">Nominal Dasar</label>
+              <input id="claimBaseAmount" type="text" placeholder="166">
+            </div>
+            <div class="field">
+              <label for="claimPercent">Persentase JP</label>
+              <input id="claimPercent" type="number" value="25" min="0" step="1">
+            </div>
+            <div class="field">
+              <label for="claimJpResult">Hasil JP</label>
+              <input id="claimJpResult" type="text" placeholder="41">
+            </div>
+          </div>
+
+          <div id="claimBuyspinWarning" class="claim-warning">Dasar hitung BUYSPIN di bawah minimal 300. Cek kembali sebelum digunakan.</div>
+
+          <div class="bonus-actions">
+            <button id="claimPickSmallestBtn" class="warning">Ambil Nominal Terkecil</button>
+            <button id="claimGenerateBtn" class="success">Generate Output</button>
+            <button id="claimCopyBtn">Copy Output</button>
+            <button id="claimResetBtn" class="danger">Reset</button>
+          </div>
+
+          <div class="card-title" style="margin-top:18px;">Output Klaim</div>
+          <textarea id="claimOutput" class="claim-output-area" placeholder="Klik Generate Output setelah field sudah benar."></textarea>
+
+          <div class="hint">
+            <strong>Aturan:</strong> Output selalu 2 baris dan tidak memakai Login ID. FREESPIN 25%, BUYSPIN 20%. PG BUYSPIN memakai kemenangan dikurangi bet, PRAGMATIC BUYSPIN langsung dari kemenangan.
+          </div>
+        </section>
+      </div>
+    </section>
+
     <section class="tool-panel" id="panel-audit">
       <div class="bonus-grid">
         <section class="card">
@@ -2100,8 +2279,8 @@
             <a
               id="adminModuleDownloadBtn"
               class="module-download-btn"
-              href="./Modul_Admin_Superadmin_QRIS_Bonus_Control.pdf"
-              download="Modul_Admin_Superadmin_QRIS_Bonus_Control.pdf"
+              href="./Modul_Admin_Operator_QRIS_Bonus_Control_Monitoring.pdf"
+              download="Modul_Admin_Operator_QRIS_Bonus_Control_Monitoring.pdf"
             >
               Download Modul
             </a>
@@ -2255,7 +2434,7 @@
     </section>
 
     <footer>
-      Tool lokal · Semua proses dilakukan di browser Anda · Tidak ada data yang dikirim ke server !
+      Tool operasional · OCR klaim hanya memproses gambar sementara · Data utama tetap mengikuti alur dashboard
       <p>By Hachiman</p>
     </footer>
   </div>
@@ -2575,7 +2754,7 @@
       ${showWorkModule ? `
         <a
           class="mini-module-link"
-          href="./Modul-kerja-operator.pdf"
+          href="./Modul_Operator_Audit_QRIS_Bonus_Control.pdf"
           target="_blank"
           rel="noopener"
           title="Download panduan kerja operator dan audit"
@@ -2714,6 +2893,361 @@
       if (target === 'bonus-monitoring') adminFetchBonusMonitoring();
     });
   });
+
+  function claimCurrentProvider() {
+    return document.getElementById('claimProvider')?.value || 'PG';
+  }
+
+  function claimCurrentType() {
+    return document.getElementById('claimType')?.value || 'FREESPIN';
+  }
+
+  function claimSetStatus(message, type = 'info') {
+    const status = document.getElementById('claimOcrStatus');
+    if (!status) return;
+    status.textContent = message || '';
+    status.className = `claim-ocr-status ${message ? 'show' : ''} ${type === 'error' ? 'error' : ''}`;
+  }
+
+  function claimCleanMoneyText(value) {
+    return String(value || '')
+      .replace(/rp/ig, '')
+      .replace(/\s+/g, '')
+      .replace(/[^\d,.-]/g, '')
+      .trim();
+  }
+
+  function claimHasThousandStyle(value) {
+    const raw = String(value || '');
+    const cleaned = claimCleanMoneyText(raw);
+    return /rp/i.test(raw) || /\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(cleaned);
+  }
+
+  function claimParseIndonesianMoney(value) {
+    let text = claimCleanMoneyText(value);
+    if (!text) return NaN;
+    const negative = /^-/.test(text);
+    text = text.replace(/^-/, '');
+    const hasComma = text.includes(',');
+    const hasDot = text.includes('.');
+
+    if (hasComma && hasDot) {
+      text = text.replace(/\./g, '').replace(',', '.');
+    } else if (hasComma) {
+      text = text.replace(',', '.');
+    } else if (hasDot && /^\d{1,3}(?:\.\d{3})+$/.test(text)) {
+      text = text.replace(/\./g, '');
+    }
+
+    const num = Number(text);
+    if (!Number.isFinite(num)) return NaN;
+    return negative ? -num : num;
+  }
+
+  function claimToJpUnit(value) {
+    const amount = claimParseIndonesianMoney(value);
+    if (!Number.isFinite(amount)) return NaN;
+    if (claimHasThousandStyle(value)) return Math.floor(amount / 1000);
+    return Math.floor(amount);
+  }
+
+  function claimParseBetUnit(value) {
+    const amount = claimParseIndonesianMoney(value);
+    if (!Number.isFinite(amount)) return NaN;
+    if (claimHasThousandStyle(value)) return Math.floor(amount / 1000);
+    return amount;
+  }
+
+  function claimFormatThousands(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '';
+    return new Intl.NumberFormat('id-ID').format(Math.round(num));
+  }
+
+  function claimParseBetToBettOutput(value) {
+    const amount = claimParseIndonesianMoney(value);
+    if (!Number.isFinite(amount)) return '';
+    if (claimHasThousandStyle(value)) return claimFormatThousands(amount);
+    if (amount < 1000) return claimFormatThousands(amount * 1000);
+    return claimFormatThousands(amount);
+  }
+
+  function claimPickSmallestPositiveWin(values) {
+    const candidates = (Array.isArray(values) ? values : String(values || '').split(/\n+/))
+      .map(value => String(value).trim())
+      .filter(Boolean)
+      .map(value => ({ raw: value, unit: claimToJpUnit(value) }))
+      .filter(item => Number.isFinite(item.unit) && item.unit > 0)
+      .sort((a, b) => a.unit - b.unit);
+    return candidates[0] ? candidates[0].raw : '';
+  }
+
+  function claimCalculateBaseAmount() {
+    const selected = document.getElementById('claimSelectedWin')?.value || '';
+    const winUnit = claimToJpUnit(selected);
+    if (!Number.isFinite(winUnit)) return '';
+    if (claimCurrentType() === 'FREESPIN') return Math.floor(winUnit);
+    if (claimCurrentProvider() === 'PRAGMATIC') return Math.floor(winUnit);
+
+    const betUnit = claimParseBetUnit(document.getElementById('claimBetInput')?.value || '');
+    if (!Number.isFinite(betUnit)) return Math.floor(winUnit);
+    return Math.floor(winUnit - betUnit);
+  }
+
+  function claimCalculateJpResult(base, percent) {
+    const baseNum = Number(base);
+    const percentNum = Number(percent);
+    if (!Number.isFinite(baseNum) || !Number.isFinite(percentNum)) return '';
+    return Math.floor(baseNum * percentNum / 100);
+  }
+
+  function claimUpdateBuyspinWarning() {
+    const warning = document.getElementById('claimBuyspinWarning');
+    if (!warning) return false;
+    const base = Number(document.getElementById('claimBaseAmount')?.value || '');
+    const shouldWarn = claimCurrentType() === 'BUYSPIN' && Number.isFinite(base) && base < 300;
+    warning.classList.toggle('show', shouldWarn);
+    return shouldWarn;
+  }
+
+  function claimUpdateCalculatedFields() {
+    const percent = claimCurrentType() === 'BUYSPIN' ? 20 : 25;
+    const percentEl = document.getElementById('claimPercent');
+    const baseEl = document.getElementById('claimBaseAmount');
+    const resultEl = document.getElementById('claimJpResult');
+    if (percentEl) percentEl.value = percent;
+
+    const base = claimCalculateBaseAmount();
+    if (base !== '') {
+      baseEl.value = base;
+      resultEl.value = claimCalculateJpResult(base, percent);
+    } else {
+      resultEl.value = '';
+    }
+
+    claimUpdateBuyspinWarning();
+  }
+
+  function claimUpdateProviderDefaults(forceScatter = false) {
+    const scatter = document.getElementById('claimScatterCount');
+    if (!scatter) return;
+    if (forceScatter || !scatter.value) {
+      scatter.value = claimCurrentProvider() === 'PRAGMATIC' ? 4 : 3;
+    }
+  }
+
+  function claimMaskCanvasArea(ctx, x, y, width, height) {
+    ctx.save();
+    ctx.fillStyle = '#050713';
+    ctx.fillRect(x, y, width, height);
+    ctx.restore();
+  }
+
+  function claimCanvasToBlob(canvas) {
+    return new Promise(resolve => {
+      canvas.toBlob(blob => resolve(blob), 'image/png', 0.92);
+    });
+  }
+
+  function claimReadImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const image = new Image();
+        image.onload = () => resolve({ image, dataUrl: reader.result });
+        image.onerror = () => reject(new Error('Gagal membaca gambar history.'));
+        image.src = reader.result;
+      };
+      reader.onerror = () => reject(new Error('Gagal membaca file history.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function preprocessHistoryImageForOcr(file, provider) {
+    const { image, dataUrl } = await claimReadImage(file);
+    const maxWidth = 1400;
+    const scale = image.naturalWidth > maxWidth ? maxWidth / image.naturalWidth : 1;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const topMask = provider === 'PRAGMATIC' ? 0.14 : 0.18;
+    const bottomMask = provider === 'PRAGMATIC' ? 0.08 : 0.22;
+    claimMaskCanvasArea(ctx, 0, 0, canvas.width, Math.round(canvas.height * topMask));
+    claimMaskCanvasArea(ctx, 0, Math.round(canvas.height * (1 - bottomMask)), canvas.width, Math.round(canvas.height * bottomMask));
+
+    const blob = await claimCanvasToBlob(canvas);
+    return {
+      originalDataUrl: dataUrl,
+      processedDataUrl: canvas.toDataURL('image/png'),
+      blob
+    };
+  }
+
+  function claimSetPreview(id, dataUrl, emptyText) {
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="Preview history">` : escapeHtml(emptyText);
+  }
+
+  async function claimPostOcrImage(blob) {
+    const form = new FormData();
+    form.append('ocr_image', blob, 'claim-history.png');
+    const endpoints = ['/api/claim-ocr', '/api/claim-ocr.js'];
+    let lastError = null;
+
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(endpoint, { method: 'POST', body: form });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+          const error = new Error(data.message || 'OCR gagal membaca history. Silakan isi manual.');
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      } catch (error) {
+        lastError = error;
+        if (error.status && error.status !== 404) break;
+      }
+    }
+
+    throw lastError || new Error('OCR gagal membaca history. Silakan isi manual.');
+  }
+
+  function claimApplyOcrResult(data) {
+    const parsed = data && data.parsed ? data.parsed : {};
+    document.getElementById('claimOcrText').value = data.raw_text || '';
+    if (parsed.ticket_id) document.getElementById('claimTicketId').value = parsed.ticket_id;
+    if (parsed.bet) document.getElementById('claimBetInput').value = parsed.bet;
+    if (parsed.bett_output) document.getElementById('claimBettOutput').value = parsed.bett_output;
+    if (Array.isArray(parsed.win_candidates) && parsed.win_candidates.length) {
+      document.getElementById('claimWinCandidates').value = parsed.win_candidates.join('\n');
+    }
+    if (parsed.selected_win) document.getElementById('claimSelectedWin').value = parsed.selected_win;
+    claimUpdateCalculatedFields();
+  }
+
+  async function claimRunOcr() {
+    const file = document.getElementById('claimHistoryImage')?.files?.[0];
+    const btn = document.getElementById('claimOcrRetryBtn');
+    if (!file) {
+      showToast('Upload gambar history permainan dulu.', 'error');
+      return;
+    }
+
+    try {
+      setButtonLoading(btn, true, 'Membaca OCR...');
+      claimSetStatus('Membaca history dengan OCR...');
+      showLoading('Klaim Mahjong Helper', 'Membaca history dengan OCR...', [
+        'Menyiapkan gambar history',
+        'Masking area tidak penting',
+        'Mengirim gambar ke OCR',
+        'Mengisi form hasil deteksi'
+      ]);
+
+      updateLoading('Menyiapkan gambar history...', 0);
+      const processed = await preprocessHistoryImageForOcr(file, claimCurrentProvider());
+      claimSetPreview('claimOriginalPreview', processed.originalDataUrl, 'Belum ada gambar history');
+      updateLoading('Masking area tidak penting...', 1, 0);
+      claimSetPreview('claimProcessedPreview', processed.processedDataUrl, 'Hasil masking/crop akan muncul di sini');
+
+      updateLoading('Mengirim gambar ke OCR...', 2, 1);
+      const data = await claimPostOcrImage(processed.blob);
+      updateLoading('Mengisi form hasil deteksi...', 3, 2);
+      claimApplyOcrResult(data);
+      claimSetStatus('OCR selesai. Cek dan koreksi hasil sebelum generate.');
+      showToast('OCR selesai. Cek dan koreksi hasil sebelum generate.', 'success');
+      updateLoading('OCR selesai.', null, 3);
+    } catch (error) {
+      const message = error.message || 'OCR gagal membaca history. Silakan isi manual.';
+      claimSetStatus(message, 'error');
+      document.getElementById('claimOcrText').value = `OCR gagal: ${message}`;
+      setLoadingError(message, 2);
+      showToast(message, 'error');
+    } finally {
+      hideLoading();
+      setButtonLoading(btn, false);
+    }
+  }
+
+  async function claimHandleHistoryUpload() {
+    const file = document.getElementById('claimHistoryImage')?.files?.[0];
+    if (!file) return;
+    await claimRunOcr();
+  }
+
+  function claimPickSmallestNominal() {
+    const smallest = claimPickSmallestPositiveWin(document.getElementById('claimWinCandidates')?.value || '');
+    if (!smallest) {
+      showToast('Tidak ada nominal positif yang valid.', 'error');
+      return;
+    }
+    document.getElementById('claimSelectedWin').value = smallest;
+    claimUpdateCalculatedFields();
+    showToast('Nominal terkecil sudah dipilih.', 'success');
+  }
+
+  function claimGenerateOutput() {
+    const provider = claimCurrentProvider();
+    const claimType = claimCurrentType();
+    const ticketId = document.getElementById('claimTicketId').value.trim();
+    const bettOutput = document.getElementById('claimBettOutput').value.trim();
+    const scatter = document.getElementById('claimScatterCount').value.trim();
+    const base = document.getElementById('claimBaseAmount').value.trim();
+    const percent = document.getElementById('claimPercent').value.trim();
+    const result = document.getElementById('claimJpResult').value.trim();
+
+    if (!provider) return showToast('Provider wajib dipilih.', 'error');
+    if (!claimType) return showToast('Jenis klaim wajib dipilih.', 'error');
+    if (!ticketId) return showToast('Ticket ID wajib diisi.', 'error');
+    if (!bettOutput) return showToast('BETT wajib diisi.', 'error');
+    if (!base) return showToast('Nominal dasar wajib diisi.', 'error');
+    if (!result) return showToast('Hasil JP wajib diisi.', 'error');
+    if (!scatter) return showToast('Jumlah scatter wajib diisi.', 'error');
+
+    if (claimUpdateBuyspinWarning()) {
+      showToast('Dasar hitung BUYSPIN di bawah minimal 300. Cek kembali sebelum digunakan.', 'error');
+    }
+
+    const gameName = provider === 'PRAGMATIC' ? 'PRAGMATIC' : 'MAHJONG';
+    const line1 = `KLAIM ${scatter} SCATTER ${gameName} BETT : ${bettOutput} (NO TICKET : ${ticketId})`;
+    const line2 = `KLAIM ${claimType} TOTAL JP = ${base} x ${percent}% = ${result} (TICKET ID : ${ticketId})`;
+    document.getElementById('claimOutput').value = `${line1}\n${line2}`;
+    showToast('Output klaim berhasil dibuat.', 'success');
+  }
+
+  async function claimCopyOutput() {
+    const output = document.getElementById('claimOutput').value.trim();
+    if (!output) {
+      showToast('Output masih kosong.', 'error');
+      return;
+    }
+    try {
+      await copyTextToClipboard(output);
+      showToast('Output klaim berhasil disalin.', 'success');
+    } catch (error) {
+      showToast('Gagal menyalin output.', 'error');
+    }
+  }
+
+  function claimReset() {
+    document.getElementById('claimHistoryImage').value = '';
+    ['claimTicketId', 'claimBetInput', 'claimBettOutput', 'claimWinCandidates', 'claimSelectedWin', 'claimBaseAmount', 'claimJpResult', 'claimOutput', 'claimOcrText'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('claimProvider').value = 'PG';
+    document.getElementById('claimType').value = 'FREESPIN';
+    document.getElementById('claimScatterCount').value = 3;
+    document.getElementById('claimPercent').value = 25;
+    claimSetPreview('claimOriginalPreview', '', 'Belum ada gambar history');
+    claimSetPreview('claimProcessedPreview', '', 'Hasil masking/crop akan muncul di sini');
+    claimSetStatus('');
+    claimUpdateBuyspinWarning();
+    showToast('Form Klaim Mahjong dibersihkan.', 'success');
+  }
 
   function showAuditTab() {
     if (!hasAuditAccess()) return;
@@ -5279,6 +5813,44 @@
   document.getElementById('monitorFinalizeBtn').addEventListener('click', adminFinalizeSelectedBonusBatch);
   document.getElementById('monitorCloseDetailBtn').addEventListener('click', adminCloseBonusBatchDetail);
   document.getElementById('monitorCopyClaimBtn').addEventListener('click', adminCopyBonusClaim);
+  document.getElementById('claimHistoryImage').addEventListener('change', claimHandleHistoryUpload);
+  document.getElementById('claimOcrRetryBtn').addEventListener('click', claimRunOcr);
+  document.getElementById('claimPickSmallestBtn').addEventListener('click', claimPickSmallestNominal);
+  document.getElementById('claimGenerateBtn').addEventListener('click', claimGenerateOutput);
+  document.getElementById('claimCopyBtn').addEventListener('click', claimCopyOutput);
+  document.getElementById('claimResetBtn').addEventListener('click', claimReset);
+  document.getElementById('claimProvider').addEventListener('change', () => {
+    claimUpdateProviderDefaults(true);
+    claimUpdateCalculatedFields();
+    const file = document.getElementById('claimHistoryImage')?.files?.[0];
+    if (file) claimHandleHistoryUpload();
+  });
+  document.getElementById('claimType').addEventListener('change', claimUpdateCalculatedFields);
+  document.getElementById('claimBetInput').addEventListener('input', event => {
+    const bett = document.getElementById('claimBettOutput');
+    if (!bett.dataset.manualEdit) bett.value = claimParseBetToBettOutput(event.target.value);
+    claimUpdateCalculatedFields();
+  });
+  document.getElementById('claimBettOutput').addEventListener('input', () => {
+    document.getElementById('claimBettOutput').dataset.manualEdit = 'true';
+  });
+  document.getElementById('claimSelectedWin').addEventListener('input', claimUpdateCalculatedFields);
+  document.getElementById('claimBaseAmount').addEventListener('input', () => {
+    document.getElementById('claimJpResult').value = claimCalculateJpResult(
+      document.getElementById('claimBaseAmount').value,
+      document.getElementById('claimPercent').value
+    );
+    claimUpdateBuyspinWarning();
+  });
+  document.getElementById('claimPercent').addEventListener('input', () => {
+    document.getElementById('claimJpResult').value = claimCalculateJpResult(
+      document.getElementById('claimBaseAmount').value,
+      document.getElementById('claimPercent').value
+    );
+    claimUpdateBuyspinWarning();
+  });
+  claimUpdateProviderDefaults(true);
+  claimUpdateCalculatedFields();
   const moduleDownloadBtn = document.getElementById('adminModuleDownloadBtn');
   if (moduleDownloadBtn) {
     moduleDownloadBtn.addEventListener('click', () => {
