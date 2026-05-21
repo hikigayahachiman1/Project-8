@@ -1469,6 +1469,78 @@
     border-radius: 14px;
   }
 
+  .claim-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .claim-form-grid .field.full {
+    grid-column: 1 / -1;
+  }
+
+  #panel-claim-mahjong .field {
+    display: grid;
+    gap: 7px;
+  }
+
+  #panel-claim-mahjong .field label {
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 800;
+  }
+
+  #panel-claim-mahjong .field input,
+  #panel-claim-mahjong .field textarea {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid rgba(143,178,255,0.24);
+    border-radius: 16px;
+    padding: 11px 13px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.055), rgba(255,255,255,0.025)),
+      rgba(3, 7, 18, 0.52);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    outline: none;
+  }
+
+  #panel-claim-mahjong .field input:focus,
+  #panel-claim-mahjong .field textarea:focus {
+    border-color: rgba(39,245,255,0.72);
+    box-shadow: 0 0 0 4px rgba(39,245,255,0.10), 0 0 22px rgba(39,245,255,0.08);
+  }
+
+  #claimWinCandidates {
+    min-height: 140px;
+    max-height: 260px;
+  }
+
+  .claim-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .claim-mini-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 10px;
+    border: 1px solid rgba(143,178,255,0.18);
+    border-radius: 999px;
+    background: rgba(255,255,255,0.045);
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    font-weight: 800;
+  }
+
   .claim-ocr-status {
     display: none;
     margin-top: 12px;
@@ -1848,6 +1920,7 @@
     .operator-left { align-items: flex-start; }
     .logout-btn { width: 100%; }
     .claim-helper-grid { grid-template-columns: 1fr; }
+    .claim-form-grid { grid-template-columns: 1fr; }
     .claim-preview-box { min-height: 180px; }
     .tool-tabs { border-radius: 22px; }
     .tool-tab { min-width: 0; flex: 1 1 145px; }
@@ -2125,7 +2198,9 @@
           <div class="card-title">Hasil Deteksi / Input Manual</div>
           <div class="card-desc">Semua field bisa dikoreksi manual sebelum output dipakai.</div>
 
-          <div class="form-grid">
+          <div id="claimDetectedSummary" class="claim-pill-row" style="display:none;"></div>
+
+          <div class="claim-form-grid">
             <div class="field">
               <label for="claimTicketId">Ticket ID / ID Sesi Bermain</label>
               <input id="claimTicketId" type="text" placeholder="2057244238252441600">
@@ -2142,7 +2217,7 @@
               <label for="claimScatterCount">Jumlah Scatter</label>
               <input id="claimScatterCount" type="number" value="3" min="1" step="1">
             </div>
-            <div class="field" style="grid-column: 1 / -1;">
+            <div class="field full">
               <label for="claimWinCandidates">Nominal Kemenangan dari History</label>
               <textarea id="claimWinCandidates" placeholder="166,56&#10;Rp 323.200,00"></textarea>
             </div>
@@ -2167,6 +2242,7 @@
           <div id="claimBuyspinWarning" class="claim-warning">Dasar hitung BUYSPIN di bawah minimal 300. Cek kembali sebelum digunakan.</div>
 
           <div class="bonus-actions">
+            <button id="claimPickTopRowBtn" class="ghost">Ambil Baris Teratas</button>
             <button id="claimPickSmallestBtn" class="warning">Ambil Nominal Terkecil</button>
             <button id="claimGenerateBtn" class="success">Generate Output</button>
             <button id="claimCopyBtn">Copy Output</button>
@@ -2504,6 +2580,7 @@
   let bonusMonitorBatches = [];
   let bonusMonitorSelectedBatch = null;
   let bonusMonitorSelectedRows = [];
+  let claimLastParsedOcr = null;
   let operatorIdleTimer = null;
   let operatorLastSessionTouchAt = 0;
 
@@ -2911,7 +2988,7 @@
 
   function claimCleanMoneyText(value) {
     return String(value || '')
-      .replace(/rp/ig, '')
+      .replace(/\b(?:rp|ap|ro|rd|bp)\b/ig, '')
       .replace(/\s+/g, '')
       .replace(/[^\d,.-]/g, '')
       .trim();
@@ -2920,7 +2997,7 @@
   function claimHasThousandStyle(value) {
     const raw = String(value || '');
     const cleaned = claimCleanMoneyText(raw);
-    return /rp/i.test(raw) || /\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(cleaned);
+    return /\b(?:rp|ap|ro|rd|bp)\b/i.test(raw) || /\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(cleaned);
   }
 
   function claimParseIndonesianMoney(value) {
@@ -3095,6 +3172,7 @@
   async function claimPostOcrImage(blob) {
     const form = new FormData();
     form.append('ocr_image', blob, 'claim-history.png');
+    form.append('provider', claimCurrentProvider());
     const endpoints = ['/api/claim-ocr', '/api/claim-ocr.js'];
     let lastError = null;
 
@@ -3119,7 +3197,28 @@
 
   function claimApplyOcrResult(data) {
     const parsed = data && data.parsed ? data.parsed : {};
-    document.getElementById('claimOcrText').value = data.raw_text || '';
+    claimLastParsedOcr = parsed;
+    if (parsed.detected_provider && ['PG', 'PRAGMATIC'].includes(parsed.detected_provider)) {
+      const providerEl = document.getElementById('claimProvider');
+      if (providerEl && providerEl.value !== parsed.detected_provider) {
+        providerEl.value = parsed.detected_provider;
+        claimUpdateProviderDefaults(true);
+      }
+    }
+    const selectedRow = (parsed.detected_rows || [])[0] || {};
+    const detectionNote = [
+      `Provider detected: ${parsed.detected_provider || claimCurrentProvider() || '-'}`,
+      `Selected row: ${parsed.selected_row_index || 1}`,
+      `Ticket: ${parsed.ticket_id || '-'}`,
+      `Bet: ${parsed.bet || '-'}`,
+      `Win: ${parsed.selected_win || '-'}`,
+      `Ticket list: ${(parsed.ticket_ids || []).join(', ') || '-'}`,
+      `Bet list: ${(parsed.bet_candidates || []).join(', ') || '-'}`,
+      `Win list: ${(parsed.win_candidates || []).join(', ') || '-'}`,
+      selectedRow.balance ? `Balance row 1: ${selectedRow.balance}` : ''
+    ].filter(Boolean).join('\n');
+    document.getElementById('claimOcrText').value = `${detectionNote}\n\n--- RAW OCR ---\n${data.raw_text || ''}`;
+    claimRenderDetectedSummary(parsed);
     if (parsed.ticket_id) document.getElementById('claimTicketId').value = parsed.ticket_id;
     if (parsed.bet) document.getElementById('claimBetInput').value = parsed.bet;
     if (parsed.bett_output) document.getElementById('claimBettOutput').value = parsed.bett_output;
@@ -3128,6 +3227,44 @@
     }
     if (parsed.selected_win) document.getElementById('claimSelectedWin').value = parsed.selected_win;
     claimUpdateCalculatedFields();
+  }
+
+  function claimRenderDetectedSummary(parsed) {
+    const wrap = document.getElementById('claimDetectedSummary');
+    if (!wrap) return;
+    if (!parsed || !parsed.detected_provider) {
+      wrap.style.display = 'none';
+      wrap.innerHTML = '';
+      return;
+    }
+    wrap.style.display = 'flex';
+    wrap.innerHTML = [
+      `Provider: ${parsed.detected_provider || '-'}`,
+      `Row: ${parsed.selected_row_index || 1}`,
+      `Ticket: ${parsed.ticket_id || '-'}`,
+      `Bet: ${parsed.bet || '-'}`,
+      `Win: ${parsed.selected_win || '-'}`
+    ].map(item => `<span class="claim-mini-stat">${escapeHtml(item)}</span>`).join('');
+  }
+
+  function claimApplyTopDetectedRow() {
+    const parsed = claimLastParsedOcr;
+    const row = parsed && Array.isArray(parsed.detected_rows) ? parsed.detected_rows[0] : null;
+    if (!row) {
+      showToast('Belum ada baris OCR terdeteksi.', 'error');
+      return;
+    }
+
+    if (row.ticket_id) document.getElementById('claimTicketId').value = row.ticket_id;
+    if (row.bet) {
+      document.getElementById('claimBetInput').value = row.bet;
+      document.getElementById('claimBettOutput').value = claimParseBetToBettOutput(row.bet);
+    }
+    if (row.win) {
+      document.getElementById('claimSelectedWin').value = row.win;
+    }
+    claimUpdateCalculatedFields();
+    showToast('Baris teratas OCR sudah dipakai.', 'success');
   }
 
   async function claimRunOcr() {
@@ -3238,10 +3375,13 @@
     ['claimTicketId', 'claimBetInput', 'claimBettOutput', 'claimWinCandidates', 'claimSelectedWin', 'claimBaseAmount', 'claimJpResult', 'claimOutput', 'claimOcrText'].forEach(id => {
       document.getElementById(id).value = '';
     });
+    delete document.getElementById('claimBettOutput').dataset.manualEdit;
+    claimLastParsedOcr = null;
     document.getElementById('claimProvider').value = 'PG';
     document.getElementById('claimType').value = 'FREESPIN';
     document.getElementById('claimScatterCount').value = 3;
     document.getElementById('claimPercent').value = 25;
+    claimRenderDetectedSummary(null);
     claimSetPreview('claimOriginalPreview', '', 'Belum ada gambar history');
     claimSetPreview('claimProcessedPreview', '', 'Hasil masking/crop akan muncul di sini');
     claimSetStatus('');
@@ -5815,6 +5955,7 @@
   document.getElementById('monitorCopyClaimBtn').addEventListener('click', adminCopyBonusClaim);
   document.getElementById('claimHistoryImage').addEventListener('change', claimHandleHistoryUpload);
   document.getElementById('claimOcrRetryBtn').addEventListener('click', claimRunOcr);
+  document.getElementById('claimPickTopRowBtn').addEventListener('click', claimApplyTopDetectedRow);
   document.getElementById('claimPickSmallestBtn').addEventListener('click', claimPickSmallestNominal);
   document.getElementById('claimGenerateBtn').addEventListener('click', claimGenerateOutput);
   document.getElementById('claimCopyBtn').addEventListener('click', claimCopyOutput);

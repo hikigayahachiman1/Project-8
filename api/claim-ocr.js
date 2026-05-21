@@ -117,7 +117,7 @@ export function normalizeOcrText(text) {
 
 function cleanMoneyText(value) {
   return String(value || '')
-    .replace(/rp/ig, '')
+    .replace(/\b(?:rp|ap|ro|rd|bp)\b/ig, '')
     .replace(/\s+/g, '')
     .replace(/[^\d,.-]/g, '')
     .trim();
@@ -126,7 +126,7 @@ function cleanMoneyText(value) {
 function hasThousandStyle(value) {
   const raw = String(value || '');
   const cleaned = cleanMoneyText(raw);
-  return /rp/i.test(raw) || /\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(cleaned);
+  return /\b(?:rp|ap|ro|rd|bp)\b/i.test(raw) || /\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(cleaned);
 }
 
 function parseIndonesianMoney(value) {
@@ -180,6 +180,10 @@ export function parseBetToBettOutput(value) {
   return formatThousands(amount);
 }
 
+export function parseMoneyToThousandsBase(value) {
+  return normalizeWinToBaseAmount(value);
+}
+
 function isLikelyNoiseLine(line) {
   return /(?:kb\/d|chrome|https?:|verify|pilih|klik|tampilkan|baterai|lte|gmt|hari ini|riwayat permainan|saldo baru|tanggal|waktu|transaksi|taruhan|surplus|jumlah dimenangkan|id sesi bermain)/i.test(line);
 }
@@ -217,15 +221,49 @@ export function extractTicketId(text) {
   return unique[0] || '';
 }
 
+export function extractTicketIds(text) {
+  const normalized = normalizeOcrText(text);
+  const lines = normalized.split('\n');
+  const candidates = [];
+
+  lines.forEach(line => {
+    if (isLikelyNoiseLine(line)) return;
+    if (/[A-Za-z]/.test(line.replace(/\b(?:id|sesi|bermain)\b/ig, ''))) return;
+    const matches = line.match(/\b\d{10,20}\b/g) || [];
+    matches.forEach(match => candidates.push(match));
+  });
+
+  const digitLines = lines
+    .map(line => ({ line, digits: line.replace(/\D/g, '') }))
+    .filter(item => item.digits.length >= 5 && item.digits.length <= 20)
+    .filter(item => !isLikelyNoiseLine(item.line))
+    .filter(item => !/(?:rp|ap|ro|rd|bp|,|\.|:)/i.test(item.line))
+    .filter(item => !/[A-Za-z]/.test(item.line));
+
+  for (let index = 0; index < digitLines.length; index += 1) {
+    const current = digitLines[index].digits;
+    if (current.length >= 10 && current.length <= 20) candidates.push(current);
+    const next = digitLines[index + 1] ? digitLines[index + 1].digits : '';
+    if (next) {
+      const combined = `${current}${next}`;
+      if (combined.length >= 10 && combined.length <= 20) candidates.push(combined);
+    }
+  }
+
+  return [...new Set(candidates)]
+    .filter(value => value.length >= 10 && value.length <= 20)
+    .filter(value => !/^0+$/.test(value));
+}
+
 export function extractMoneyCandidates(text) {
   const normalized = normalizeOcrText(text);
-  const matches = normalized.match(/-?\s*(?:Rp\s*)?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\s*(?:Rp\s*)?\d+(?:[,.]\d+)?/gi) || [];
+  const matches = normalized.match(/-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d{1,3}(?:\.\d{3})+(?:[,.]\d+)?|-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d+(?:[,.]\d+)?/gi) || [];
   return [...new Set(matches
     .map(item => item.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .filter(item => {
       const cleaned = cleanMoneyText(item);
-      return /rp/i.test(item) || cleaned.includes(',') || /\d{1,3}(?:\.\d{3})+/.test(cleaned);
+      return /\b(?:rp|ap|ro|rd|bp)\b/i.test(item) || cleaned.includes(',') || /\d{1,3}(?:\.\d{3})+/.test(cleaned);
     }))];
 }
 
@@ -292,8 +330,96 @@ export function pickSmallestPositiveWin(values) {
   return candidates[0] ? candidates[0].raw : '';
 }
 
-export function parseHistoryOcr(rawText) {
+function detectProvider(rawText, requestedProvider = '') {
   const normalized = normalizeOcrText(rawText);
+  if (/(gates of olympus|sweet bonanza|starlight princess|pragmatic|super scatter)/i.test(normalized)) {
+    return 'PRAGMATIC';
+  }
+  const requested = String(requestedProvider || '').trim().toUpperCase();
+  if (requested === 'PG' || requested === 'PRAGMATIC') return requested;
+  return 'PG';
+}
+
+function normalizeMoneyLabel(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return raw.replace(/\b(?:ap|ro|rd|bp)\b/ig, 'Rp').replace(/\s+/g, ' ');
+}
+
+function buildPragmaticDetectedRows(ticketIds, balances, bets, wins) {
+  const rowCount = Math.max(ticketIds.length, bets.length, wins.length, 1);
+  const rows = [];
+  for (let index = 0; index < rowCount; index += 1) {
+    rows.push({
+      row_index: index + 1,
+      ticket_id: ticketIds[index] || '',
+      balance: balances[index] || '',
+      bet: bets[index] || '',
+      win: wins[index] || ''
+    });
+  }
+  return rows;
+}
+
+export function parsePragmaticHistoryOcr(rawText) {
+  const normalized = normalizeOcrText(rawText);
+  const ticketIds = extractTicketIds(normalized);
+  const moneyValues = extractMoneyCandidates(normalized)
+    .map(normalizeMoneyLabel)
+    .filter(value => parseIndonesianMoney(value) >= 0);
+
+  const ticketCount = Math.max(ticketIds.length, 1);
+  let balances = [];
+  let bets = [];
+  let wins = [];
+
+  if (moneyValues.length >= ticketCount * 3) {
+    balances = moneyValues.slice(0, ticketCount);
+    bets = moneyValues.slice(ticketCount, ticketCount * 2);
+    wins = moneyValues.slice(ticketCount * 2, ticketCount * 3);
+  } else if (moneyValues.length >= 3) {
+    balances = [moneyValues[0]];
+    bets = [moneyValues[1]];
+    wins = moneyValues.slice(2);
+  } else if (moneyValues.length >= 2) {
+    bets = [moneyValues[0]];
+    wins = [moneyValues[1]];
+  } else {
+    wins = moneyValues;
+  }
+
+  wins = wins.filter(value => parseIndonesianMoney(value) > 0);
+  bets = bets.filter(value => parseIndonesianMoney(value) > 0);
+
+  const detectedRows = buildPragmaticDetectedRows(ticketIds, balances, bets, wins);
+  const selectedRow = detectedRows[0] || {};
+  const ticket_id = selectedRow.ticket_id || ticketIds[0] || '';
+  const bet = selectedRow.bet || bets[0] || '';
+  const selected_win = selectedRow.win || wins[0] || '';
+  const base_amount = normalizeWinToBaseAmount(selected_win);
+
+  return {
+    ticket_id,
+    bet,
+    bett_output: parseBetToBettOutput(bet),
+    win_candidates: wins,
+    selected_win,
+    base_amount: Number.isFinite(base_amount) ? base_amount : null,
+    detected_provider: 'PRAGMATIC',
+    selected_row_index: selectedRow.row_index || 1,
+    ticket_ids: ticketIds,
+    bet_candidates: bets,
+    detected_rows: detectedRows
+  };
+}
+
+export function parseHistoryOcr(rawText, provider = '') {
+  const normalized = normalizeOcrText(rawText);
+  const detectedProvider = detectProvider(normalized, provider);
+  if (detectedProvider === 'PRAGMATIC') {
+    return parsePragmaticHistoryOcr(normalized);
+  }
+
   const ticket_id = extractTicketId(normalized);
   const bet = extractBet(normalized);
   const bett_output = parseBetToBettOutput(bet);
@@ -307,7 +433,17 @@ export function parseHistoryOcr(rawText) {
     bett_output,
     win_candidates,
     selected_win,
-    base_amount: Number.isFinite(base_amount) ? base_amount : null
+    base_amount: Number.isFinite(base_amount) ? base_amount : null,
+    detected_provider: 'PG',
+    selected_row_index: 1,
+    ticket_ids: extractTicketIds(normalized),
+    bet_candidates: bet ? [bet] : [],
+    detected_rows: [{
+      row_index: 1,
+      ticket_id,
+      bet,
+      win: selected_win
+    }]
   };
 }
 
@@ -413,7 +549,7 @@ export default async function handler(req, res) {
     }
 
     const bodyBuffer = await readRequestBuffer(req);
-    const { files } = parseMultipart(bodyBuffer, contentType);
+    const { fields, files } = parseMultipart(bodyBuffer, contentType);
     const historyImage = files.ocr_image || files.history_image;
 
     if (!historyImage) {
@@ -442,7 +578,7 @@ export default async function handler(req, res) {
 
     const ocrResponse = await callOcrApi(historyImage.buffer, historyImage.fileName, historyImage.mimeType);
     const rawText = parseOcrResponse(ocrResponse);
-    const parsed = parseHistoryOcr(rawText);
+    const parsed = parseHistoryOcr(rawText, fields.provider);
 
     return json(res, 200, {
       ok: true,
