@@ -550,6 +550,39 @@ export function parsePgHistoryOcr(rawText) {
   };
 }
 
+export function parsePgScatterOcr(rawText) {
+  const normalized = normalizeOcrText(rawText);
+  const patterns = [
+    /(?:scatter|scater|skater)\D{0,12}([3-6])/i,
+    /([3-6])\D{0,8}(?:scatter|scater|skater)/i,
+    /x\s*([3-6])\b/i,
+    /\b([3-6])\s*x\b/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match && match[1]) {
+      return {
+        provider: 'PG',
+        ocr_type: 'scatter_pg',
+        scatter_count: Number(match[1]),
+        confidence: 'ocr',
+        detected_provider: 'PG',
+        parser_used: 'parsePgScatterOcr'
+      };
+    }
+  }
+
+  return {
+    provider: 'PG',
+    ocr_type: 'scatter_pg',
+    scatter_count: null,
+    confidence: 'manual_required',
+    detected_provider: 'PG',
+    parser_used: 'parsePgScatterOcr'
+  };
+}
+
 export function parseGenericHistoryOcr(rawText) {
   return parsePgHistoryOcr(rawText);
 }
@@ -695,11 +728,15 @@ export default async function handler(req, res) {
 
     const ocrResponse = await callOcrApi(historyImage.buffer, historyImage.fileName, historyImage.mimeType);
     const rawText = parseOcrResponse(ocrResponse);
-    const parsed = parseHistoryOcr(rawText, fields.provider);
+    const ocrType = String(fields.ocr_type || fields.ocrType || 'history_pg').trim();
+    const parsed = ocrType === 'scatter_pg'
+      ? parsePgScatterOcr(rawText)
+      : parsePgHistoryOcr(rawText);
 
     return json(res, 200, {
       ok: true,
       raw_text: rawText,
+      ocr_type: ocrType,
       parsed
     });
   } catch (error) {

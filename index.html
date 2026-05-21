@@ -1502,6 +1502,47 @@
     border-radius: 14px;
   }
 
+  .claim-paste-area {
+    display: grid;
+    gap: 12px;
+    min-height: 164px;
+    padding: 16px;
+    border: 1px dashed rgba(39,245,255,0.34);
+    border-radius: 22px;
+    background:
+      linear-gradient(135deg, rgba(39,245,255,0.075), rgba(155,92,255,0.055)),
+      rgba(3, 7, 18, 0.48);
+    color: var(--ink-soft);
+    cursor: pointer;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+  }
+
+  .claim-paste-area.active {
+    border-color: rgba(255,200,87,0.66);
+    box-shadow: 0 0 0 4px rgba(255,200,87,0.08), 0 0 28px rgba(39,245,255,0.10);
+    transform: translateY(-1px);
+  }
+
+  .claim-paste-area strong {
+    color: var(--ink);
+    font-size: 0.98rem;
+  }
+
+  .claim-paste-area span {
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+
+  .claim-paste-area input[type="file"] {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid rgba(143,178,255,0.20);
+    border-radius: 14px;
+    padding: 8px 10px;
+    background: rgba(2, 7, 18, 0.46);
+    color: var(--ink-soft);
+  }
+
   .claim-form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1980,7 +2021,7 @@
     <div class="login-shell">
       <div class="login-card">
         <div class="login-accent-line"></div>
-        <h2>Login</h2>
+        <h2>Login Operator</h2>
         <p>Masukkan username dan password.</p>
         <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
         <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
@@ -2011,10 +2052,10 @@
     <div class="tool-tabs">
       <button class="tool-tab active" data-panel="parser">Parser QRIS</button>
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
-      <button class="tool-tab" data-panel="claim-mahjong">Klaim</button>
+      <button class="tool-tab" data-panel="claim-mahjong">Klaim Mahjong</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
-      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Dashboard</button>
+      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
       <button class="tool-tab" id="bonusMonitoringTab" data-panel="bonus-monitoring" style="display:none;">Monitoring Bonus Operator</button>
     </div>
 
@@ -2191,29 +2232,40 @@
       <div class="claim-helper-grid">
         <section class="card">
           <div class="card-title">Klaim Mahjong Helper</div>
-          <div class="card-desc">Upload screenshot history permainan. Gambar hanya dipakai sementara untuk OCR, lalu hasilnya bisa dicek dan diedit manual.</div>
+          <div class="card-desc">Mode testing PG Soft: paste/upload history permainan dan gambar scatter. Gambar hanya dipakai sementara untuk OCR.</div>
 
           <div class="date-row">
-            <select id="claimProvider" class="bonus-date">
-              <option value="PG">PG</option>
-            </select>
+            <input id="claimProvider" class="bonus-date" type="text" value="PG" readonly title="Fokus sementara hanya PG Soft">
             <input id="claimType" class="bonus-date" type="text" value="FREESPIN" readonly title="Sementara hanya FREESPIN">
           </div>
 
-          <div class="file-row">
-            <input id="claimHistoryImage" type="file" accept="image/png,image/jpeg,image/webp">
-            <button id="claimOcrRetryBtn" class="primary">Baca OCR Ulang</button>
+          <div class="claim-preview-grid">
+            <div class="claim-paste-area active" id="claimHistoryPasteArea" tabindex="0" role="button">
+              <strong>History Permainan PG</strong>
+              <span>Klik area ini lalu tekan Ctrl+V untuk paste gambar, atau upload file history PG.</span>
+              <input id="claimHistoryImage" type="file" accept="image/png,image/jpeg,image/webp">
+            </div>
+            <div class="claim-paste-area" id="claimScatterPasteArea" tabindex="0" role="button">
+              <strong>Gambar Scatter PG</strong>
+              <span>Klik area ini lalu tekan Ctrl+V untuk paste gambar scatter. Jika OCR gagal, isi scatter manual.</span>
+              <input id="claimScatterImage" type="file" accept="image/png,image/jpeg,image/webp">
+            </div>
+          </div>
+
+          <div class="bonus-actions">
+            <button id="claimHistoryOcrRetryBtn" class="primary">Baca OCR History Ulang</button>
+            <button id="claimScatterOcrRetryBtn" class="ghost">Baca OCR Scatter Ulang</button>
           </div>
           <div id="claimOcrStatus" class="claim-ocr-status">Membaca history dengan OCR...</div>
 
           <div class="claim-preview-grid">
             <div>
-              <div class="source-note">Preview original</div>
-              <div id="claimOriginalPreview" class="claim-preview-box">Belum ada gambar history</div>
+              <div class="source-note">Preview History PG</div>
+              <div id="claimHistoryPreview" class="claim-preview-box">Belum ada gambar history</div>
             </div>
             <div>
-              <div class="source-note">Preview gambar yang dikirim ke OCR</div>
-              <div id="claimProcessedPreview" class="claim-preview-box">Hasil masking/crop akan muncul di sini</div>
+              <div class="source-note">Preview Scatter PG</div>
+              <div id="claimScatterPreview" class="claim-preview-box">Belum ada gambar scatter</div>
             </div>
           </div>
 
@@ -2269,8 +2321,6 @@
           </div>
 
           <div class="bonus-actions">
-            <button id="claimPickTopRowBtn" class="ghost">Ambil Baris Teratas</button>
-            <button id="claimPickSmallestBtn" class="warning">Ambil Nominal Terkecil</button>
             <button id="claimGenerateBtn" class="success">Generate Output</button>
             <button id="claimCopyBtn">Copy Output</button>
             <button id="claimResetBtn" class="danger">Reset</button>
@@ -2280,7 +2330,7 @@
           <textarea id="claimOutput" class="claim-output-area" placeholder="Klik Generate Output setelah field sudah benar."></textarea>
 
           <div class="hint">
-            <strong>Aturan:</strong> Output selalu 2 baris dan tidak memakai Login ID. Untuk tahap ini Klaim Mahjong hanya memakai FREESPIN 25%.
+            <strong>Aturan:</strong> Output scatter selalu dibuat. FREESPIN 25% hanya dibuat jika nominal dasar minimal 150.
           </div>
         </section>
       </div>
@@ -2631,6 +2681,9 @@
   let bonusMonitorSelectedBatch = null;
   let bonusMonitorSelectedRows = [];
   let claimLastParsedOcr = null;
+  let claimHistoryFile = null;
+  let claimScatterFile = null;
+  let activePasteTarget = 'history';
   let featureAccessLocks = {};
   const FEATURE_TAB_MAP = {
     parser: 'parser',
@@ -3595,6 +3648,314 @@
     claimRenderDetectedSummary(null);
     claimSetPreview('claimOriginalPreview', '', 'Belum ada gambar history');
     claimSetPreview('claimProcessedPreview', '', 'Hasil masking/crop akan muncul di sini');
+    claimSetStatus('');
+    showToast('Form Klaim Mahjong dibersihkan.', 'success');
+  }
+
+  // PG-only Klaim Mahjong Helper override. Kept near the end so it wins over the earlier testing helpers.
+  function claimCurrentProvider() {
+    return 'PG';
+  }
+
+  function claimCurrentType() {
+    return 'FREESPIN';
+  }
+
+  function claimSetStatus(message, type = 'info') {
+    const status = document.getElementById('claimOcrStatus');
+    if (!status) return;
+    status.textContent = message || '';
+    status.className = `claim-ocr-status ${message ? 'show' : ''} ${type === 'error' ? 'error' : ''}`;
+  }
+
+  function claimResetClaimOutputOnly() {
+    const output = document.getElementById('claimOutput');
+    if (output) output.value = '';
+  }
+
+  function claimSetActivePasteTarget(target) {
+    activePasteTarget = target === 'scatter' ? 'scatter' : 'history';
+    document.getElementById('claimHistoryPasteArea')?.classList.toggle('active', activePasteTarget === 'history');
+    document.getElementById('claimScatterPasteArea')?.classList.toggle('active', activePasteTarget === 'scatter');
+  }
+
+  function claimSetPreview(target, dataUrl) {
+    const id = target === 'scatter' ? 'claimScatterPreview' : 'claimHistoryPreview';
+    const emptyText = target === 'scatter' ? 'Belum ada gambar scatter' : 'Belum ada gambar history';
+    const box = document.getElementById(id);
+    if (!box) return;
+    box.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="Preview ${target === 'scatter' ? 'scatter' : 'history'}">` : escapeHtml(emptyText);
+  }
+
+  function renderClaimImagePreview(file, target) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        claimSetPreview(target, reader.result);
+        resolve(reader.result);
+      };
+      reader.onerror = () => reject(new Error('Gagal membaca gambar.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function claimResetBeforeHistoryOcr() {
+    claimLastParsedOcr = null;
+    ['claimTicketId', 'claimBetInput', 'claimBettOutput', 'claimWinCandidates', 'claimSelectedWin', 'claimBaseAmount', 'claimJpResult', 'claimOcrText'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    delete document.getElementById('claimBettOutput').dataset.manualEdit;
+    claimRenderDetectedSummary(null);
+    claimResetClaimOutputOnly();
+    claimSetStatus('');
+  }
+
+  async function claimPostOcrImage(file, ocrType) {
+    const form = new FormData();
+    form.append('ocr_image', file, file.name || `${ocrType}.png`);
+    form.append('provider', 'PG');
+    form.append('ocr_type', ocrType);
+    const endpoints = ['/api/claim-ocr', '/api/claim-ocr.js'];
+    let lastError = null;
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(endpoint, { method: 'POST', body: form });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.ok) {
+          const error = new Error(data.message || 'OCR gagal membaca gambar. Silakan isi manual.');
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      } catch (error) {
+        lastError = error;
+        if (error.status && error.status !== 404) break;
+      }
+    }
+    throw lastError || new Error('OCR gagal membaca gambar. Silakan isi manual.');
+  }
+
+  function claimBuildDetectionNote(parsed, rawText = '', label = 'History PG') {
+    const debug = parsed?.debug || {};
+    const selectedIndex = Number.isFinite(Number(parsed?.selected_row_index)) ? Number(parsed.selected_row_index) : 0;
+    return [
+      `Sumber OCR: ${label}`,
+      `Provider selected: PG`,
+      `Provider detected: ${parsed?.detected_provider || parsed?.provider || 'PG'}`,
+      `Parser used: ${parsed?.parser_used || '-'}`,
+      `Selected row: ${selectedIndex + 1}`,
+      `Ticket: ${parsed?.ticket_id || '-'}`,
+      `Bet: ${parsed?.bet || '-'}`,
+      `Win: ${parsed?.selected_win || '-'}`,
+      `Ticket list: ${(debug.ticket_list || parsed?.ticket_ids || []).join(', ') || '-'}`,
+      `Bet list: ${(debug.bet_list || parsed?.bet_candidates || []).join(', ') || '-'}`,
+      `Win list: ${(debug.win_list || parsed?.win_candidates || []).join(', ') || '-'}`,
+      '',
+      '--- RAW OCR ---',
+      rawText || ''
+    ].join('\n');
+  }
+
+  function claimAppendOcrNote(note) {
+    const box = document.getElementById('claimOcrText');
+    if (!box) return;
+    box.value = box.value ? `${box.value}\n\n${note}` : note;
+  }
+
+  function claimRenderDetectedSummary(parsed) {
+    const wrap = document.getElementById('claimDetectedSummary');
+    if (!wrap) return;
+    if (!parsed || !parsed.detected_provider) {
+      wrap.style.display = 'none';
+      wrap.innerHTML = '';
+      return;
+    }
+    wrap.style.display = 'flex';
+    wrap.innerHTML = [
+      `Provider: ${parsed.detected_provider || 'PG'}`,
+      `Ticket: ${parsed.ticket_id || '-'}`,
+      `Bet: ${parsed.bet || '-'}`,
+      `Win: ${parsed.selected_win || '-'}`
+    ].map(item => `<span class="claim-mini-stat">${escapeHtml(item)}</span>`).join('');
+  }
+
+  function claimApplyHistoryResult(data) {
+    const parsed = data?.parsed || {};
+    if (parsed.provider && parsed.provider !== 'PG') {
+      claimSetStatus('Gambar terdeteksi bukan PG Soft. PRAGMATIC sementara tidak diproses.', 'error');
+      showToast('PRAGMATIC sementara dinonaktifkan. Fokus PG Soft dulu.', 'error');
+      claimAppendOcrNote(claimBuildDetectionNote(parsed, data?.raw_text || '', 'History non-PG'));
+      return;
+    }
+    claimLastParsedOcr = parsed;
+    document.getElementById('claimProvider').value = 'PG';
+    document.getElementById('claimType').value = 'FREESPIN';
+    if (parsed.ticket_id) document.getElementById('claimTicketId').value = parsed.ticket_id;
+    if (parsed.bet) document.getElementById('claimBetInput').value = parsed.bet;
+    if (parsed.bett_output) document.getElementById('claimBettOutput').value = parsed.bett_output;
+    if (Array.isArray(parsed.win_candidates) && parsed.win_candidates.length) {
+      document.getElementById('claimWinCandidates').value = parsed.win_candidates.join('\n');
+    }
+    if (parsed.selected_win) document.getElementById('claimSelectedWin').value = parsed.selected_win;
+    claimUpdateCalculatedFields();
+    claimRenderDetectedSummary(parsed);
+    claimAppendOcrNote(claimBuildDetectionNote(parsed, data?.raw_text || '', 'History PG'));
+  }
+
+  function claimApplyScatterResult(data) {
+    const parsed = data?.parsed || {};
+    const note = [
+      'Sumber OCR: Scatter PG',
+      `Parser used: ${parsed.parser_used || '-'}`,
+      `Scatter detected: ${parsed.scatter_count || '-'}`,
+      `Confidence: ${parsed.confidence || '-'}`,
+      '',
+      '--- RAW OCR SCATTER ---',
+      data?.raw_text || ''
+    ].join('\n');
+    claimAppendOcrNote(note);
+    if (Number.isFinite(Number(parsed.scatter_count))) {
+      document.getElementById('claimScatterCount').value = Number(parsed.scatter_count);
+      showToast('Jumlah scatter terbaca dari gambar.', 'success');
+    } else {
+      claimSetStatus('Jumlah scatter belum terbaca. Silakan isi manual.', 'error');
+      showToast('Jumlah scatter belum terbaca. Silakan isi manual.', 'error');
+    }
+  }
+
+  async function claimRunOcr(target = 'history') {
+    const isScatter = target === 'scatter';
+    const file = isScatter ? claimScatterFile : claimHistoryFile;
+    const btn = document.getElementById(isScatter ? 'claimScatterOcrRetryBtn' : 'claimHistoryOcrRetryBtn');
+    if (!file) {
+      showToast(isScatter ? 'Upload/paste gambar scatter dulu.' : 'Upload/paste gambar history PG dulu.', 'error');
+      return;
+    }
+    try {
+      if (!isScatter) claimResetBeforeHistoryOcr();
+      setButtonLoading(btn, true, 'Membaca OCR...');
+      claimSetStatus(isScatter ? 'Membaca scatter dengan OCR...' : 'Membaca history PG dengan OCR...');
+      showLoading('Klaim Mahjong Helper', isScatter ? 'Membaca gambar scatter...' : 'Membaca history PG...', [
+        'Menyiapkan gambar',
+        'Mengirim gambar ke OCR',
+        'Mengisi hasil deteksi'
+      ]);
+      updateLoading('Menyiapkan gambar...', 0);
+      updateLoading('Mengirim gambar ke OCR...', 1, 0);
+      const data = await claimPostOcrImage(file, isScatter ? 'scatter_pg' : 'history_pg');
+      updateLoading('Mengisi hasil deteksi...', 2, 1);
+      if (isScatter) {
+        claimApplyScatterResult(data);
+      } else {
+        claimApplyHistoryResult(data);
+      }
+      if (!isScatter || Number.isFinite(Number(data?.parsed?.scatter_count))) {
+        claimSetStatus('OCR selesai. Cek dan koreksi hasil sebelum generate.');
+      }
+      updateLoading('OCR selesai.', null, 2);
+    } catch (error) {
+      const message = error.message || 'OCR gagal membaca gambar. Silakan isi manual.';
+      claimSetStatus(message, 'error');
+      claimAppendOcrNote(`OCR gagal (${isScatter ? 'Scatter' : 'History'}): ${message}`);
+      setLoadingError(message, 1);
+      showToast(message, 'error');
+    } finally {
+      hideLoading();
+      setButtonLoading(btn, false);
+    }
+  }
+
+  async function handleClaimImageFile(file, target) {
+    if (!file) return;
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type || '')) {
+      showToast('File harus berupa gambar JPG, PNG, atau WEBP.', 'error');
+      return;
+    }
+    claimSetActivePasteTarget(target);
+    if (target === 'scatter') {
+      claimScatterFile = file;
+    } else {
+      claimHistoryFile = file;
+    }
+    await renderClaimImagePreview(file, target);
+    showToast('Gambar berhasil ditempel.', 'success');
+    await claimRunOcr(target);
+  }
+
+  function handleClaimPaste(event) {
+    const panel = document.getElementById('panel-claim-mahjong');
+    if (!panel || !panel.classList.contains('active')) return;
+    const items = Array.from(event.clipboardData?.items || []);
+    const imageItem = items.find(item => /^image\//i.test(item.type || ''));
+    if (!imageItem) {
+      showToast('Clipboard tidak berisi gambar.', 'error');
+      return;
+    }
+    const file = imageItem.getAsFile();
+    if (!file) {
+      showToast('Clipboard tidak berisi gambar.', 'error');
+      return;
+    }
+    event.preventDefault();
+    handleClaimImageFile(file, activePasteTarget || 'history');
+  }
+
+  function claimGenerateOutput() {
+    const ticketId = document.getElementById('claimTicketId').value.trim();
+    const bettOutput = document.getElementById('claimBettOutput').value.trim();
+    const scatter = document.getElementById('claimScatterCount').value.trim();
+    const base = Number(document.getElementById('claimBaseAmount').value.trim());
+    const result = document.getElementById('claimJpResult').value.trim();
+    if (!ticketId) return showToast('Ticket ID wajib diisi.', 'error');
+    if (!bettOutput) return showToast('BETT wajib diisi.', 'error');
+    if (!Number.isFinite(base)) return showToast('Nominal dasar wajib diisi.', 'error');
+    if (!scatter) return showToast('Jumlah scatter wajib diisi.', 'error');
+    const line1 = `KLAIM ${scatter} SCATTER MAHJONG BETT : ${bettOutput} (NO TICKET : ${ticketId})`;
+    let output = line1;
+    if (base >= 150) {
+      const jp = result || claimCalculateJpResult(base, 25);
+      output += `\nKLAIM FREESPIN TOTAL JP = ${base} x 25% = ${jp} (TICKET ID : ${ticketId})`;
+      claimSetStatus('Output scatter dan FREESPIN berhasil dibuat.');
+    } else {
+      claimSetStatus('Kemenangan di bawah 150, output FREESPIN tidak dibuat. Hanya output scatter.', 'error');
+      showToast('Kemenangan di bawah 150, output FREESPIN tidak dibuat. Hanya output scatter.', 'error');
+    }
+    document.getElementById('claimOutput').value = output;
+    showToast('Output klaim berhasil dibuat.', 'success');
+  }
+
+  async function claimCopyOutput() {
+    const output = document.getElementById('claimOutput').value.trim();
+    if (!output) return showToast('Output masih kosong.', 'error');
+    try {
+      await copyTextToClipboard(output);
+      showToast('Output klaim berhasil disalin.', 'success');
+    } catch (error) {
+      showToast('Gagal menyalin output.', 'error');
+    }
+  }
+
+  function claimReset() {
+    claimHistoryFile = null;
+    claimScatterFile = null;
+    claimLastParsedOcr = null;
+    activePasteTarget = 'history';
+    document.getElementById('claimHistoryImage').value = '';
+    document.getElementById('claimScatterImage').value = '';
+    ['claimTicketId', 'claimBetInput', 'claimBettOutput', 'claimWinCandidates', 'claimSelectedWin', 'claimBaseAmount', 'claimJpResult', 'claimOutput', 'claimOcrText'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '';
+    });
+    delete document.getElementById('claimBettOutput').dataset.manualEdit;
+    document.getElementById('claimProvider').value = 'PG';
+    document.getElementById('claimType').value = 'FREESPIN';
+    document.getElementById('claimScatterCount').value = 3;
+    document.getElementById('claimPercent').value = 25;
+    claimRenderDetectedSummary(null);
+    claimSetPreview('history', '');
+    claimSetPreview('scatter', '');
+    claimSetActivePasteTarget('history');
     claimSetStatus('');
     showToast('Form Klaim Mahjong dibersihkan.', 'success');
   }
@@ -6163,20 +6524,20 @@
   document.getElementById('monitorFinalizeBtn').addEventListener('click', adminFinalizeSelectedBonusBatch);
   document.getElementById('monitorCloseDetailBtn').addEventListener('click', adminCloseBonusBatchDetail);
   document.getElementById('monitorCopyClaimBtn').addEventListener('click', adminCopyBonusClaim);
-  document.getElementById('claimHistoryImage').addEventListener('change', claimHandleHistoryUpload);
-  document.getElementById('claimOcrRetryBtn').addEventListener('click', claimRunOcr);
-  document.getElementById('claimPickTopRowBtn').addEventListener('click', claimApplyTopDetectedRow);
-  document.getElementById('claimPickSmallestBtn').addEventListener('click', claimPickSmallestNominal);
+  document.getElementById('claimHistoryPasteArea').addEventListener('click', () => claimSetActivePasteTarget('history'));
+  document.getElementById('claimHistoryPasteArea').addEventListener('focus', () => claimSetActivePasteTarget('history'));
+  document.getElementById('claimScatterPasteArea').addEventListener('click', () => claimSetActivePasteTarget('scatter'));
+  document.getElementById('claimScatterPasteArea').addEventListener('focus', () => claimSetActivePasteTarget('scatter'));
+  document.getElementById('claimHistoryImage').addEventListener('click', event => event.stopPropagation());
+  document.getElementById('claimScatterImage').addEventListener('click', event => event.stopPropagation());
+  document.getElementById('claimHistoryImage').addEventListener('change', event => handleClaimImageFile(event.target.files?.[0], 'history'));
+  document.getElementById('claimScatterImage').addEventListener('change', event => handleClaimImageFile(event.target.files?.[0], 'scatter'));
+  document.getElementById('claimHistoryOcrRetryBtn').addEventListener('click', () => claimRunOcr('history'));
+  document.getElementById('claimScatterOcrRetryBtn').addEventListener('click', () => claimRunOcr('scatter'));
+  document.addEventListener('paste', handleClaimPaste);
   document.getElementById('claimGenerateBtn').addEventListener('click', claimGenerateOutput);
   document.getElementById('claimCopyBtn').addEventListener('click', claimCopyOutput);
   document.getElementById('claimResetBtn').addEventListener('click', claimReset);
-  document.getElementById('claimProvider').addEventListener('change', () => {
-    claimUpdateProviderDefaults(true);
-    claimUpdateCalculatedFields();
-    const file = document.getElementById('claimHistoryImage')?.files?.[0];
-    if (file) claimHandleHistoryUpload();
-  });
-  document.getElementById('claimType').addEventListener('change', claimUpdateCalculatedFields);
   document.getElementById('claimBetInput').addEventListener('input', event => {
     const bett = document.getElementById('claimBettOutput');
     if (!bett.dataset.manualEdit) bett.value = claimParseBetToBettOutput(event.target.value);
@@ -6198,7 +6559,6 @@
       document.getElementById('claimPercent').value
     );
   });
-  claimUpdateProviderDefaults(true);
   claimUpdateCalculatedFields();
   const moduleDownloadBtn = document.getElementById('adminModuleDownloadBtn');
   if (moduleDownloadBtn) {
