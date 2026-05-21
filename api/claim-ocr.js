@@ -675,6 +675,62 @@ function parseOcrResponse(response) {
   return text;
 }
 
+function validateImageFile(file, label = 'Gambar') {
+  if (!file) return;
+  if (!ALLOWED_MIME_TYPES.has(String(file.mimeType).toLowerCase())) {
+    const error = new Error(`${label} harus berupa JPG, PNG, atau WEBP.`);
+    error.statusCode = 400;
+    throw error;
+  }
+  if (file.buffer.length > MAX_FILE_BYTES) {
+    const error = new Error(`${label} terlalu besar. Maksimal gambar 5MB.`);
+    error.statusCode = 413;
+    throw error;
+  }
+}
+
+async function processPgOcrImage(file, type) {
+  try {
+    validateImageFile(file, type === 'scatter' ? 'Gambar scatter' : 'Gambar history');
+    const ocrResponse = await callOcrApi(file.buffer, file.fileName, file.mimeType);
+    const rawText = parseOcrResponse(ocrResponse);
+    const parsed = type === 'scatter'
+      ? parsePgScatterOcr(rawText)
+      : parsePgHistoryOcr(rawText);
+
+    const scatterMissing = type === 'scatter' && !Number.isFinite(Number(parsed.scatter_count));
+    return {
+      ok: !scatterMissing,
+      raw_text: rawText,
+      parsed,
+      ...(scatterMissing ? { message: 'Jumlah scatter belum terbaca. Silakan isi manual.' } : {})
+    };
+  } catch (error) {
+    if (error.code === 'OCR_API_KEY_MISSING') throw error;
+    return {
+      ok: false,
+      raw_text: error.raw || error.raw_text || '',
+      parsed: type === 'scatter'
+        ? {
+            provider: 'PG',
+            ocr_type: 'scatter_pg',
+            scatter_count: null,
+            confidence: 'manual_required',
+            detected_provider: 'PG',
+            parser_used: 'parsePgScatterOcr'
+          }
+        : {
+            provider: 'PG',
+            detected_provider: 'PG',
+            parser_used: 'parsePgHistoryOcr'
+          },
+      message: type === 'scatter'
+        ? 'Jumlah scatter belum terbaca. Silakan isi manual.'
+        : 'OCR history gagal. Silakan isi manual.'
+    };
+  }
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') {
@@ -706,6 +762,33 @@ export default async function handler(req, res) {
 
     const bodyBuffer = await readRequestBuffer(req);
     const { fields, files } = parseMultipart(bodyBuffer, contentType);
+    const mode = String(fields.mode || '').trim();
+
+    if (mode === 'pg_dual_submit') {
+      const historyImage = files.history_image;
+      const scatterImage = files.scatter_image;
+
+      if (!historyImage) {
+        return json(res, 400, {
+          ok: false,
+          error: 'HISTORY_REQUIRED',
+          message: 'Gambar History PG wajib diupload.'
+        });
+      }
+
+      const jobs = [
+        processPgOcrImage(historyImage, 'history')
+      ];
+      if (scatterImage) jobs.push(processPgOcrImage(scatterImage, 'scatter'));
+
+      const results = await Promise.all(jobs);
+      return json(res, 200, {
+        ok: true,
+        history: results[0],
+        scatter: scatterImage ? results[1] : null
+      });
+    }
+
     const historyImage = files.ocr_image || files.history_image;
 
     if (!historyImage) {
@@ -716,21 +799,7 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!ALLOWED_MIME_TYPES.has(String(historyImage.mimeType).toLowerCase())) {
-      return json(res, 400, {
-        ok: false,
-        error: 'INVALID_FILE_TYPE',
-        message: 'Format gambar harus JPG, PNG, atau WEBP.'
-      });
-    }
-
-    if (historyImage.buffer.length > MAX_FILE_BYTES) {
-      return json(res, 413, {
-        ok: false,
-        error: 'FILE_TOO_LARGE',
-        message: 'File terlalu besar. Maksimal gambar 5MB.'
-      });
-    }
+    validateImageFile(historyImage, 'Gambar');
 
     const ocrResponse = await callOcrApi(historyImage.buffer, historyImage.fileName, historyImage.mimeType);
     const rawText = parseOcrResponse(ocrResponse);

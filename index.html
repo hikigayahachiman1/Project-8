@@ -1481,6 +1481,10 @@
     gap: 14px;
   }
 
+  .claim-image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .claim-preview-box {
     min-height: 220px;
     display: grid;
@@ -1531,6 +1535,24 @@
   .claim-paste-area span {
     font-size: 0.82rem;
     line-height: 1.45;
+  }
+
+  .claim-image-status {
+    display: inline-flex;
+    width: fit-content;
+    padding: 7px 10px;
+    border: 1px solid rgba(143,178,255,0.18);
+    border-radius: 999px;
+    background: rgba(2, 7, 18, 0.38);
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    font-weight: 800;
+  }
+
+  .claim-image-status.ready {
+    border-color: rgba(52,211,153,0.36);
+    color: #a7f3d0;
   }
 
   .claim-paste-area input[type="file"] {
@@ -1994,6 +2016,7 @@
     .operator-left { align-items: flex-start; }
     .logout-btn { width: 100%; }
     .claim-helper-grid { grid-template-columns: 1fr; }
+    .claim-image-grid { grid-template-columns: 1fr; }
     .claim-form-grid { grid-template-columns: 1fr; }
     .claim-preview-box { min-height: 180px; }
     .tool-tabs { border-radius: 22px; }
@@ -2239,26 +2262,28 @@
             <input id="claimType" class="bonus-date" type="text" value="FREESPIN" readonly title="Sementara hanya FREESPIN">
           </div>
 
-          <div class="claim-preview-grid">
+          <div class="claim-preview-grid claim-image-grid">
             <div class="claim-paste-area active" id="claimHistoryPasteArea" tabindex="0" role="button">
               <strong>History Permainan PG</strong>
               <span>Klik area ini lalu tekan Ctrl+V untuk paste gambar, atau upload file history PG.</span>
+              <em id="claimHistoryImageStatus" class="claim-image-status">Belum ada gambar</em>
               <input id="claimHistoryImage" type="file" accept="image/png,image/jpeg,image/webp">
             </div>
             <div class="claim-paste-area" id="claimScatterPasteArea" tabindex="0" role="button">
               <strong>Gambar Scatter PG</strong>
               <span>Klik area ini lalu tekan Ctrl+V untuk paste gambar scatter. Jika OCR gagal, isi scatter manual.</span>
+              <em id="claimScatterImageStatus" class="claim-image-status">Belum ada gambar</em>
               <input id="claimScatterImage" type="file" accept="image/png,image/jpeg,image/webp">
             </div>
           </div>
 
           <div class="bonus-actions">
-            <button id="claimHistoryOcrRetryBtn" class="primary">Baca OCR History Ulang</button>
-            <button id="claimScatterOcrRetryBtn" class="ghost">Baca OCR Scatter Ulang</button>
+            <button id="claimSubmitOcrBtn" class="primary">Kirim ke OCR</button>
+            <button id="claimResetImagesBtn" class="ghost">Reset Gambar</button>
           </div>
-          <div id="claimOcrStatus" class="claim-ocr-status">Membaca history dengan OCR...</div>
+          <div id="claimOcrStatus" class="claim-ocr-status show">Masukkan gambar History PG, lalu klik Kirim ke OCR.</div>
 
-          <div class="claim-preview-grid">
+          <div class="claim-preview-grid claim-image-grid">
             <div>
               <div class="source-note">Preview History PG</div>
               <div id="claimHistoryPreview" class="claim-preview-box">Belum ada gambar history</div>
@@ -2323,7 +2348,7 @@
           <div class="bonus-actions">
             <button id="claimGenerateBtn" class="success">Generate Output</button>
             <button id="claimCopyBtn">Copy Output</button>
-            <button id="claimResetBtn" class="danger">Reset</button>
+            <button id="claimResetBtn" class="danger">Reset Semua</button>
           </div>
 
           <div class="card-title" style="margin-top:18px;">Output Klaim</div>
@@ -3483,32 +3508,6 @@
     target.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="Preview history">` : escapeHtml(emptyText);
   }
 
-  async function claimPostOcrImage(blob) {
-    const form = new FormData();
-    form.append('ocr_image', blob, 'claim-history.png');
-    form.append('provider', claimCurrentProvider());
-    const endpoints = ['/api/claim-ocr', '/api/claim-ocr.js'];
-    let lastError = null;
-
-    for (const endpoint of endpoints) {
-      try {
-        const response = await fetch(endpoint, { method: 'POST', body: form });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || !data.ok) {
-          const error = new Error(data.message || 'OCR gagal membaca history. Silakan isi manual.');
-          error.status = response.status;
-          throw error;
-        }
-        return data;
-      } catch (error) {
-        lastError = error;
-        if (error.status && error.status !== 404) break;
-      }
-    }
-
-    throw lastError || new Error('OCR gagal membaca history. Silakan isi manual.');
-  }
-
   function claimApplyParsedResult(parsed, rawText = '') {
     if (!parsed) return;
     const selectedProviderBeforeOcr = claimCurrentProvider();
@@ -3597,61 +3596,6 @@
     }
     claimRecalculateAll();
     showToast('Baris teratas OCR sudah dipakai.', 'success');
-  }
-
-  async function claimRunOcr() {
-    const file = document.getElementById('claimHistoryImage')?.files?.[0];
-    const btn = document.getElementById('claimOcrRetryBtn');
-    if (!file) {
-      showToast('Upload gambar history permainan dulu.', 'error');
-      return;
-    }
-
-    try {
-      claimResetBeforeOcr();
-      setButtonLoading(btn, true, 'Membaca OCR...');
-      claimSetStatus('Membaca history dengan OCR...');
-      showLoading('Klaim Mahjong Helper', 'Membaca history dengan OCR...', [
-        'Menyiapkan gambar history',
-        'Masking area tidak penting',
-        'Mengirim gambar ke OCR',
-        'Mengisi form hasil deteksi'
-      ]);
-
-      updateLoading('Menyiapkan gambar history...', 0);
-      const processed = await preprocessHistoryImageForOcr(file, claimCurrentProvider());
-      claimSetPreview('claimOriginalPreview', processed.originalDataUrl, 'Belum ada gambar history');
-      updateLoading('Masking area tidak penting...', 1, 0);
-      claimSetPreview('claimProcessedPreview', processed.processedDataUrl, 'Hasil masking/crop akan muncul di sini');
-
-      updateLoading('Mengirim gambar ke OCR...', 2, 1);
-      const data = await claimPostOcrImage(processed.blob);
-      updateLoading('Mengisi form hasil deteksi...', 3, 2);
-      const detectedProvider = data?.parsed?.provider || data?.parsed?.detected_provider || '';
-      claimApplyOcrResult(data);
-      if (detectedProvider === 'PRAGMATIC') {
-        updateLoading('Provider PRAGMATIC terdeteksi dan sementara dinonaktifkan.', null, 3);
-        return;
-      }
-      claimSetStatus('OCR selesai. Cek dan koreksi hasil sebelum generate.');
-      showToast('OCR selesai. Cek dan koreksi hasil sebelum generate.', 'success');
-      updateLoading('OCR selesai.', null, 3);
-    } catch (error) {
-      const message = error.message || 'OCR gagal membaca history. Silakan isi manual.';
-      claimSetStatus(message, 'error');
-      document.getElementById('claimOcrText').value = `OCR gagal: ${message}`;
-      setLoadingError(message, 2);
-      showToast(message, 'error');
-    } finally {
-      hideLoading();
-      setButtonLoading(btn, false);
-    }
-  }
-
-  async function claimHandleHistoryUpload() {
-    const file = document.getElementById('claimHistoryImage')?.files?.[0];
-    if (!file) return;
-    await claimRunOcr();
   }
 
   function claimPickSmallestNominal() {
@@ -3756,6 +3700,19 @@
     box.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="Preview ${target === 'scatter' ? 'scatter' : 'history'}">` : escapeHtml(emptyText);
   }
 
+  function claimSetImageStatus(target, ready) {
+    const id = target === 'scatter' ? 'claimScatterImageStatus' : 'claimHistoryImageStatus';
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = ready ? 'Siap dikirim ke OCR' : 'Belum ada gambar';
+    el.classList.toggle('ready', Boolean(ready));
+  }
+
+  function claimUpdateSubmitButton() {
+    const btn = document.getElementById('claimSubmitOcrBtn');
+    if (btn) btn.disabled = !claimHistoryFile;
+  }
+
   function renderClaimImagePreview(file, target) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -3780,11 +3737,15 @@
     claimSetStatus('');
   }
 
-  async function claimPostOcrImage(file, ocrType) {
+  async function claimPostDualOcr() {
+    if (!claimHistoryFile) {
+      showToast('Masukkan gambar History PG dulu.', 'error');
+      return null;
+    }
     const form = new FormData();
-    form.append('ocr_image', file, file.name || `${ocrType}.png`);
-    form.append('provider', 'PG');
-    form.append('ocr_type', ocrType);
+    form.append('mode', 'pg_dual_submit');
+    form.append('history_image', claimHistoryFile, claimHistoryFile.name || 'history-pg.png');
+    if (claimScatterFile) form.append('scatter_image', claimScatterFile, claimScatterFile.name || 'scatter-pg.png');
     const endpoints = ['/api/claim-ocr', '/api/claim-ocr.js'];
     let lastError = null;
     for (const endpoint of endpoints) {
@@ -3893,44 +3854,65 @@
     }
   }
 
-  async function claimRunOcr(target = 'history') {
-    const isScatter = target === 'scatter';
-    const file = isScatter ? claimScatterFile : claimHistoryFile;
-    const btn = document.getElementById(isScatter ? 'claimScatterOcrRetryBtn' : 'claimHistoryOcrRetryBtn');
-    if (!file) {
-      showToast(isScatter ? 'Upload/paste gambar scatter dulu.' : 'Upload/paste gambar history PG dulu.', 'error');
+  function claimApplyDualOcrResult(data) {
+    const history = data?.history || null;
+    const scatter = data?.scatter || null;
+    const ocrText = document.getElementById('claimOcrText');
+    if (ocrText) ocrText.value = '';
+
+    if (history?.ok) {
+      claimApplyHistoryResult(history);
+    } else {
+      const message = history?.message || 'OCR history gagal. Silakan isi manual.';
+      claimSetStatus(message, 'error');
+      claimAppendOcrNote(`OCR gagal (History): ${message}\n\n${history?.raw_text || ''}`);
+      showToast(message, 'error');
+    }
+
+    if (scatter) {
+      if (scatter.ok) {
+        claimApplyScatterResult(scatter);
+      } else {
+        const parsed = scatter.parsed || {};
+        claimAppendOcrNote([
+          'Sumber OCR: Scatter PG',
+          `Parser used: ${parsed.parser_used || 'parsePgScatterOcr'}`,
+          `Scatter detected: ${parsed.scatter_count || '-'}`,
+          `Confidence: ${parsed.confidence || 'manual_required'}`,
+          '',
+          '--- RAW OCR SCATTER ---',
+          scatter.raw_text || ''
+        ].join('\n'));
+        claimSetStatus(scatter.message || 'Jumlah scatter belum terbaca. Silakan isi manual.', 'error');
+        showToast(scatter.message || 'Jumlah scatter belum terbaca. Silakan isi manual.', 'error');
+      }
+    }
+
+    if (history?.ok && (!scatter || scatter.ok)) {
+      claimSetStatus('OCR selesai. Cek hasil lalu klik Generate Output.');
+    } else if (history?.ok) {
+      claimSetStatus('OCR history selesai. Jumlah scatter bisa diisi manual.', 'error');
+    }
+  }
+
+  async function claimRunOcr() {
+    const btn = document.getElementById('claimSubmitOcrBtn');
+    if (!claimHistoryFile) {
+      showToast('Masukkan gambar History PG dulu.', 'error');
       return;
     }
     try {
-      if (!isScatter) claimResetBeforeHistoryOcr();
-      setButtonLoading(btn, true, 'Membaca OCR...');
-      claimSetStatus(isScatter ? 'Membaca scatter dengan OCR...' : 'Membaca history PG dengan OCR...');
-      showLoading('Klaim Mahjong Helper', isScatter ? 'Membaca gambar scatter...' : 'Membaca history PG...', [
-        'Menyiapkan gambar',
-        'Mengirim gambar ke OCR',
-        'Mengisi hasil deteksi'
-      ]);
-      updateLoading('Menyiapkan gambar...', 0);
-      updateLoading('Mengirim gambar ke OCR...', 1, 0);
-      const data = await claimPostOcrImage(file, isScatter ? 'scatter_pg' : 'history_pg');
-      updateLoading('Mengisi hasil deteksi...', 2, 1);
-      if (isScatter) {
-        claimApplyScatterResult(data);
-      } else {
-        claimApplyHistoryResult(data);
-      }
-      if (!isScatter || Number.isFinite(Number(data?.parsed?.scatter_count))) {
-        claimSetStatus('OCR selesai. Cek dan koreksi hasil sebelum generate.');
-      }
-      updateLoading('OCR selesai.', null, 2);
+      claimResetBeforeHistoryOcr();
+      setButtonLoading(btn, true, 'Mengirim...');
+      claimSetStatus(claimScatterFile ? 'Mengirim 2 gambar ke OCR...' : 'Mengirim history ke OCR...');
+      const data = await claimPostDualOcr();
+      if (data) claimApplyDualOcrResult(data);
     } catch (error) {
       const message = error.message || 'OCR gagal membaca gambar. Silakan isi manual.';
       claimSetStatus(message, 'error');
-      claimAppendOcrNote(`OCR gagal (${isScatter ? 'Scatter' : 'History'}): ${message}`);
-      setLoadingError(message, 1);
+      claimAppendOcrNote(`OCR gagal: ${message}`);
       showToast(message, 'error');
     } finally {
-      hideLoading();
       setButtonLoading(btn, false);
     }
   }
@@ -3948,8 +3930,25 @@
       claimHistoryFile = file;
     }
     await renderClaimImagePreview(file, target);
+    claimSetImageStatus(target, true);
+    claimUpdateSubmitButton();
+    claimResetClaimOutputOnly();
+    claimSetStatus(`${target === 'scatter' ? 'Gambar scatter' : 'History PG'} siap dikirim ke OCR.`);
     showToast('Gambar berhasil ditempel.', 'success');
-    await claimRunOcr(target);
+  }
+
+  function resetClaimImages() {
+    claimHistoryFile = null;
+    claimScatterFile = null;
+    document.getElementById('claimHistoryImage').value = '';
+    document.getElementById('claimScatterImage').value = '';
+    claimSetPreview('history', '');
+    claimSetPreview('scatter', '');
+    claimSetImageStatus('history', false);
+    claimSetImageStatus('scatter', false);
+    claimSetActivePasteTarget('history');
+    claimUpdateSubmitButton();
+    claimSetStatus('Gambar dibersihkan. Masukkan History PG untuk OCR.');
   }
 
   function handleClaimPaste(event) {
@@ -4015,8 +4014,7 @@
     claimScatterFile = null;
     claimLastParsedOcr = null;
     activePasteTarget = 'history';
-    document.getElementById('claimHistoryImage').value = '';
-    document.getElementById('claimScatterImage').value = '';
+    resetClaimImages();
     ['claimTicketId', 'claimBetInput', 'claimBettOutput', 'claimWinCandidates', 'claimSelectedWin', 'claimBaseAmount', 'claimJpResult', 'claimOutput', 'claimOcrText'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = '';
@@ -4027,9 +4025,6 @@
     document.getElementById('claimScatterCount').value = 3;
     document.getElementById('claimPercent').value = 25;
     claimRenderDetectedSummary(null);
-    claimSetPreview('history', '');
-    claimSetPreview('scatter', '');
-    claimSetActivePasteTarget('history');
     claimSetStatus('');
     showToast('Form Klaim Mahjong dibersihkan.', 'success');
   }
@@ -6715,8 +6710,8 @@
   document.getElementById('claimScatterImage').addEventListener('click', event => event.stopPropagation());
   document.getElementById('claimHistoryImage').addEventListener('change', event => handleClaimImageFile(event.target.files?.[0], 'history'));
   document.getElementById('claimScatterImage').addEventListener('change', event => handleClaimImageFile(event.target.files?.[0], 'scatter'));
-  document.getElementById('claimHistoryOcrRetryBtn').addEventListener('click', () => claimRunOcr('history'));
-  document.getElementById('claimScatterOcrRetryBtn').addEventListener('click', () => claimRunOcr('scatter'));
+  document.getElementById('claimSubmitOcrBtn').addEventListener('click', claimRunOcr);
+  document.getElementById('claimResetImagesBtn').addEventListener('click', resetClaimImages);
   document.addEventListener('paste', handleClaimPaste);
   document.getElementById('claimGenerateBtn').addEventListener('click', claimGenerateOutput);
   document.getElementById('claimCopyBtn').addEventListener('click', claimCopyOutput);
@@ -6742,6 +6737,7 @@
       document.getElementById('claimPercent').value
     );
   });
+  claimUpdateSubmitButton();
   claimUpdateCalculatedFields();
   const moduleDownloadBtn = document.getElementById('adminModuleDownloadBtn');
   if (moduleDownloadBtn) {
