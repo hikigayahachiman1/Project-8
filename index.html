@@ -1784,6 +1784,31 @@
     font-weight: 800;
   }
 
+  .claim-scatter-quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .claim-scatter-quick button {
+    min-height: 38px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(143,178,255,0.22);
+    background: rgba(255,255,255,0.06);
+    color: var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    font-weight: 900;
+    box-shadow: none;
+  }
+
+  .claim-scatter-quick button.active {
+    border-color: rgba(39,245,255,0.82);
+    background: linear-gradient(135deg, rgba(39,245,255,0.24), rgba(0,255,168,0.15));
+    color: #ffffff;
+  }
+
   .claim-ocr-status {
     display: none;
     margin-top: 12px;
@@ -2405,7 +2430,7 @@
       <div class="claim-helper-grid">
         <section class="card">
           <div class="card-title">Klaim Mahjong Helper</div>
-          <div class="card-desc">Mode testing PG Soft: paste/upload history permainan dan gambar scatter. Gambar hanya dipakai sementara untuk OCR.</div>
+          <div class="card-desc">Mode testing PG Soft: History PG dibaca OCR, gambar scatter hanya bukti visual. Jumlah scatter dipilih manual.</div>
 
           <div class="date-row">
             <input id="claimProvider" class="bonus-date" type="text" value="PG" readonly title="Fokus sementara hanya PG Soft">
@@ -2435,7 +2460,7 @@
               <div id="claimOcrProgressText" class="claim-ocr-progress-text">0% Menunggu gambar</div>
             </div>
           </div>
-          <div id="claimOcrStatus" class="claim-ocr-status show">Masukkan gambar History PG, lalu klik Kirim ke OCR.</div>
+          <div id="claimOcrStatus" class="claim-ocr-status show">Masukkan gambar History PG, pilih jumlah scatter manual, lalu klik Kirim ke OCR.</div>
 
           <details class="ocr-box">
             <summary>Raw OCR / Catatan Deteksi</summary>
@@ -2465,6 +2490,11 @@
             <div class="field">
               <label for="claimScatterCount">Jumlah Scatter</label>
               <input id="claimScatterCount" type="number" value="3" min="3" max="6" step="1">
+              <div class="claim-scatter-quick" id="claimScatterQuick">
+                <button type="button" data-scatter-value="3" class="active">3 Scatter</button>
+                <button type="button" data-scatter-value="4">4 Scatter</button>
+                <button type="button" data-scatter-value="5">5 Scatter</button>
+              </div>
             </div>
             <div class="field full">
               <label for="claimWinCandidates">Nominal Kemenangan dari History</label>
@@ -3804,7 +3834,7 @@
     claimLastParsedOcr = null;
     document.getElementById('claimProvider').value = 'PG';
     document.getElementById('claimType').value = 'FREESPIN';
-    document.getElementById('claimScatterCount').value = 3;
+    claimSetScatterCount(3);
     document.getElementById('claimPercent').value = 25;
     claimRenderDetectedSummary(null);
     claimSetPreview('claimOriginalPreview', '', 'Belum ada gambar history');
@@ -4108,7 +4138,6 @@
     const form = new FormData();
     form.append('mode', 'pg_dual_submit');
     form.append('history_image', claimHistoryFile, claimHistoryFile.name || 'history-pg.png');
-    if (claimScatterFile) form.append('scatter_image', claimScatterFile, claimScatterFile.name || 'scatter-pg.png');
     const endpoints = ['/api/claim-ocr', '/api/claim-ocr.js'];
     let lastError = null;
     for (const endpoint of endpoints) {
@@ -4231,7 +4260,6 @@
 
   function claimApplyDualOcrResult(data, visualScatterCount = null) {
     const history = data?.history || null;
-    const scatter = data?.scatter || null;
     const ocrText = document.getElementById('claimOcrText');
     if (ocrText) ocrText.value = '';
 
@@ -4244,45 +4272,12 @@
       showToast(message, 'error');
     }
 
-    if (scatter) {
-      if (scatter.ok) {
-        claimApplyScatterResult(scatter, visualScatterCount);
-      } else {
-        const parsed = scatter.parsed || {};
-        const visualCount = Number(visualScatterCount);
-        if (Number.isFinite(visualCount) && visualCount >= 3 && visualCount <= 6) {
-          document.getElementById('claimScatterCount').value = visualCount;
-          claimAppendOcrNote([
-            'Sumber OCR: Scatter PG',
-            `Parser used: ${parsed.parser_used || 'parsePgScatterOcr'}`,
-            `Scatter detected: -`,
-            `Visual detected: ${visualCount}`,
-            'Confidence: visual',
-            '',
-            '--- RAW OCR SCATTER ---',
-            scatter.raw_text || ''
-          ].join('\n'));
-          showToast('Jumlah scatter terbaca dari gambar.', 'success');
-          return;
-        }
-        claimAppendOcrNote([
-          'Sumber OCR: Scatter PG',
-          `Parser used: ${parsed.parser_used || 'parsePgScatterOcr'}`,
-          `Scatter detected: ${parsed.scatter_count || '-'}`,
-          `Confidence: ${parsed.confidence || 'manual_required'}`,
-          '',
-          '--- RAW OCR SCATTER ---',
-          scatter.raw_text || ''
-        ].join('\n'));
-        claimSetStatus(scatter.message || 'Jumlah scatter belum terbaca. Silakan isi manual.', 'error');
-        showToast(scatter.message || 'Jumlah scatter belum terbaca. Silakan isi manual.', 'error');
-      }
+    if (claimScatterFile) {
+      claimAppendOcrNote('Scatter PG: gambar hanya dipakai sebagai bukti visual. Pilih jumlah scatter manual dengan tombol 3/4/5 atau edit field.');
     }
 
-    if (history?.ok && (!scatter || scatter.ok)) {
+    if (history?.ok) {
       claimSetStatus('OCR selesai. Cek hasil lalu klik Generate Output.');
-    } else if (history?.ok) {
-      claimSetStatus('OCR history selesai. Jumlah scatter bisa diisi manual.', 'error');
     }
   }
 
@@ -4295,13 +4290,12 @@
     try {
       claimResetBeforeHistoryOcr();
       setButtonLoading(btn, true, 'Mengirim...');
-      claimSetStatus(claimScatterFile ? 'Mengirim 2 gambar ke OCR...' : 'Mengirim history ke OCR...');
-      claimStartOcrProgress(Boolean(claimScatterFile));
+      claimSetStatus('Mengirim History PG ke OCR. Scatter PG dipakai sebagai bukti visual.');
+      claimStartOcrProgress(false);
       const data = await claimPostDualOcr();
       if (data) {
         claimSetOcrProgress(90, 'Memproses hasil OCR');
-        const visualScatterCount = claimScatterFile ? await claimEstimatePgScatterCountFromImage(claimScatterFile) : null;
-        claimApplyDualOcrResult(data, visualScatterCount);
+        claimApplyDualOcrResult(data, null);
         claimFinishOcrProgress();
       }
     } catch (error) {
@@ -4313,6 +4307,25 @@
     } finally {
       setButtonLoading(btn, false);
     }
+  }
+
+  function claimSetScatterCount(value) {
+    const scatterValue = Number(value);
+    if (!Number.isFinite(scatterValue) || scatterValue < 3 || scatterValue > 6) return;
+    const input = document.getElementById('claimScatterCount');
+    if (input) input.value = scatterValue;
+    document.querySelectorAll('#claimScatterQuick [data-scatter-value]').forEach(button => {
+      button.classList.toggle('active', Number(button.dataset.scatterValue) === scatterValue);
+    });
+    claimResetClaimOutputOnly();
+  }
+
+  function claimSyncScatterQuickButtons() {
+    const input = document.getElementById('claimScatterCount');
+    const scatterValue = Number(input?.value);
+    document.querySelectorAll('#claimScatterQuick [data-scatter-value]').forEach(button => {
+      button.classList.toggle('active', Number(button.dataset.scatterValue) === scatterValue);
+    });
   }
 
   async function handleClaimImageFile(file, target) {
@@ -7182,6 +7195,15 @@
   document.getElementById('claimSubmitOcrBtn').addEventListener('click', claimRunOcr);
   document.getElementById('claimResetImagesBtn').addEventListener('click', resetClaimImages);
   document.addEventListener('paste', handleClaimPaste);
+  document.getElementById('claimScatterQuick').addEventListener('click', event => {
+    const button = event.target.closest('[data-scatter-value]');
+    if (!button) return;
+    claimSetScatterCount(button.dataset.scatterValue);
+  });
+  document.getElementById('claimScatterCount').addEventListener('input', () => {
+    claimSyncScatterQuickButtons();
+    claimResetClaimOutputOnly();
+  });
   document.getElementById('claimGenerateBtn').addEventListener('click', claimGenerateOutput);
   document.getElementById('claimCopyBtn').addEventListener('click', claimCopyOutput);
   document.getElementById('claimResetBtn').addEventListener('click', claimReset);

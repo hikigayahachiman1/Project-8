@@ -770,7 +770,6 @@ export default async function handler(req, res) {
 
     if (mode === 'pg_dual_submit') {
       const historyImage = files.history_image;
-      const scatterImage = files.scatter_image;
 
       if (!historyImage) {
         return json(res, 400, {
@@ -780,16 +779,11 @@ export default async function handler(req, res) {
         });
       }
 
-      const jobs = [
-        processPgOcrImage(historyImage, 'history')
-      ];
-      if (scatterImage) jobs.push(processPgOcrImage(scatterImage, 'scatter'));
-
-      const results = await Promise.all(jobs);
+      const historyResult = await processPgOcrImage(historyImage, 'history');
       return json(res, 200, {
         ok: true,
-        history: results[0],
-        scatter: scatterImage ? results[1] : null
+        history: historyResult,
+        scatter: null
       });
     }
 
