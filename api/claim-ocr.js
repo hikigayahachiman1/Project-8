@@ -561,8 +561,12 @@ export function parsePgScatterOcr(rawText) {
   const patterns = [
     /(?:scatter|scater|skater)\D{0,12}([3-6])/i,
     /([3-6])\D{0,8}(?:scatter|scater|skater)/i,
+    /(?:scatter|scater|skater)\s*[:=-]?\s*([3-6])/i,
+    /(?:jumlah|total)\D{0,10}(?:scatter|scater|skater)\D{0,10}([3-6])/i,
     /x\s*([3-6])\b/i,
-    /\b([3-6])\s*x\b/i
+    /\b([3-6])\s*x\b/i,
+    /(?:胡|hu)\D{0,8}([3-6])/i,
+    /([3-6])\D{0,8}(?:胡|hu)/i
   ];
 
   for (const pattern of patterns) {
