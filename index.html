@@ -1517,6 +1517,93 @@
     line-height: 1.5;
   }
 
+  .claim-upload-surface {
+    display: grid;
+    place-items: center;
+    gap: 10px;
+    min-height: 150px;
+    padding: 18px;
+    border: 1px dashed rgba(143,178,255,0.28);
+    border-radius: 20px;
+    background: rgba(2, 7, 18, 0.35);
+    text-align: center;
+  }
+
+  .claim-image-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .claim-image-item {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid rgba(143,178,255,0.18);
+    border-radius: 18px;
+    background: rgba(2, 7, 18, 0.38);
+  }
+
+  .claim-thumb {
+    width: 74px;
+    height: 74px;
+    border-radius: 14px;
+    object-fit: cover;
+    border: 1px solid rgba(255,255,255,0.12);
+  }
+
+  .claim-image-meta {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .claim-image-meta strong {
+    color: var(--ink);
+    font-size: 0.9rem;
+  }
+
+  .claim-image-meta span {
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .claim-ocr-progress {
+    display: none;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .claim-ocr-progress.show {
+    display: grid;
+  }
+
+  .claim-ocr-progress-track {
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(143,178,255,0.15);
+    overflow: hidden;
+  }
+
+  .claim-ocr-progress-bar {
+    width: 0%;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), var(--warning));
+    transition: width 0.28s ease;
+  }
+
+  .claim-ocr-progress-text {
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    font-weight: 800;
+  }
+
   .claim-preview-box {
     min-height: 220px;
     display: grid;
@@ -2077,6 +2164,9 @@
     .logout-btn { width: 100%; }
     .claim-helper-grid { grid-template-columns: 1fr; }
     .claim-image-grid { grid-template-columns: 1fr; }
+    .claim-image-item { grid-template-columns: 58px minmax(0, 1fr); }
+    .claim-image-item .row-actions { grid-column: 1 / -1; }
+    .claim-thumb { width: 58px; height: 58px; }
     .claim-form-grid { grid-template-columns: 1fr; }
     .claim-preview-box { min-height: 180px; }
     .tool-tabs { border-radius: 22px; }
@@ -2322,34 +2412,27 @@
             <input id="claimType" class="bonus-date" type="text" value="FREESPIN" readonly title="Sementara hanya FREESPIN">
           </div>
 
-          <div class="claim-main-dropzone active" id="claimImageDropzone" tabindex="0" role="group">
+          <div class="claim-main-dropzone active" id="claimImageDropzone" tabindex="0" role="button">
             <div class="claim-main-head">
               <strong>Area Gambar Klaim PG</strong>
-              <span>Paste/upload maksimal 2 gambar: History PG dan Bukti Scatter PG. Klik slot tertentu untuk mengganti gambar.</span>
+              <span>Paste atau upload 2 gambar: History PG dan Bukti Scatter PG.</span>
             </div>
-            <div class="claim-preview-grid claim-image-grid">
-              <div class="claim-slot active" id="claimHistorySlot" tabindex="0" role="button">
-                <div class="claim-slot-head">
-                  <span class="claim-slot-title">Gambar 1 - History PG</span>
-                  <em id="claimHistoryImageStatus" class="claim-image-status">Belum ada gambar</em>
-                </div>
-                <div id="claimHistoryPreview" class="claim-preview-box">Belum ada gambar history</div>
-                <button type="button" id="claimPickHistoryBtn" class="ghost">Pilih History</button>
-                <input id="claimHistoryImage" type="file" accept="image/png,image/jpeg,image/webp" style="display:none;">
-              </div>
-              <div class="claim-slot" id="claimScatterSlot" tabindex="0" role="button">
-                <div class="claim-slot-head">
-                  <span class="claim-slot-title">Gambar 2 - Scatter PG</span>
-                  <em id="claimScatterImageStatus" class="claim-image-status">Belum ada gambar</em>
-                </div>
-                <div id="claimScatterPreview" class="claim-preview-box">Belum ada gambar scatter</div>
-                <button type="button" id="claimPickScatterBtn" class="ghost">Pilih Scatter</button>
-                <input id="claimScatterImage" type="file" accept="image/png,image/jpeg,image/webp" style="display:none;">
-              </div>
+            <div class="claim-upload-surface">
+              <strong>Klik / Ctrl+V / Upload gambar di sini</strong>
+              <span class="source-note">Maksimal 2 gambar. Gambar pertama dianggap History PG, gambar kedua dianggap Scatter PG.</span>
+              <button type="button" id="claimUploadImagesBtn" class="ghost">Upload Gambar</button>
+              <input id="claimImageUpload" type="file" accept="image/png,image/jpeg,image/webp" multiple style="display:none;">
+              <input id="claimReplaceImageInput" type="file" accept="image/png,image/jpeg,image/webp" style="display:none;">
             </div>
+            <em id="claimImageStatusText" class="claim-image-status">Belum ada gambar</em>
+            <div id="claimImageList" class="claim-image-list"></div>
             <div class="bonus-actions">
               <button id="claimSubmitOcrBtn" class="primary">Kirim ke OCR</button>
               <button id="claimResetImagesBtn" class="ghost">Reset Gambar</button>
+            </div>
+            <div id="claimOcrProgress" class="claim-ocr-progress">
+              <div class="claim-ocr-progress-track"><div id="claimOcrProgressBar" class="claim-ocr-progress-bar"></div></div>
+              <div id="claimOcrProgressText" class="claim-ocr-progress-text">0% Menunggu gambar</div>
             </div>
           </div>
           <div id="claimOcrStatus" class="claim-ocr-status show">Masukkan gambar History PG, lalu klik Kirim ke OCR.</div>
@@ -2783,6 +2866,11 @@
   let claimLastParsedOcr = null;
   let claimHistoryFile = null;
   let claimScatterFile = null;
+  let claimHistoryPreviewDataUrl = '';
+  let claimScatterPreviewDataUrl = '';
+  let claimReplaceTarget = '';
+  let claimOcrProgressTimer = null;
+  let claimOcrProgressValue = 0;
   let activePasteTarget = 'history';
   let featureAccessLocks = {};
   let featureLocksLoadedAt = 0;
@@ -3748,30 +3836,74 @@
 
   function claimSetActivePasteTarget(target) {
     activePasteTarget = target === 'scatter' ? 'scatter' : 'history';
-    document.getElementById('claimHistorySlot')?.classList.toggle('active', activePasteTarget === 'history');
-    document.getElementById('claimScatterSlot')?.classList.toggle('active', activePasteTarget === 'scatter');
     document.getElementById('claimImageDropzone')?.classList.add('active');
   }
 
   function claimSetPreview(target, dataUrl) {
-    const id = target === 'scatter' ? 'claimScatterPreview' : 'claimHistoryPreview';
-    const emptyText = target === 'scatter' ? 'Belum ada gambar scatter' : 'Belum ada gambar history';
-    const box = document.getElementById(id);
-    if (!box) return;
-    box.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="Preview ${target === 'scatter' ? 'scatter' : 'history'}">` : escapeHtml(emptyText);
+    if (target === 'scatter') claimScatterPreviewDataUrl = dataUrl || '';
+    else claimHistoryPreviewDataUrl = dataUrl || '';
+    renderClaimImageList();
   }
 
-  function claimSetImageStatus(target, ready) {
-    const id = target === 'scatter' ? 'claimScatterImageStatus' : 'claimHistoryImageStatus';
-    const el = document.getElementById(id);
+  function claimSetImageStatus() {
+    const el = document.getElementById('claimImageStatusText');
     if (!el) return;
-    el.textContent = ready ? 'Siap dikirim ke OCR' : 'Belum ada gambar';
-    el.classList.toggle('ready', Boolean(ready));
+    const count = (claimHistoryFile ? 1 : 0) + (claimScatterFile ? 1 : 0);
+    if (count === 0) el.textContent = 'Belum ada gambar';
+    if (count === 1) el.textContent = 'History siap, scatter boleh ditambahkan atau isi manual';
+    if (count === 2) el.textContent = 'History dan scatter siap dikirim ke OCR';
+    el.classList.toggle('ready', count > 0);
   }
 
   function claimUpdateSubmitButton() {
     const btn = document.getElementById('claimSubmitOcrBtn');
     if (btn) btn.disabled = !claimHistoryFile;
+  }
+
+  function claimSetOcrProgress(percent, text) {
+    claimOcrProgressValue = Math.max(0, Math.min(100, Number(percent) || 0));
+    const wrap = document.getElementById('claimOcrProgress');
+    const bar = document.getElementById('claimOcrProgressBar');
+    const label = document.getElementById('claimOcrProgressText');
+    if (wrap) wrap.classList.add('show');
+    if (bar) bar.style.width = `${claimOcrProgressValue}%`;
+    if (label) label.textContent = `${claimOcrProgressValue}% ${text || ''}`.trim();
+  }
+
+  function claimStopOcrProgress() {
+    if (claimOcrProgressTimer) {
+      clearInterval(claimOcrProgressTimer);
+      claimOcrProgressTimer = null;
+    }
+  }
+
+  function claimStartOcrProgress(hasScatter) {
+    claimStopOcrProgress();
+    claimSetOcrProgress(10, 'Menyiapkan gambar');
+    setTimeout(() => claimSetOcrProgress(Math.max(claimOcrProgressValue, 25), 'Mengirim gambar ke backend'), 250);
+    claimOcrProgressTimer = setInterval(() => {
+      if (claimOcrProgressValue >= 90) return;
+      const next = Math.min(90, claimOcrProgressValue + 5);
+      const text = next < 45
+        ? 'Mengirim gambar ke backend'
+        : next < 70
+          ? 'Membaca history dengan OCR'
+          : next < 90
+            ? (hasScatter ? 'Membaca scatter dengan OCR' : 'Mengecek data history')
+            : 'Memproses hasil OCR';
+      claimSetOcrProgress(next, text);
+    }, 650);
+  }
+
+  function claimFinishOcrProgress() {
+    claimStopOcrProgress();
+    claimSetOcrProgress(100, 'OCR selesai. Cek hasil sebelum generate.');
+  }
+
+  function claimFailOcrProgress(message) {
+    claimStopOcrProgress();
+    const label = document.getElementById('claimOcrProgressText');
+    if (label) label.textContent = message || 'OCR gagal.';
   }
 
   function renderClaimImagePreview(file, target) {
@@ -3784,6 +3916,40 @@
       reader.onerror = () => reject(new Error('Gagal membaca gambar.'));
       reader.readAsDataURL(file);
     });
+  }
+
+  function claimImageName(file) {
+    return file && file.name ? file.name : 'Gambar dari clipboard';
+  }
+
+  function renderClaimImageList() {
+    const list = document.getElementById('claimImageList');
+    if (!list) return;
+    const rows = [
+      { key: 'history', label: '1. History PG', file: claimHistoryFile, preview: claimHistoryPreviewDataUrl },
+      { key: 'scatter', label: '2. Scatter PG', file: claimScatterFile, preview: claimScatterPreviewDataUrl }
+    ].filter(item => item.file);
+
+    if (!rows.length) {
+      list.innerHTML = '<div class="source-note">Belum ada gambar. Klik area ini lalu Ctrl+V, atau upload gambar.</div>';
+      claimSetImageStatus();
+      return;
+    }
+
+    list.innerHTML = rows.map(item => `
+      <div class="claim-image-item">
+        <img class="claim-thumb" src="${item.preview}" alt="${escapeHtml(item.label)}">
+        <div class="claim-image-meta">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>${escapeHtml(claimImageName(item.file))}</span>
+        </div>
+        <div class="row-actions">
+          <button type="button" data-claim-replace="${escapeHtml(item.key)}">Ganti</button>
+          <button type="button" class="danger" data-claim-remove="${escapeHtml(item.key)}">Hapus</button>
+        </div>
+      </div>
+    `).join('');
+    claimSetImageStatus();
   }
 
   function claimResetBeforeHistoryOcr() {
@@ -3966,11 +4132,17 @@
       claimResetBeforeHistoryOcr();
       setButtonLoading(btn, true, 'Mengirim...');
       claimSetStatus(claimScatterFile ? 'Mengirim 2 gambar ke OCR...' : 'Mengirim history ke OCR...');
+      claimStartOcrProgress(Boolean(claimScatterFile));
       const data = await claimPostDualOcr();
-      if (data) claimApplyDualOcrResult(data);
+      if (data) {
+        claimSetOcrProgress(90, 'Memproses hasil OCR');
+        claimApplyDualOcrResult(data);
+        claimFinishOcrProgress();
+      }
     } catch (error) {
       const message = error.message || 'OCR gagal membaca gambar. Silakan isi manual.';
       claimSetStatus(message, 'error');
+      claimFailOcrProgress(message);
       claimAppendOcrNote(`OCR gagal: ${message}`);
       showToast(message, 'error');
     } finally {
@@ -3984,37 +4156,71 @@
       showToast('File harus berupa gambar JPG, PNG, atau WEBP.', 'error');
       return;
     }
-    claimSetActivePasteTarget(target);
-    if (target === 'scatter') {
+    const resolvedTarget = target || claimResolvePasteTarget();
+    if (!resolvedTarget) {
+      showToast('Maksimal 2 gambar. Hapus salah satu gambar jika ingin mengganti.', 'error');
+      return;
+    }
+    claimSetActivePasteTarget(resolvedTarget);
+    if (resolvedTarget === 'scatter') {
       claimScatterFile = file;
     } else {
       claimHistoryFile = file;
     }
-    await renderClaimImagePreview(file, target);
-    claimSetImageStatus(target, true);
+    await renderClaimImagePreview(file, resolvedTarget);
+    claimReplaceTarget = '';
     claimUpdateSubmitButton();
     claimResetClaimOutputOnly();
-    claimSetStatus(`${target === 'scatter' ? 'Gambar scatter' : 'History PG'} siap dikirim ke OCR.`);
+    claimSetStatus(`${resolvedTarget === 'scatter' ? 'Scatter PG' : 'History PG'} siap dikirim ke OCR.`);
     showToast('Gambar berhasil ditempel.', 'success');
   }
 
   function claimResolvePasteTarget() {
+    if (claimReplaceTarget) return claimReplaceTarget;
     if (!claimHistoryFile) return 'history';
     if (!claimScatterFile) return 'scatter';
-    return activePasteTarget || 'history';
+    return '';
+  }
+
+  async function handleClaimImageFiles(files) {
+    for (const file of Array.from(files || []).slice(0, 2)) {
+      await handleClaimImageFile(file, claimResolvePasteTarget());
+    }
+  }
+
+  function removeClaimImage(target) {
+    if (target === 'scatter') {
+      claimScatterFile = null;
+      claimScatterPreviewDataUrl = '';
+    } else {
+      claimHistoryFile = null;
+      claimHistoryPreviewDataUrl = '';
+    }
+    claimReplaceTarget = '';
+    renderClaimImageList();
+    claimUpdateSubmitButton();
+    claimResetClaimOutputOnly();
+    claimSetStatus('Gambar dihapus.');
   }
 
   function resetClaimImages() {
     claimHistoryFile = null;
     claimScatterFile = null;
-    document.getElementById('claimHistoryImage').value = '';
-    document.getElementById('claimScatterImage').value = '';
-    claimSetPreview('history', '');
-    claimSetPreview('scatter', '');
-    claimSetImageStatus('history', false);
-    claimSetImageStatus('scatter', false);
+    claimHistoryPreviewDataUrl = '';
+    claimScatterPreviewDataUrl = '';
+    claimReplaceTarget = '';
+    document.getElementById('claimImageUpload').value = '';
+    document.getElementById('claimReplaceImageInput').value = '';
+    renderClaimImageList();
     claimSetActivePasteTarget('history');
     claimUpdateSubmitButton();
+    claimStopOcrProgress();
+    const progress = document.getElementById('claimOcrProgress');
+    const bar = document.getElementById('claimOcrProgressBar');
+    const text = document.getElementById('claimOcrProgressText');
+    if (progress) progress.classList.remove('show');
+    if (bar) bar.style.width = '0%';
+    if (text) text.textContent = '0% Menunggu gambar';
     claimSetStatus('Gambar dibersihkan. Masukkan History PG untuk OCR.');
   }
 
@@ -6774,26 +6980,38 @@
     else if (!claimScatterFile) claimSetActivePasteTarget('scatter');
   });
   document.getElementById('claimImageDropzone').addEventListener('focus', () => {
-    if (!claimHistoryFile) claimSetActivePasteTarget('history');
+    claimSetActivePasteTarget(claimResolvePasteTarget() || activePasteTarget || 'history');
   });
-  document.getElementById('claimHistorySlot').addEventListener('click', () => claimSetActivePasteTarget('history'));
-  document.getElementById('claimHistorySlot').addEventListener('focus', () => claimSetActivePasteTarget('history'));
-  document.getElementById('claimScatterSlot').addEventListener('click', () => claimSetActivePasteTarget('scatter'));
-  document.getElementById('claimScatterSlot').addEventListener('focus', () => claimSetActivePasteTarget('scatter'));
-  document.getElementById('claimPickHistoryBtn').addEventListener('click', event => {
+  document.getElementById('claimUploadImagesBtn').addEventListener('click', event => {
     event.stopPropagation();
-    claimSetActivePasteTarget('history');
-    document.getElementById('claimHistoryImage').click();
+    claimReplaceTarget = '';
+    document.getElementById('claimImageUpload').click();
   });
-  document.getElementById('claimPickScatterBtn').addEventListener('click', event => {
-    event.stopPropagation();
-    claimSetActivePasteTarget('scatter');
-    document.getElementById('claimScatterImage').click();
+  document.getElementById('claimImageUpload').addEventListener('click', event => event.stopPropagation());
+  document.getElementById('claimImageUpload').addEventListener('change', async event => {
+    await handleClaimImageFiles(event.target.files);
+    event.target.value = '';
   });
-  document.getElementById('claimHistoryImage').addEventListener('click', event => event.stopPropagation());
-  document.getElementById('claimScatterImage').addEventListener('click', event => event.stopPropagation());
-  document.getElementById('claimHistoryImage').addEventListener('change', event => handleClaimImageFile(event.target.files?.[0], 'history'));
-  document.getElementById('claimScatterImage').addEventListener('change', event => handleClaimImageFile(event.target.files?.[0], 'scatter'));
+  document.getElementById('claimReplaceImageInput').addEventListener('click', event => event.stopPropagation());
+  document.getElementById('claimReplaceImageInput').addEventListener('change', async event => {
+    await handleClaimImageFile(event.target.files?.[0], claimReplaceTarget || 'history');
+    event.target.value = '';
+  });
+  document.getElementById('claimImageList').addEventListener('click', event => {
+    const replaceTarget = event.target.closest('[data-claim-replace]')?.dataset.claimReplace;
+    const removeTarget = event.target.closest('[data-claim-remove]')?.dataset.claimRemove;
+    if (replaceTarget) {
+      event.stopPropagation();
+      claimReplaceTarget = replaceTarget;
+      claimSetActivePasteTarget(replaceTarget);
+      document.getElementById('claimReplaceImageInput').click();
+      return;
+    }
+    if (removeTarget) {
+      event.stopPropagation();
+      removeClaimImage(removeTarget);
+    }
+  });
   document.getElementById('claimSubmitOcrBtn').addEventListener('click', claimRunOcr);
   document.getElementById('claimResetImagesBtn').addEventListener('click', resetClaimImages);
   document.addEventListener('paste', handleClaimPaste);
@@ -6822,6 +7040,7 @@
     );
   });
   claimUpdateSubmitButton();
+  renderClaimImageList();
   claimUpdateCalculatedFields();
   const moduleDownloadBtn = document.getElementById('adminModuleDownloadBtn');
   if (moduleDownloadBtn) {
