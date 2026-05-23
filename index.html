@@ -2219,7 +2219,7 @@
     <div class="login-shell">
       <div class="login-card">
         <div class="login-accent-line"></div>
-        <h2>Login</h2>
+        <h2>Login Operator</h2>
         <p>Masukkan username dan password.</p>
         <input id="operatorUsername" type="text" placeholder="Username" autocomplete="username">
         <input id="operatorPassword" type="password" placeholder="Password" autocomplete="current-password">
@@ -2250,10 +2250,10 @@
     <div class="tool-tabs">
       <button class="tool-tab active" data-panel="parser">Parser QRIS</button>
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
-      <button class="tool-tab" data-panel="claim-mahjong">Klaim</button>
+      <button class="tool-tab" data-panel="claim-mahjong">Klaim Mahjong</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
-      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Dashboard</button>
+      <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
       <button class="tool-tab" id="bonusMonitoringTab" data-panel="bonus-monitoring" style="display:none;">Monitoring Bonus Operator</button>
     </div>
 
@@ -2429,7 +2429,7 @@
     <section class="tool-panel" id="panel-claim-mahjong">
       <div class="claim-helper-grid">
         <section class="card">
-          <div class="card-title">Klaim Helper</div>
+          <div class="card-title">Klaim Mahjong Helper</div>
           <div class="card-desc">Mode testing PG Soft: History PG dibaca OCR, gambar scatter hanya bukti visual. Jumlah scatter dipilih manual.</div>
 
           <div class="date-row">
@@ -4223,6 +4223,10 @@
     claimUpdateCalculatedFields();
     claimRenderDetectedSummary(parsed);
     claimAppendOcrNote(claimBuildDetectionNote(parsed, data?.raw_text || '', 'History PG'));
+    if (parsed.warning) {
+      claimSetStatus(parsed.warning, 'error');
+      showToast(parsed.warning, 'error');
+    }
   }
 
   function claimApplyScatterResult(data, visualScatterCount = null) {
@@ -4276,7 +4280,7 @@
       claimAppendOcrNote('Scatter PG: gambar hanya dipakai sebagai bukti visual. Pilih jumlah scatter manual dengan tombol 3/4/5 atau edit field.');
     }
 
-    if (history?.ok) {
+    if (history?.ok && !history?.parsed?.warning) {
       claimSetStatus('OCR selesai. Cek hasil lalu klik Generate Output.');
     }
   }

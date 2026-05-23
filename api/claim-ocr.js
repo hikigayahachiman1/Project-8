@@ -517,42 +517,128 @@ function extractPgMoneyColumns(text) {
   };
 }
 
+function extractMoneyTokensWithLines(text) {
+  const normalized = normalizeOcrText(text);
+  return normalized.split('\n').flatMap((line, lineIndex) => {
+    const hasMoneyPrefix = /\b(?:rp|ap|ro|rd|bp)\b/i.test(line);
+    const looksLikeDateTime = /\b\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?\b/.test(line) || /\b\d{1,2}[.:]\d{2}(?:[.:]\d{2})?\b/.test(line);
+    if (!hasMoneyPrefix && looksLikeDateTime) return [];
+    const matches = line.match(/-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d{1,3}(?:\.\d{3})+(?:[,.]\d+)?|-?\s*(?:(?:Rp|Ap|Ro|RD|Bp)\s*)?\d+(?:[,.]\d+)?/gi) || [];
+    return matches
+      .map(raw => normalizeMoneyLabel(raw))
+      .filter(Boolean)
+      .filter(raw => {
+        const cleaned = cleanMoneyText(raw);
+        return /\b(?:rp|ap|ro|rd|bp)\b/i.test(raw) || cleaned.includes(',') || /\d{1,3}(?:\.\d{3})+/.test(cleaned);
+      })
+      .map(raw => ({
+        raw,
+        lineIndex,
+        amount: parseIndonesianMoney(raw),
+        base: normalizePgWinToBaseAmount(raw)
+      }));
+  });
+}
+
+function findPgColumnLine(lines, pattern) {
+  const index = lines.findIndex(line => pattern.test(line));
+  return index >= 0 ? index : -1;
+}
+
+function buildPgDetectedRows(ticketIds, betCandidates, winTokens) {
+  const rowCount = Math.max(ticketIds.length, betCandidates.length, winTokens.length, 1);
+  const rows = [];
+  for (let index = 0; index < rowCount; index += 1) {
+    const bet = betCandidates[index] || betCandidates[0] || '';
+    const winToken = winTokens[index] || null;
+    const win = winToken ? winToken.raw : '';
+    const baseAmount = normalizePgWinToBaseAmount(win);
+    rows.push({
+      row_index: index,
+      ticket_id: ticketIds[index] || '',
+      bet,
+      bett_output: parseBetToBettOutput(bet),
+      win,
+      base_amount: Number.isFinite(baseAmount) ? baseAmount : null
+    });
+  }
+  return rows;
+}
+
 export function parsePgHistoryOcr(rawText) {
   const normalized = normalizeOcrText(rawText);
+  const lines = normalized.split('\n');
   const ticketIds = extractPgTicketIds(normalized);
-  const { bet, betCandidates, winCandidates } = extractPgMoneyColumns(normalized);
-  const ticket_id = ticketIds[0] || extractTicketId(normalized);
-  const bett_output = parseBetToBettOutput(bet);
-  const selected_win = winCandidates[0] || pickSmallestPositiveWin(extractWinCandidates(normalized));
+  const tokens = extractMoneyTokensWithLines(normalized);
+  const taruhanLine = findPgColumnLine(lines, /taruhan|bet/i);
+  const surplusLine = findPgColumnLine(lines, /surplus|untung|win/i);
+  const ticketCount = Math.max(ticketIds.length, 1);
+
+  let betCandidates = tokens
+    .filter(token => token.amount > 0)
+    .filter(token => surplusLine < 0 || token.lineIndex < surplusLine)
+    .filter(token => taruhanLine < 0 || token.lineIndex > taruhanLine)
+    .filter(token => isLikelyPgBet(token.raw))
+    .map(token => token.raw)
+    .slice(0, ticketCount);
+
+  let winTokens = tokens
+    .filter(token => Number.isFinite(token.amount))
+    .filter(token => surplusLine < 0 || token.lineIndex > surplusLine)
+    .slice(0, ticketCount);
+
+  if (!betCandidates.length || !winTokens.length) {
+    const fallback = extractPgMoneyColumns(normalized);
+    if (!betCandidates.length) betCandidates = fallback.betCandidates.slice(0, ticketCount);
+    if (!winTokens.length) {
+      winTokens = fallback.winCandidates.map(raw => ({
+        raw,
+        amount: parseIndonesianMoney(raw),
+        base: normalizePgWinToBaseAmount(raw)
+      }));
+    }
+  }
+
+  const detectedRows = buildPgDetectedRows(ticketIds, betCandidates, winTokens);
+  const selectedRow = detectedRows.find(row => row.ticket_id && Number(row.base_amount) > 0 && parseIndonesianMoney(row.win) > 0)
+    || detectedRows.find(row => Number(row.base_amount) > 0 && parseIndonesianMoney(row.win) > 0)
+    || detectedRows[0]
+    || {};
+
+  const positiveWinCandidates = winTokens
+    .filter(token => token.amount > 0)
+    .map(token => token.raw);
+  const selected_win = selectedRow.win || positiveWinCandidates[0] || pickSmallestPositiveWin(extractWinCandidates(normalized));
   const base_amount = normalizePgWinToBaseAmount(selected_win);
+  const highPositiveWin = positiveWinCandidates.find(value => normalizePgWinToBaseAmount(value) >= 150);
+  const warning = Number.isFinite(base_amount) && base_amount < 150 && highPositiveWin
+    ? 'Nominal kemenangan terdeteksi tidak konsisten. Silakan cek pilihan win.'
+    : '';
+  const ticket_id = selectedRow.ticket_id || ticketIds[0] || extractTicketId(normalized);
+  const bet = selectedRow.bet || betCandidates[0] || '';
+  const bett_output = parseBetToBettOutput(bet);
 
   return {
     provider: 'PG',
     ticket_id,
     bet,
     bett_output,
-    win_candidates: winCandidates,
+    win_candidates: positiveWinCandidates,
     selected_win,
     base_amount: Number.isFinite(base_amount) ? base_amount : null,
+    warning,
     detected_provider: 'PG',
     parser_used: 'parsePgHistoryOcr',
-    selected_row_index: 0,
+    selected_row_index: selectedRow.row_index || 0,
     ticket_ids: ticketIds,
     bet_candidates: betCandidates,
-    win_list: winCandidates,
+    win_list: positiveWinCandidates,
     debug: {
       ticket_list: ticketIds,
       bet_list: betCandidates,
-      win_list: winCandidates
+      win_list: positiveWinCandidates
     },
-    detected_rows: [{
-      row_index: 0,
-      ticket_id,
-      bet,
-      bett_output,
-      win: selected_win,
-      base_amount: Number.isFinite(base_amount) ? base_amount : null
-    }]
+    detected_rows: detectedRows
   };
 }
 
