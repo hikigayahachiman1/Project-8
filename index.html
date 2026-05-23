@@ -4213,6 +4213,22 @@
     claimLastParsedOcr = parsed;
     document.getElementById('claimProvider').value = 'PG';
     document.getElementById('claimType').value = 'FREESPIN';
+    const betAmount = claimParseIndonesianMoney(parsed.bet);
+    const selectedWinAmount = claimParseIndonesianMoney(parsed.selected_win);
+    const saferWin = Array.isArray(parsed.win_candidates)
+      ? parsed.win_candidates.find(value => {
+          const amount = claimParseIndonesianMoney(value);
+          return Number.isFinite(amount)
+            && amount > 0
+            && (!Number.isFinite(betAmount) || Math.abs(amount - betAmount) > 0.0001)
+            && (!Number.isFinite(selectedWinAmount) || amount > selectedWinAmount);
+        })
+      : '';
+    if (saferWin && Number.isFinite(betAmount) && Number.isFinite(selectedWinAmount) && Math.abs(betAmount - selectedWinAmount) < 0.0001) {
+      parsed.selected_win = saferWin;
+      parsed.base_amount = claimToJpUnit(saferWin);
+      parsed.warning = 'Nominal kemenangan awal sama dengan bet. Sistem memilih kandidat surplus yang lebih valid.';
+    }
     if (parsed.ticket_id) document.getElementById('claimTicketId').value = parsed.ticket_id;
     if (parsed.bet) document.getElementById('claimBetInput').value = parsed.bet;
     if (parsed.bett_output) document.getElementById('claimBettOutput').value = parsed.bett_output;

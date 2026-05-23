@@ -565,6 +565,18 @@ function buildPgDetectedRows(ticketIds, betCandidates, winTokens) {
   return rows;
 }
 
+function filterPgWinTokens(winTokens, betCandidates) {
+  const betKeys = new Set((Array.isArray(betCandidates) ? betCandidates : [])
+    .map(value => moneyAmountKey(value))
+    .filter(Boolean));
+  const positiveNonBet = (Array.isArray(winTokens) ? winTokens : [])
+    .filter(token => token && Number.isFinite(token.amount))
+    .filter(token => token.amount > 0)
+    .filter(token => !betKeys.has(moneyAmountKey(token.raw)));
+  const highValue = positiveNonBet.filter(token => normalizePgWinToBaseAmount(token.raw) >= 150);
+  return highValue.length ? highValue.concat(positiveNonBet.filter(token => normalizePgWinToBaseAmount(token.raw) < 150)) : positiveNonBet;
+}
+
 export function parsePgHistoryOcr(rawText) {
   const normalized = normalizeOcrText(rawText);
   const lines = normalized.split('\n');
@@ -582,20 +594,23 @@ export function parsePgHistoryOcr(rawText) {
     .map(token => token.raw)
     .slice(0, ticketCount);
 
-  let winTokens = tokens
+  const rawWinTokens = tokens
     .filter(token => Number.isFinite(token.amount))
-    .filter(token => surplusLine < 0 || token.lineIndex > surplusLine)
-    .slice(0, ticketCount);
+    .filter(token => surplusLine < 0 || token.lineIndex > surplusLine);
+  let winTokens = filterPgWinTokens(rawWinTokens, betCandidates).slice(0, ticketCount);
 
   if (!betCandidates.length || !winTokens.length) {
     const fallback = extractPgMoneyColumns(normalized);
     if (!betCandidates.length) betCandidates = fallback.betCandidates.slice(0, ticketCount);
     if (!winTokens.length) {
-      winTokens = fallback.winCandidates.map(raw => ({
-        raw,
-        amount: parseIndonesianMoney(raw),
-        base: normalizePgWinToBaseAmount(raw)
-      }));
+      winTokens = filterPgWinTokens(
+        fallback.winCandidates.map(raw => ({
+          raw,
+          amount: parseIndonesianMoney(raw),
+          base: normalizePgWinToBaseAmount(raw)
+        })),
+        betCandidates
+      ).slice(0, ticketCount);
     }
   }
 
@@ -605,9 +620,7 @@ export function parsePgHistoryOcr(rawText) {
     || detectedRows[0]
     || {};
 
-  const positiveWinCandidates = winTokens
-    .filter(token => token.amount > 0)
-    .map(token => token.raw);
+  const positiveWinCandidates = winTokens.map(token => token.raw);
   const selected_win = selectedRow.win || positiveWinCandidates[0] || pickSmallestPositiveWin(extractWinCandidates(normalized));
   const base_amount = normalizePgWinToBaseAmount(selected_win);
   const highPositiveWin = positiveWinCandidates.find(value => normalizePgWinToBaseAmount(value) >= 150);
