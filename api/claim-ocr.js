@@ -517,6 +517,19 @@ function extractPgMoneyColumns(text) {
   };
 }
 
+function stripPgFooter(rawText) {
+  const lines = normalizeOcrText(rawText).split('\n');
+  const footerIndex = lines.findIndex(line => (
+    /catatan[-\s]*catatan/i.test(line)
+    || /klik di bawah/i.test(line)
+    || /verify\.pgsoft/i.test(line)
+    || /verifikasi permainan pg/i.test(line)
+    || /^\s*resmi\s*:?\s*$/i.test(line)
+  ));
+  if (footerIndex < 0) return lines.join('\n');
+  return lines.slice(0, footerIndex).join('\n');
+}
+
 function extractMoneyTokensWithLines(text) {
   const normalized = normalizeOcrText(text);
   return normalized.split('\n').flatMap((line, lineIndex) => {
@@ -578,7 +591,7 @@ function filterPgWinTokens(winTokens, betCandidates) {
 }
 
 export function parsePgHistoryOcr(rawText) {
-  const normalized = normalizeOcrText(rawText);
+  const normalized = stripPgFooter(rawText);
   const lines = normalized.split('\n');
   const ticketIds = extractPgTicketIds(normalized);
   const tokens = extractMoneyTokensWithLines(normalized);
