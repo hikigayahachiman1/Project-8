@@ -2418,7 +2418,7 @@
     <div class="hermes-panel">
       <div class="hermes-head">
         <div>
-          <div id="hermesTitle" class="hermes-title">Hermes Bantuan</div>
+          <div id="hermesTitle" class="hermes-title">Hermes Superadmin Debug</div>
           <div id="hermesSubtitle" class="hermes-subtitle">Tanya panduan kerja Parser QRIS.</div>
         </div>
         <button id="hermesCloseBtn" class="hermes-close ghost" type="button" title="Tutup Hermes">×</button>
@@ -3454,7 +3454,7 @@
   }
 
   function hermesLabelForRole() {
-    return isSuperAdmin() ? 'Hermes Superadmin Debug' : 'Hermes Bantuan';
+    return 'Hermes Superadmin Debug';
   }
 
   function resetHermesWidget() {
@@ -3472,16 +3472,14 @@
     const subtitle = document.getElementById('hermesSubtitle');
     const messages = document.getElementById('hermesMessages');
     if (!widget) return;
-    if (!currentOperator) {
+    if (!currentOperator || !isSuperAdmin()) {
       resetHermesWidget();
       return;
     }
     widget.classList.add('show');
     if (title) title.textContent = hermesLabelForRole();
     if (subtitle) {
-      subtitle.textContent = isSuperAdmin()
-        ? 'Akses tanya debug/log aman untuk superadmin.'
-        : 'Tanya panduan umum. Debug/log hanya untuk superadmin.';
+      subtitle.textContent = 'Akses tanya debug/log aman untuk superadmin.';
     }
     if (messages && !messages.children.length) {
       addHermesMessage('Hermes siap membantu. Aksi penting tetap dilakukan lewat Telegram Hermes dengan preview/confirm.', 'bot');
@@ -3513,7 +3511,10 @@
 
   async function handleHermesSubmit(event) {
     event.preventDefault();
-    if (!currentOperator) return;
+    if (!currentOperator || !isSuperAdmin()) {
+      resetHermesWidget();
+      return;
+    }
     const input = document.getElementById('hermesInput');
     const button = document.getElementById('hermesSendBtn');
     const question = String(input?.value || '').trim();

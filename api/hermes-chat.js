@@ -12,8 +12,6 @@ const supabase = supabaseUrl && serviceRoleKey
   : null;
 
 const SESSION_IDLE_MS = 2 * 60 * 60 * 1000;
-const DEBUG_QUESTION_PATTERN = /\b(debug|log|logs|stack|trace|internal|session|token|service[_\s-]*role|status internal|server status|audit log|error log)\b/i;
-
 function bearerToken(req) {
   const header = req.headers.authorization || req.headers.Authorization || '';
   const match = String(header).match(/^Bearer\s+(.+)$/i);
@@ -138,10 +136,11 @@ export default async function handler(req, res) {
     if (question.length > 2000) {
       return res.status(400).json({ ok: false, message: 'Pertanyaan terlalu panjang. Maksimal 2000 karakter.' });
     }
-    if (operator.role !== 'superadmin' && DEBUG_QUESTION_PATTERN.test(question)) {
+    if (operator.role !== 'superadmin') {
       return res.status(403).json({
         ok: false,
-        message: 'Fitur debug/log/status internal hanya tersedia untuk superadmin.'
+        error: 'Hermes Debug hanya tersedia untuk superadmin.',
+        message: 'Hermes Debug hanya tersedia untuk superadmin.'
       });
     }
     if (!hermesApiUrl) {
@@ -156,7 +155,7 @@ export default async function handler(req, res) {
       headers,
       body: JSON.stringify({
         question,
-        role: operator.role,
+        role: 'superadmin',
         username: operator.username,
         requested_by: operator.username,
         source: 'parser-index'
