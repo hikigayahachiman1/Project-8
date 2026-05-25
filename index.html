@@ -123,6 +123,61 @@
 
   .login-screen.hidden { display: none; }
 
+  body.maintenance-active .container,
+  body.maintenance-active #operatorLoginScreen {
+    display: none !important;
+  }
+
+  .maintenance-screen {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    z-index: 1300;
+    background:
+      radial-gradient(circle at 18% 20%, rgba(255, 200, 87, 0.18), transparent 30%),
+      radial-gradient(circle at 82% 16%, rgba(39, 245, 255, 0.18), transparent 34%),
+      linear-gradient(135deg, #030612 0%, #071426 48%, #050713 100%);
+  }
+
+  .maintenance-screen.show { display: flex; }
+
+  .maintenance-card {
+    width: min(620px, 100%);
+    padding: 34px 30px;
+    border-radius: 28px;
+    border: 1px solid rgba(255, 200, 87, 0.34);
+    background:
+      linear-gradient(145deg, rgba(255,255,255,0.13), rgba(255,255,255,0.04)),
+      rgba(10, 16, 34, 0.88);
+    box-shadow: 0 28px 90px rgba(0,0,0,0.50), 0 0 34px rgba(255,200,87,0.12);
+    text-align: center;
+  }
+
+  .maintenance-card h2 {
+    font-family: 'Fraunces', serif;
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    margin-bottom: 12px;
+  }
+
+  .maintenance-card p {
+    color: var(--ink-soft);
+    line-height: 1.7;
+    margin-bottom: 14px;
+  }
+
+  .maintenance-reason {
+    margin: 18px 0;
+    padding: 14px 16px;
+    border: 1px solid rgba(143,178,255,0.22);
+    border-radius: 18px;
+    background: rgba(3, 7, 18, 0.44);
+    color: var(--ink);
+    font-weight: 800;
+  }
+
   .login-orb {
     position: absolute;
     border-radius: 999px;
@@ -2213,6 +2268,18 @@
 </style>
 </head>
 <body>
+  <div id="maintenanceScreen" class="maintenance-screen" aria-live="polite">
+    <div class="maintenance-card">
+      <h2>Parser QRIS Sedang Maintenance</h2>
+      <p>Sistem sedang dalam perbaikan sementara.</p>
+      <div class="maintenance-reason">
+        <div style="color:var(--ink-soft); font-size:0.78rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px;">Alasan</div>
+        <div id="maintenanceReason">Maintenance sedang berlangsung.</div>
+      </div>
+      <p>Silakan coba beberapa saat lagi atau hubungi admin.</p>
+      <button id="maintenanceRefreshBtn" class="primary" type="button">Refresh Status</button>
+    </div>
+  </div>
   <div id="operatorLoginScreen" class="login-screen">
     <div class="login-orb login-orb-one"></div>
     <div class="login-orb login-orb-two"></div>
@@ -2905,6 +2972,7 @@
   let featureAccessLocks = {};
   let featureLocksLoadedAt = 0;
   let featureLockWarningShown = false;
+  let maintenanceActive = false;
   const FEATURE_LOCK_TTL_MS = 60000;
   const FEATURE_TAB_MAP = {
     parser: 'parser',
@@ -2969,6 +3037,52 @@
     document.body.classList.remove('is-loading');
     globalLoadingActive = false;
     currentLoadingSteps = [];
+  }
+
+  function showMaintenancePage(reason = '') {
+    maintenanceActive = true;
+    stopOperatorActivityTracking();
+    document.body.classList.add('maintenance-active');
+    document.body.classList.remove('operator-locked');
+    const screen = document.getElementById('maintenanceScreen');
+    const reasonEl = document.getElementById('maintenanceReason');
+    if (reasonEl) reasonEl.textContent = reason || 'Maintenance sedang berlangsung.';
+    if (screen) screen.classList.add('show');
+  }
+
+  function showNormalApp() {
+    maintenanceActive = false;
+    document.body.classList.remove('maintenance-active');
+    const screen = document.getElementById('maintenanceScreen');
+    if (screen) screen.classList.remove('show');
+  }
+
+  function showMaintenanceCheckError() {
+    maintenanceActive = true;
+    stopOperatorActivityTracking();
+    document.body.classList.add('maintenance-active');
+    document.body.classList.remove('operator-locked');
+    const screen = document.getElementById('maintenanceScreen');
+    const reasonEl = document.getElementById('maintenanceReason');
+    if (reasonEl) reasonEl.textContent = 'Gagal mengecek status sistem. Silakan refresh atau hubungi admin.';
+    if (screen) screen.classList.add('show');
+  }
+
+  async function checkMaintenanceMode() {
+    try {
+      const response = await fetch('/api/system-settings', { cache: 'no-store' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok !== true) throw new Error('maintenance-check-failed');
+      if (result.maintenance === true) {
+        showMaintenancePage(result.reason || '');
+        return true;
+      }
+      showNormalApp();
+      return false;
+    } catch (error) {
+      showMaintenanceCheckError();
+      return true;
+    }
   }
 
   function renderLoadingSteps() {
@@ -3154,12 +3268,14 @@
   }
 
   function showOperatorLogin() {
+    if (maintenanceActive) return;
     document.body.classList.add('operator-locked');
     document.getElementById('operatorLoginScreen').classList.remove('hidden');
     document.getElementById('operatorUsername').focus();
   }
 
   function hideOperatorLogin() {
+    if (maintenanceActive) return;
     document.body.classList.remove('operator-locked');
     document.getElementById('operatorLoginScreen').classList.add('hidden');
   }
@@ -3408,6 +3524,7 @@
   }
 
   async function loginOperator() {
+    if (maintenanceActive || await checkMaintenanceMode()) return;
     const username = document.getElementById('operatorUsername').value;
     const password = document.getElementById('operatorPassword').value;
     const errorBox = document.getElementById('operatorLoginError');
@@ -7264,6 +7381,10 @@
     });
   }
   document.getElementById('operatorLoginBtn').addEventListener('click', loginOperator);
+  document.getElementById('maintenanceRefreshBtn').addEventListener('click', async () => {
+    const isMaintenance = await checkMaintenanceMode();
+    if (!isMaintenance) await verifyOperatorSession();
+  });
   document.getElementById('operatorPassword').addEventListener('keydown', event => {
     if (event.key === 'Enter') loginOperator();
   });
@@ -7724,7 +7845,11 @@
   updateDateTimeDisplay();
   setInterval(updateDateTimeDisplay, 1000);
   renderBonusDoneInfo();
-  verifyOperatorSession();
+  async function initializeApp() {
+    const isMaintenance = await checkMaintenanceMode();
+    if (!isMaintenance) await verifyOperatorSession();
+  }
+  initializeApp();
 
   // Allow Ctrl+Enter to parse
   document.getElementById('input').addEventListener('keydown', (e) => {
