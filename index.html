@@ -178,6 +178,121 @@
     font-weight: 800;
   }
 
+  .hermes-widget {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    z-index: 900;
+    display: none;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .hermes-widget.show { display: flex; }
+
+  .hermes-fab {
+    min-width: 0;
+    width: 58px;
+    height: 58px;
+    border-radius: 20px;
+    padding: 0;
+    box-shadow: 0 18px 42px rgba(39,245,255,0.22), 0 0 24px rgba(155,92,255,0.18);
+  }
+
+  .hermes-panel {
+    display: none;
+    width: min(380px, calc(100vw - 32px));
+    max-height: min(620px, calc(100vh - 100px));
+    border: 1px solid rgba(143,178,255,0.26);
+    border-radius: 24px;
+    background:
+      linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04)),
+      rgba(9, 15, 33, 0.94);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.48), 0 0 28px rgba(39,245,255,0.12);
+    overflow: hidden;
+  }
+
+  .hermes-widget.open .hermes-panel {
+    display: grid;
+    grid-template-rows: auto minmax(180px, 1fr) auto;
+  }
+
+  .hermes-head {
+    padding: 16px 17px;
+    border-bottom: 1px solid rgba(143,178,255,0.16);
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .hermes-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.08rem;
+    font-weight: 800;
+  }
+
+  .hermes-subtitle {
+    margin-top: 3px;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+  }
+
+  .hermes-close {
+    min-width: 0;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border-radius: 999px;
+  }
+
+  .hermes-messages {
+    padding: 16px;
+    overflow: auto;
+    display: grid;
+    gap: 10px;
+  }
+
+  .hermes-message {
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(143,178,255,0.14);
+    background: rgba(255,255,255,0.055);
+    color: var(--ink-soft);
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+
+  .hermes-message.user {
+    background: rgba(39,245,255,0.12);
+    color: var(--ink);
+    border-color: rgba(39,245,255,0.22);
+  }
+
+  .hermes-message.error {
+    background: rgba(255,79,139,0.12);
+    color: #ffcad8;
+    border-color: rgba(255,79,139,0.30);
+  }
+
+  .hermes-form {
+    padding: 14px;
+    border-top: 1px solid rgba(143,178,255,0.16);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+  }
+
+  .hermes-form input {
+    min-height: 44px;
+    border-radius: 16px;
+    border: 1px solid rgba(143,178,255,0.24);
+    background: rgba(3,7,18,0.58);
+    color: var(--ink);
+    padding: 10px 12px;
+    outline: none;
+  }
+
   .login-orb {
     position: absolute;
     border-radius: 999px;
@@ -2263,6 +2378,10 @@
     .datetime-panel { min-width: 0; text-align: left; }
     .controls { align-items: stretch; }
     button, select { width: 100%; }
+    .hermes-widget { right: 14px; bottom: 14px; }
+    .hermes-fab { width: 58px; flex: 0 0 58px; }
+    .hermes-close { width: 34px; }
+    .hermes-form button { width: auto; }
     th, td { padding: 11px 12px; }
   }
 </style>
@@ -2294,6 +2413,23 @@
         <div id="operatorLoginError" class="login-error"></div>
       </div>
     </div>
+  </div>
+  <div id="hermesWidget" class="hermes-widget" aria-live="polite">
+    <div class="hermes-panel">
+      <div class="hermes-head">
+        <div>
+          <div id="hermesTitle" class="hermes-title">Hermes Bantuan</div>
+          <div id="hermesSubtitle" class="hermes-subtitle">Tanya panduan kerja Parser QRIS.</div>
+        </div>
+        <button id="hermesCloseBtn" class="hermes-close ghost" type="button" title="Tutup Hermes">×</button>
+      </div>
+      <div id="hermesMessages" class="hermes-messages"></div>
+      <form id="hermesForm" class="hermes-form">
+        <input id="hermesInput" type="text" maxlength="2000" placeholder="Tulis pertanyaan..." autocomplete="off">
+        <button id="hermesSendBtn" class="primary" type="submit">Kirim</button>
+      </form>
+    </div>
+    <button id="hermesToggleBtn" class="hermes-fab primary" type="button" title="Buka Hermes">Hermes</button>
   </div>
   <div class="container">
     <header>
@@ -3158,6 +3294,7 @@
     localStorage.removeItem(OPERATOR_PROFILE_KEY);
     currentOperator = null;
     stopOperatorActivityTracking();
+    resetHermesWidget();
     const info = document.getElementById('operatorInfo');
     if (info) {
       info.style.display = 'none';
@@ -3313,6 +3450,86 @@
       await logoutOperator();
       window.location.reload();
     });
+    renderHermesWidget();
+  }
+
+  function hermesLabelForRole() {
+    return isSuperAdmin() ? 'Hermes Superadmin Debug' : 'Hermes Bantuan';
+  }
+
+  function resetHermesWidget() {
+    const widget = document.getElementById('hermesWidget');
+    const messages = document.getElementById('hermesMessages');
+    const input = document.getElementById('hermesInput');
+    if (widget) widget.classList.remove('show', 'open');
+    if (messages) messages.innerHTML = '';
+    if (input) input.value = '';
+  }
+
+  function renderHermesWidget() {
+    const widget = document.getElementById('hermesWidget');
+    const title = document.getElementById('hermesTitle');
+    const subtitle = document.getElementById('hermesSubtitle');
+    const messages = document.getElementById('hermesMessages');
+    if (!widget) return;
+    if (!currentOperator) {
+      resetHermesWidget();
+      return;
+    }
+    widget.classList.add('show');
+    if (title) title.textContent = hermesLabelForRole();
+    if (subtitle) {
+      subtitle.textContent = isSuperAdmin()
+        ? 'Akses tanya debug/log aman untuk superadmin.'
+        : 'Tanya panduan umum. Debug/log hanya untuk superadmin.';
+    }
+    if (messages && !messages.children.length) {
+      addHermesMessage('Hermes siap membantu. Aksi penting tetap dilakukan lewat Telegram Hermes dengan preview/confirm.', 'bot');
+    }
+  }
+
+  function addHermesMessage(text, type = 'bot') {
+    const messages = document.getElementById('hermesMessages');
+    if (!messages) return;
+    const item = document.createElement('div');
+    item.className = `hermes-message ${type === 'user' ? 'user' : type === 'error' ? 'error' : ''}`;
+    item.textContent = text;
+    messages.appendChild(item);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function sendHermesQuestion(question) {
+    const response = await fetch('/api/hermes-chat', {
+      method: 'POST',
+      headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ question })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true) {
+      throw new Error(result.message || 'Hermes belum dapat dihubungi.');
+    }
+    return result.answer || 'Hermes belum memberi jawaban.';
+  }
+
+  async function handleHermesSubmit(event) {
+    event.preventDefault();
+    if (!currentOperator) return;
+    const input = document.getElementById('hermesInput');
+    const button = document.getElementById('hermesSendBtn');
+    const question = String(input?.value || '').trim();
+    if (!question) return;
+    addHermesMessage(question, 'user');
+    input.value = '';
+    setButtonLoading(button, true, '...');
+    try {
+      const answer = await sendHermesQuestion(question);
+      addHermesMessage(answer, 'bot');
+    } catch (error) {
+      addHermesMessage(error.message || 'Hermes belum dapat dihubungi.', 'error');
+    } finally {
+      setButtonLoading(button, false);
+      input.focus();
+    }
   }
 
   function featureKeyForPanel(panel) {
@@ -7385,6 +7602,15 @@
     const isMaintenance = await checkMaintenanceMode();
     if (!isMaintenance) await verifyOperatorSession();
   });
+  document.getElementById('hermesToggleBtn').addEventListener('click', () => {
+    const widget = document.getElementById('hermesWidget');
+    widget.classList.toggle('open');
+    if (widget.classList.contains('open')) document.getElementById('hermesInput').focus();
+  });
+  document.getElementById('hermesCloseBtn').addEventListener('click', () => {
+    document.getElementById('hermesWidget').classList.remove('open');
+  });
+  document.getElementById('hermesForm').addEventListener('submit', handleHermesSubmit);
   document.getElementById('operatorPassword').addEventListener('keydown', event => {
     if (event.key === 'Enter') loginOperator();
   });
