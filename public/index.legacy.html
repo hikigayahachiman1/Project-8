@@ -1116,24 +1116,12 @@
     display: block;
   }
 
-  .autowd-summary {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 12px;
-    margin: 16px 0;
-  }
-
-  .autowd-summary .stat {
-    min-height: 88px;
-  }
-
   .autowd-total-negative {
     color: #ffb4c8;
-  }
-
-  .autowd-output {
-    min-height: 170px;
-    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+    overflow: visible;
+    font-size: clamp(1.05rem, 1.7vw, 1.72rem);
+    letter-spacing: 0;
   }
 
   .options input[type="checkbox"] { accent-color: var(--accent); }
@@ -2432,7 +2420,6 @@
     .date-panel { width: 100%; align-items: stretch; }
     .datetime-panel { min-width: 0; text-align: left; }
     .qris-parser-mode { display: grid; grid-template-columns: 1fr; width: 100%; }
-    .autowd-summary { grid-template-columns: 1fr; }
     .controls { align-items: stretch; }
     button, select { width: 100%; }
     .hermes-widget { right: 14px; bottom: 14px; }
@@ -2616,47 +2603,38 @@
     <div id="autoWdParserModePanel" class="autowd-panel">
       <div class="grid">
         <section class="card">
-          <div class="card-title">Input AutoWD QRIS</div>
-          <div class="card-desc">Paste raw CSV/tabel withdraw atau upload file CSV. Hanya transaksi Approved yang diproses, nominal AutoWD selalu minus.</div>
+          <div class="card-title">Input Raw Data</div>
+          <div class="card-desc">Paste raw data dari web (Ctrl+V) atau import CSV export dari Excel/BO. Kolom input kosong ini tetap bisa dipakai manual.</div>
           <div class="file-row">
             <input type="file" id="autoWdFile" accept=".csv,.txt,.tsv">
-            <button id="autoWdImportBtn" class="ghost">Import CSV</button>
+            <button id="autoWdImportBtn" class="ghost">Import Excel/CSV</button>
           </div>
-          <textarea id="autoWdRaw" placeholder="Paste CSV export atau raw table dari BO Withdraw Report di sini."></textarea>
+          <textarea id="autoWdRaw" placeholder="Paste raw Withdraw Report di sini..."></textarea>
 
           <div class="controls">
             <button id="autoWdParseBtn" class="primary">Parse AutoWD</button>
             <select id="autoWdSortOrder">
-              <option value="asc">Lama ke Baru</option>
-              <option value="desc">Baru ke Lama</option>
+              <option value="asc">↑ Lama → Terbaru</option>
+              <option value="desc">↓ Terbaru → Lama</option>
             </select>
-            <button id="autoWdResetBtn" class="ghost">Reset AutoWD</button>
+            <button id="autoWdResetBtn" class="ghost">Bersihkan</button>
           </div>
 
           <div class="hint">
-            <strong>Rumus:</strong> AutoWD = -((Amount x 1000) + 2.500). Kolom Fee dari file diabaikan karena fee AutoWD memakai nilai fixed 2.500.
-            Support CSV dan copy langsung dari tabel BO.
+            <strong>Tip:</strong> Parser AutoWD membaca report Withdraw. Kolom TOTAL otomatis minus dengan potongan fixed 2.500.
           </div>
         </section>
 
         <section class="card">
           <div class="card-title">Hasil Terurut</div>
-          <div class="card-desc" id="autoWdDesc">Belum ada data. Paste raw atau upload CSV, lalu klik Parse AutoWD.</div>
-          <div class="autowd-summary">
+          <div class="card-desc" id="autoWdDesc">Belum ada data. Paste raw data di kiri lalu klik "Parse AutoWD".</div>
+          <div class="stats" id="autoWdStats" style="display:none;">
             <div class="stat">
               <div class="stat-label">Total Transaksi</div>
               <div class="stat-value" id="autoWdTotalRows">0</div>
             </div>
             <div class="stat">
-              <div class="stat-label">Approved</div>
-              <div class="stat-value" id="autoWdApprovedRows">0</div>
-            </div>
-            <div class="stat">
-              <div class="stat-label">Skipped</div>
-              <div class="stat-value" id="autoWdSkippedRows">0</div>
-            </div>
-            <div class="stat">
-              <div class="stat-label">Total AutoWD</div>
+              <div class="stat-label">Grand Total</div>
               <div class="stat-value autowd-total-negative" id="autoWdTotalAmount">0</div>
             </div>
           </div>
@@ -2674,8 +2652,8 @@
           </div>
 
           <div id="autoWdOutputTextWrap" style="display:none; margin-top:12px;">
-            <div style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:6px; font-family:'JetBrains Mono',monospace;">Output teks bisa juga Ctrl+A lalu Ctrl+C di sini, lalu paste ke Excel.</div>
-            <textarea id="autoWdOutput" class="autowd-output" placeholder="Output copy AutoWD akan muncul di sini..." readonly></textarea>
+            <div style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:6px; font-family:'JetBrains Mono',monospace;">Output teks (bisa juga Ctrl+A lalu Ctrl+C di sini, lalu paste ke Excel). Kolom TOTAL AutoWD sudah otomatis minus.</div>
+            <textarea id="autoWdOutput" style="min-height:200px; background:#f0fff0;" placeholder="Output copy AutoWD akan muncul di sini..." readonly></textarea>
           </div>
         </section>
       </div>
@@ -2691,9 +2669,9 @@
                 <th>Application Time</th>
                 <th>Login ID</th>
                 <th>Nama Rekening</th>
-                <th class="num">Amount</th>
-                <th class="num">Fee Fixed</th>
-                <th class="num">Total AutoWD</th>
+                <th class="num">Nominal</th>
+                <th class="num">Potongan QRIS</th>
+                <th class="num">Total</th>
                 <th>Status</th>
                 <th>Verified By</th>
               </tr>
@@ -8172,7 +8150,7 @@
       const header = [];
       if (includeIndex) header.push('NO');
       if (includeTime) header.push('APPLICATION TIME');
-      header.push('LOGIN ID', 'NAMA REKENING', 'AMOUNT', 'FEE FIXED', 'TOTAL AUTOWD');
+      header.push('LOGIN ID', 'NAMA REKENING', 'NOMINAL', 'POTONGAN QRIS', 'TOTAL');
       outputRows.push(header.join(separator));
     }
 
@@ -8193,24 +8171,6 @@
     return outputRows.join('\n');
   }
 
-  function buildAutoWdReportText(rows = autoWdRows, stats = autoWdLastStats) {
-    const totalAmount = rows.reduce((sum, row) => sum + row.autowd_amount, 0);
-    const totalRows = stats ? stats.totalRows : rows.length;
-    const approvedRows = stats ? stats.approvedRows : rows.length;
-    const skippedRows = stats ? stats.skippedRows : 0;
-    return [
-      'LAPORAN AUTOWD QRIS',
-      `Total Transaksi: ${totalRows}`,
-      `Total Approved: ${approvedRows}`,
-      `Skipped: ${skippedRows}`,
-      `Fee Fixed: ${formatAutoWdAmount(FIXED_AUTOWD_FEE)}`,
-      `Total AutoWD: ${formatAutoWdAmount(totalAmount)}`,
-      `Mode Urut: ${autoWdSortLabel()}`,
-      '',
-      buildAutoWdTableText('\t', rows)
-    ].join('\n');
-  }
-
   function buildAutoWdCsvText(rows = autoWdRows) {
     const escCsv = value => {
       const text = String(value == null ? '' : value);
@@ -8226,7 +8186,7 @@
       const header = [];
       if (includeIndex) header.push('NO');
       if (includeTime) header.push('APPLICATION TIME');
-      header.push('LOGIN ID', 'NAMA REKENING', 'AMOUNT', 'FEE FIXED', 'TOTAL AUTOWD');
+      header.push('LOGIN ID', 'NAMA REKENING', 'NOMINAL', 'POTONGAN QRIS', 'TOTAL');
       csvRows.push(header);
     }
 
@@ -8550,22 +8510,23 @@
     const outputControls = document.getElementById('autoWdOutputControls');
     const options = document.getElementById('autoWdOptions');
     const outputWrap = document.getElementById('autoWdOutputTextWrap');
+    const statsBox = document.getElementById('autoWdStats');
     document.getElementById('autoWdTotalRows').textContent = stats ? stats.totalRows : rows.length;
-    document.getElementById('autoWdApprovedRows').textContent = stats ? stats.approvedRows : rows.length;
-    document.getElementById('autoWdSkippedRows').textContent = stats ? stats.skippedRows : 0;
     document.getElementById('autoWdTotalAmount').textContent = formatAutoWdAmount(totalAmount);
-    output.value = buildAutoWdReportText(rows, stats || autoWdLastStats);
+    output.value = buildAutoWdTableText('\t', rows);
 
     if (rows.length === 0) {
       tbody.innerHTML = '<tr><td colspan="9" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>';
       desc.textContent = 'Belum ada data. Paste raw atau upload CSV, lalu klik Parse AutoWD.';
+      if (statsBox) statsBox.style.display = 'none';
       if (outputControls) outputControls.style.display = 'none';
       if (options) options.style.display = 'none';
       if (outputWrap) outputWrap.style.display = 'none';
       return;
     }
 
-    desc.textContent = `${rows.length} transaksi Approved siap dicopy sebagai output AutoWD.`;
+    desc.textContent = `${rows.length} transaksi berhasil di-parse dan diurutkan.`;
+    if (statsBox) statsBox.style.display = 'grid';
     if (outputControls) outputControls.style.display = 'flex';
     if (options) options.style.display = 'flex';
     if (outputWrap) outputWrap.style.display = 'block';

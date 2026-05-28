@@ -11,7 +11,7 @@ export default function AppLayout({ children }) {
         </div>
         <div className="status-card">
           <span>Status</span>
-          <strong>Vite React Active</strong>
+          <strong>Aktif</strong>
         </div>
       </header>
       <main>{children}</main>

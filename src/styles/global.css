@@ -38,30 +38,3 @@ body {
   border: 0;
   background: #060914;
 }
-
-.react-active-badge {
-  position: fixed;
-  top: 12px;
-  right: 14px;
-  z-index: 10;
-  padding: 8px 12px;
-  border: 1px solid rgba(39, 245, 255, 0.35);
-  border-radius: 999px;
-  color: #dffcff;
-  background: rgba(6, 12, 28, 0.72);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.28), 0 0 18px rgba(39, 245, 255, 0.16);
-  backdrop-filter: blur(14px);
-  font-size: 0.72rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  pointer-events: none;
-}
-
-@media (max-width: 760px) {
-  .react-active-badge {
-    top: 8px;
-    right: 8px;
-    padding: 7px 10px;
-    font-size: 0.64rem;
-  }
-}
