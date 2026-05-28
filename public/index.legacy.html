@@ -2630,7 +2630,6 @@
               <option value="asc">Lama ke Baru</option>
               <option value="desc">Baru ke Lama</option>
             </select>
-            <button id="autoWdCopyBtn" class="success">Copy Output AutoWD</button>
             <button id="autoWdResetBtn" class="ghost">Reset AutoWD</button>
           </div>
 
@@ -2641,11 +2640,11 @@
         </section>
 
         <section class="card">
-          <div class="card-title">Output AutoWD</div>
+          <div class="card-title">Hasil Terurut</div>
           <div class="card-desc" id="autoWdDesc">Belum ada data. Paste raw atau upload CSV, lalu klik Parse AutoWD.</div>
           <div class="autowd-summary">
             <div class="stat">
-              <div class="stat-label">Row Terbaca</div>
+              <div class="stat-label">Total Transaksi</div>
               <div class="stat-value" id="autoWdTotalRows">0</div>
             </div>
             <div class="stat">
@@ -2661,13 +2660,29 @@
               <div class="stat-value autowd-total-negative" id="autoWdTotalAmount">0</div>
             </div>
           </div>
-          <textarea id="autoWdOutput" class="autowd-output" placeholder="Output copy AutoWD akan muncul di sini..." readonly></textarea>
+
+          <div class="controls" id="autoWdOutputControls" style="display:none;">
+            <button id="autoWdCopyBtn" class="success">Copy untuk Excel (Tab)</button>
+            <button id="autoWdCopyCsvBtn">Copy CSV</button>
+            <button id="autoWdSelectAllBtn" class="ghost">Select All Output</button>
+          </div>
+
+          <div class="options" id="autoWdOptions" style="display:none;">
+            <label><input type="checkbox" id="autoWdOptHeader" checked> Sertakan Header</label>
+            <label><input type="checkbox" id="autoWdOptTime"> Sertakan Application Time</label>
+            <label><input type="checkbox" id="autoWdOptIndex"> Sertakan No. Urut</label>
+          </div>
+
+          <div id="autoWdOutputTextWrap" style="display:none; margin-top:12px;">
+            <div style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:6px; font-family:'JetBrains Mono',monospace;">Output teks bisa juga Ctrl+A lalu Ctrl+C di sini, lalu paste ke Excel.</div>
+            <textarea id="autoWdOutput" class="autowd-output" placeholder="Output copy AutoWD akan muncul di sini..." readonly></textarea>
+          </div>
         </section>
       </div>
 
       <section class="card" style="margin-top:24px;">
-        <div class="card-title">Preview AutoWD</div>
-        <div class="card-desc">Preview transaksi Approved yang akan dicopy sebagai LOGIN_ID NOMINAL_MINUS.</div>
+        <div class="card-title">Tabel Hasil</div>
+        <div class="card-desc">Data AutoWD yang sudah di-extract dan diurutkan berdasarkan Application Time.</div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -2675,15 +2690,16 @@
                 <th style="width:50px;">#</th>
                 <th>Application Time</th>
                 <th>Login ID</th>
+                <th>Nama Rekening</th>
                 <th class="num">Amount</th>
                 <th class="num">Fee Fixed</th>
-                <th class="num">AutoWD Amount</th>
+                <th class="num">Total AutoWD</th>
                 <th>Status</th>
                 <th>Verified By</th>
               </tr>
             </thead>
             <tbody id="autoWdTbody">
-              <tr><td colspan="8" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>
+              <tr><td colspan="9" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>
             </tbody>
           </table>
         </div>
@@ -3204,6 +3220,7 @@
   let transactions = [];
   let qrisParserMode = 'deposit';
   let autoWdRows = [];
+  let autoWdLastStats = null;
   const FIXED_AUTOWD_FEE = 2500;
   let bonusRows = [];
   let auditDoubleTicketRows = [];
@@ -8132,20 +8149,116 @@
     return Number.isNaN(fallback.getTime()) ? new Date(0) : fallback;
   }
 
-  function buildAutoWdCopyText(rows) {
-    return (rows || autoWdRows)
-      .map(row => `${row.login_id} ${formatAutoWdAmount(row.autowd_amount)}`)
+  function formatAutoWdAmountUnit(value) {
+    return Number(value || 0).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
+
+  function autoWdSortLabel() {
+    return document.getElementById('autoWdSortOrder').value === 'asc'
+      ? 'Lama \u2192 Baru'
+      : 'Baru \u2192 Lama';
+  }
+
+  function buildAutoWdTableText(separator = '\t', rows = autoWdRows) {
+    const includeHeader = document.getElementById('autoWdOptHeader') ? document.getElementById('autoWdOptHeader').checked : true;
+    const includeTime = document.getElementById('autoWdOptTime') ? document.getElementById('autoWdOptTime').checked : false;
+    const includeIndex = document.getElementById('autoWdOptIndex') ? document.getElementById('autoWdOptIndex').checked : false;
+    const outputRows = [];
+
+    if (includeHeader) {
+      const header = [];
+      if (includeIndex) header.push('NO');
+      if (includeTime) header.push('APPLICATION TIME');
+      header.push('LOGIN ID', 'NAMA REKENING', 'AMOUNT', 'FEE FIXED', 'TOTAL AUTOWD');
+      outputRows.push(header.join(separator));
+    }
+
+    rows.forEach((row, index) => {
+      const line = [];
+      if (includeIndex) line.push(index + 1);
+      if (includeTime) line.push(row.application_time || '');
+      line.push(
+        row.login_id,
+        row.nama_rekening || '-',
+        row.amount_text || formatAutoWdAmountUnit(row.amount),
+        formatAutoWdAmount(row.fee_fixed),
+        formatAutoWdAmount(row.autowd_amount)
+      );
+      outputRows.push(line.join(separator));
+    });
+
+    return outputRows.join('\n');
+  }
+
+  function buildAutoWdReportText(rows = autoWdRows, stats = autoWdLastStats) {
+    const totalAmount = rows.reduce((sum, row) => sum + row.autowd_amount, 0);
+    const totalRows = stats ? stats.totalRows : rows.length;
+    const approvedRows = stats ? stats.approvedRows : rows.length;
+    const skippedRows = stats ? stats.skippedRows : 0;
+    return [
+      'LAPORAN AUTOWD QRIS',
+      `Total Transaksi: ${totalRows}`,
+      `Total Approved: ${approvedRows}`,
+      `Skipped: ${skippedRows}`,
+      `Fee Fixed: ${formatAutoWdAmount(FIXED_AUTOWD_FEE)}`,
+      `Total AutoWD: ${formatAutoWdAmount(totalAmount)}`,
+      `Mode Urut: ${autoWdSortLabel()}`,
+      '',
+      buildAutoWdTableText('\t', rows)
+    ].join('\n');
+  }
+
+  function buildAutoWdCsvText(rows = autoWdRows) {
+    const escCsv = value => {
+      const text = String(value == null ? '' : value);
+      if (/[",\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+      return text;
+    };
+    const includeHeader = document.getElementById('autoWdOptHeader') ? document.getElementById('autoWdOptHeader').checked : true;
+    const includeTime = document.getElementById('autoWdOptTime') ? document.getElementById('autoWdOptTime').checked : false;
+    const includeIndex = document.getElementById('autoWdOptIndex') ? document.getElementById('autoWdOptIndex').checked : false;
+    const csvRows = [];
+
+    if (includeHeader) {
+      const header = [];
+      if (includeIndex) header.push('NO');
+      if (includeTime) header.push('APPLICATION TIME');
+      header.push('LOGIN ID', 'NAMA REKENING', 'AMOUNT', 'FEE FIXED', 'TOTAL AUTOWD');
+      csvRows.push(header);
+    }
+
+    rows.forEach((row, index) => {
+      const line = [];
+      if (includeIndex) line.push(index + 1);
+      if (includeTime) line.push(row.application_time || '');
+      line.push(
+        row.login_id,
+        row.nama_rekening || '-',
+        row.amount_text || formatAutoWdAmountUnit(row.amount),
+        formatAutoWdAmount(row.fee_fixed),
+        formatAutoWdAmount(row.autowd_amount)
+      );
+      csvRows.push(line);
+    });
+
+    return csvRows
+      .map(line => line.map(escCsv).join(','))
       .join('\n');
   }
 
-  function createAutoWdRecord({ login, applicationTime, amount, status, verifiedBy }) {
+  function createAutoWdRecord({ login, applicationTime, amount, status, verifiedBy, namaRekening }) {
     const amountUnit = parseAutoWdAmount(amount);
     if (!login || !Number.isFinite(amountUnit)) return null;
     const autoWdAmount = -((amountUnit * 1000) + FIXED_AUTOWD_FEE);
     return {
       login_id: String(login).trim().toUpperCase(),
+      nama_rekening: String(namaRekening || '').trim() || '-',
       application_time: String(applicationTime || '').trim(),
       amount: amountUnit,
+      amount_text: String(amount || '').trim() || formatAutoWdAmountUnit(amountUnit),
       fee_fixed: FIXED_AUTOWD_FEE,
       autowd_amount: autoWdAmount,
       status: String(status || '').trim(),
@@ -8185,6 +8298,19 @@
     const operatorLine = [...afterStatus].reverse().find(line => /^op\d+@g\d+$/i.test(line));
     if (operatorLine) return operatorLine;
     return afterStatus.find(line => /^system$/i.test(line)) || '';
+  }
+
+  function findAutoWdMemberName(lines, memberIndex, fallbackLogin) {
+    const memberName = memberIndex >= 0 ? lines[memberIndex + 2] : '';
+    return String(memberName || fallbackLogin || '').trim();
+  }
+
+  function findAutoWdAccountName(lines, index, memberName) {
+    const statusRelativeIndex = 6;
+    const afterStatus = lines.slice(index + statusRelativeIndex + 1, Math.min(lines.length, index + 28));
+    const bookingDateIndex = afterStatus.findIndex(line => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(line));
+    const accountName = bookingDateIndex >= 0 ? afterStatus[bookingDateIndex + 1] : '';
+    return String(accountName || memberName || '').trim();
   }
 
   function parseAutoWdBoChunk(chunk) {
@@ -8298,13 +8424,16 @@
         result.skippedRows++;
         return;
       }
+      const memberName = findAutoWdMemberName(lines, memberIndex, login);
+      const namaRekening = findAutoWdAccountName(lines, index, memberName);
 
       const record = createAutoWdRecord({
         login,
         applicationTime: lines[index],
         amount,
         status,
-        verifiedBy: findAutoWdVerifiedBy(lines.slice(index, Math.min(lines.length, index + 28)), 6)
+        verifiedBy: findAutoWdVerifiedBy(lines.slice(index, Math.min(lines.length, index + 28)), 6),
+        namaRekening
       });
       if (!record) {
         result.skippedRows++;
@@ -8346,6 +8475,7 @@
 
     const headers = rows[0].map(normalizeAutoWdHeader);
     const loginIndex = findAutoWdHeaderIndex(headers, ['Login ID', 'LoginID', 'User ID']);
+    const memberNameIndex = findAutoWdHeaderIndex(headers, ['Member Acct Name', 'Member Account Name', 'Member Name', 'Nama Rekening', 'Account Name']);
     const timeIndex = findAutoWdHeaderIndex(headers, ['Application Time (GMT+8)', 'Application Time', 'Apply Time']);
     let amountIndex = findAutoWdHeaderIndex(headers, ['Amount', 'Withdraw Amount', 'Nominal']);
     const statusIndex = findAutoWdHeaderIndex(headers, ['Status']);
@@ -8381,7 +8511,8 @@
         applicationTime: timeIndex >= 0 ? row[timeIndex] : '',
         amount: row[amountIndex],
         status,
-        verifiedBy: verifiedIndex >= 0 ? row[verifiedIndex] : ''
+        verifiedBy: verifiedIndex >= 0 ? row[verifiedIndex] : '',
+        namaRekening: memberNameIndex >= 0 ? row[memberNameIndex] : ''
       });
       if (!record) {
         result.skippedRows++;
@@ -8416,25 +8547,35 @@
     if (!tbody || !desc || !output) return;
 
     const totalAmount = rows.reduce((sum, row) => sum + row.autowd_amount, 0);
+    const outputControls = document.getElementById('autoWdOutputControls');
+    const options = document.getElementById('autoWdOptions');
+    const outputWrap = document.getElementById('autoWdOutputTextWrap');
     document.getElementById('autoWdTotalRows').textContent = stats ? stats.totalRows : rows.length;
     document.getElementById('autoWdApprovedRows').textContent = stats ? stats.approvedRows : rows.length;
     document.getElementById('autoWdSkippedRows').textContent = stats ? stats.skippedRows : 0;
     document.getElementById('autoWdTotalAmount').textContent = formatAutoWdAmount(totalAmount);
-    output.value = buildAutoWdCopyText(rows);
+    output.value = buildAutoWdReportText(rows, stats || autoWdLastStats);
 
     if (rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>';
       desc.textContent = 'Belum ada data. Paste raw atau upload CSV, lalu klik Parse AutoWD.';
+      if (outputControls) outputControls.style.display = 'none';
+      if (options) options.style.display = 'none';
+      if (outputWrap) outputWrap.style.display = 'none';
       return;
     }
 
     desc.textContent = `${rows.length} transaksi Approved siap dicopy sebagai output AutoWD.`;
+    if (outputControls) outputControls.style.display = 'flex';
+    if (options) options.style.display = 'flex';
+    if (outputWrap) outputWrap.style.display = 'block';
     tbody.innerHTML = rows.map((row, index) => `
       <tr>
         <td class="idx">${index + 1}</td>
         <td class="time-cell">${escapeHtml(row.application_time || '-')}</td>
         <td class="user-id">${escapeHtml(row.login_id)}</td>
-        <td class="num">${escapeHtml(String(row.amount))}</td>
+        <td class="nama">${escapeHtml(row.nama_rekening || '-')}</td>
+        <td class="num">${escapeHtml(row.amount_text || formatAutoWdAmountUnit(row.amount))}</td>
         <td class="num">${formatAutoWdAmount(row.fee_fixed)}</td>
         <td class="num"><strong>${formatAutoWdAmount(row.autowd_amount)}</strong></td>
         <td>${escapeHtml(row.status)}</td>
@@ -8453,8 +8594,13 @@
   function parseAutoWdRowsFromInput(raw) {
     const parsed = parseAutoWdText(raw);
     autoWdRows = parsed.records;
+    autoWdLastStats = {
+      totalRows: parsed.totalRows,
+      approvedRows: parsed.approvedRows,
+      skippedRows: parsed.skippedRows
+    };
     sortAutoWdRows();
-    renderAutoWdPreview(autoWdRows, parsed);
+    renderAutoWdPreview(autoWdRows, autoWdLastStats);
 
     if (parsed.errors.length > 0) {
       showToast(parsed.errors[0], parsed.records.length ? '' : 'error');
@@ -8467,6 +8613,7 @@
 
   function resetAutoWdParser() {
     autoWdRows = [];
+    autoWdLastStats = null;
     document.getElementById('autoWdRaw').value = '';
     document.getElementById('autoWdFile').value = '';
     renderAutoWdPreview([]);
@@ -8478,7 +8625,15 @@
       showToast('Belum ada output AutoWD untuk dicopy.', 'error');
       return;
     }
-    await copyToClipboard(buildAutoWdCopyText(autoWdRows), 'Output AutoWD');
+    await copyToClipboard(document.getElementById('autoWdOutput').value, 'Output AutoWD');
+  }
+
+  async function copyAutoWdCsvOutput() {
+    if (autoWdRows.length === 0) {
+      showToast('Belum ada output AutoWD untuk dicopy.', 'error');
+      return;
+    }
+    await copyToClipboard(buildAutoWdCsvText(autoWdRows), 'Output AutoWD CSV');
   }
 
   // ======= EVENTS =======
@@ -8567,11 +8722,25 @@
   document.getElementById('autoWdSortOrder').addEventListener('change', () => {
     if (autoWdRows.length === 0) return;
     sortAutoWdRows();
-    renderAutoWdPreview(autoWdRows);
+    renderAutoWdPreview(autoWdRows, autoWdLastStats);
   });
 
   document.getElementById('autoWdCopyBtn').addEventListener('click', copyAutoWdOutput);
+  document.getElementById('autoWdCopyCsvBtn').addEventListener('click', copyAutoWdCsvOutput);
+  document.getElementById('autoWdSelectAllBtn').addEventListener('click', () => {
+    const ta = document.getElementById('autoWdOutput');
+    ta.focus();
+    ta.select();
+    showToast('Teks AutoWD dipilih. Tekan Ctrl+C untuk menyalin.');
+  });
   document.getElementById('autoWdResetBtn').addEventListener('click', resetAutoWdParser);
+
+  ['autoWdOptHeader','autoWdOptTime','autoWdOptIndex'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => {
+      if (autoWdRows.length > 0) renderAutoWdPreview(autoWdRows, autoWdLastStats);
+    });
+  });
 
   document.getElementById('sortOrder').addEventListener('change', () => {
     if (transactions.length === 0) return;
