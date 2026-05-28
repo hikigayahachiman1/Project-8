@@ -2622,7 +2622,7 @@
             <input type="file" id="autoWdFile" accept=".csv,.txt,.tsv">
             <button id="autoWdImportBtn" class="ghost">Import CSV</button>
           </div>
-          <textarea id="autoWdRaw" placeholder="Paste raw CSV / tabel withdraw di sini..."></textarea>
+          <textarea id="autoWdRaw" placeholder="Paste CSV export atau raw table dari BO Withdraw Report di sini."></textarea>
 
           <div class="controls">
             <button id="autoWdParseBtn" class="primary">Parse AutoWD</button>
@@ -2636,6 +2636,7 @@
 
           <div class="hint">
             <strong>Rumus:</strong> AutoWD = -((Amount x 1000) + 2.500). Kolom Fee dari file diabaikan karena fee AutoWD memakai nilai fixed 2.500.
+            Support CSV dan copy langsung dari tabel BO.
           </div>
         </section>
 
@@ -2678,10 +2679,11 @@
                 <th class="num">Fee Fixed</th>
                 <th class="num">AutoWD Amount</th>
                 <th>Status</th>
+                <th>Verified By</th>
               </tr>
             </thead>
             <tbody id="autoWdTbody">
-              <tr><td colspan="7" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>
+              <tr><td colspan="8" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>
             </tbody>
           </table>
         </div>
@@ -8114,6 +8116,10 @@
     return Number.isFinite(num) ? num : NaN;
   }
 
+  function parseAutoWdAmount(value) {
+    return parseAutoWdNumber(value);
+  }
+
   function formatAutoWdAmount(value) {
     const rounded = Math.round(Number(value) || 0);
     return rounded.toLocaleString('id-ID');
@@ -8130,6 +8136,147 @@
     return (rows || autoWdRows)
       .map(row => `${row.login_id} ${formatAutoWdAmount(row.autowd_amount)}`)
       .join('\n');
+  }
+
+  function createAutoWdRecord({ login, applicationTime, amount, status, verifiedBy }) {
+    const amountUnit = parseAutoWdAmount(amount);
+    if (!login || !Number.isFinite(amountUnit)) return null;
+    const autoWdAmount = -((amountUnit * 1000) + FIXED_AUTOWD_FEE);
+    return {
+      login_id: String(login).trim().toUpperCase(),
+      application_time: String(applicationTime || '').trim(),
+      amount: amountUnit,
+      fee_fixed: FIXED_AUTOWD_FEE,
+      autowd_amount: autoWdAmount,
+      status: String(status || '').trim(),
+      verified_by: String(verifiedBy || '').trim(),
+      _timestamp: parseAutoWdDate(applicationTime || '')
+    };
+  }
+
+  function isAutoWdBoFooterLine(line) {
+    return /^(records per page|results?|first|previous|next|last)$/i.test(String(line || '').trim());
+  }
+
+  function looksLikeBoMemberId(line) {
+    return /^\d+@\d+$/i.test(String(line || '').trim());
+  }
+
+  function looksLikeBoDateTime(line) {
+    return /^\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2}$/.test(String(line || '').trim());
+  }
+
+  function looksLikeBoStatus(line) {
+    return /^(approved|rejected|reject|pending)$/i.test(String(line || '').trim());
+  }
+
+  function findAutoWdVerifiedBy(lines, statusIndex) {
+    const afterStatus = lines.slice(Math.max(statusIndex + 1, 0));
+    const operatorLine = [...afterStatus].reverse().find(line => /^op\d+@g\d+$/i.test(line));
+    if (operatorLine) return operatorLine;
+    return afterStatus.find(line => /^system$/i.test(line)) || '';
+  }
+
+  function parseAutoWdBoChunk(chunk) {
+    if (chunk.length < 12) return null;
+    const memberIndex = chunk.findIndex(looksLikeBoMemberId);
+    const login = memberIndex >= 0 ? chunk[memberIndex + 1] : chunk[3];
+    const applicationTimeIndex = chunk.findIndex(looksLikeBoDateTime);
+    if (applicationTimeIndex < 0) return null;
+
+    const paymentIndex = chunk.findIndex((line, index) =>
+      index > applicationTimeIndex && /qris\s*im/i.test(line)
+    );
+    if (paymentIndex < 0) return null;
+
+    const currencyIndex = chunk.findIndex((line, index) =>
+      index > paymentIndex && /^idr$/i.test(line)
+    );
+    if (currencyIndex < 0) return null;
+
+    let amountIndex = -1;
+    for (let i = currencyIndex + 1; i < Math.min(chunk.length, currencyIndex + 6); i++) {
+      const value = parseAutoWdAmount(chunk[i]);
+      if (Number.isFinite(value)) {
+        amountIndex = i;
+        break;
+      }
+    }
+    if (amountIndex < 0) return null;
+
+    const statusIndex = chunk.findIndex((line, index) =>
+      index > amountIndex && looksLikeBoStatus(line)
+    );
+    if (statusIndex < 0) return null;
+
+    return {
+      login,
+      applicationTime: chunk[applicationTimeIndex],
+      payment: chunk[paymentIndex],
+      currency: chunk[currencyIndex],
+      amount: chunk[amountIndex],
+      status: chunk[statusIndex],
+      verifiedBy: findAutoWdVerifiedBy(chunk, statusIndex)
+    };
+  }
+
+  function parseAutoWdBoRawText(rawText) {
+    const lines = String(rawText || '')
+      .split(/\r?\n/)
+      .map(line => cleanCell(line))
+      .filter(line => line && !isAutoWdBoFooterLine(line));
+
+    const result = {
+      records: [],
+      totalRows: 0,
+      approvedRows: 0,
+      skippedRows: 0,
+      errors: []
+    };
+
+    const groupIndexes = [];
+    lines.forEach((line, index) => {
+      if (/^MAGNUM188\s*\(G156\)$/i.test(line)) groupIndexes.push(index);
+    });
+
+    if (groupIndexes.length === 0) {
+      result.errors.push('Header Amount/Login ID/Status tidak ditemukan. Pastikan file report withdraw benar.');
+      return result;
+    }
+
+    groupIndexes.forEach((startIndex, position) => {
+      const endIndex = groupIndexes[position + 1] || lines.length;
+      const chunk = lines.slice(startIndex, endIndex);
+      const row = parseAutoWdBoChunk(chunk);
+      if (!row) {
+        result.skippedRows++;
+        return;
+      }
+
+      result.totalRows++;
+      if (String(row.status).trim().toLowerCase() !== 'approved') {
+        result.skippedRows++;
+        return;
+      }
+      result.approvedRows++;
+
+      const record = createAutoWdRecord(row);
+      if (!record) {
+        result.skippedRows++;
+        return;
+      }
+      result.records.push(record);
+    });
+
+    if (result.totalRows === 0) {
+      result.errors.push('Tidak ada transaksi AutoWD valid dari raw BO.');
+    } else if (result.approvedRows === 0) {
+      result.errors.push('Tidak ada transaksi Approved yang bisa diproses.');
+    } else if (result.records.length === 0) {
+      result.errors.push('Tidak ada transaksi AutoWD valid. Cek Login ID dan Amount.');
+    }
+
+    return result;
   }
 
   function parseAutoWdCsvText(rawText) {
@@ -8171,7 +8318,7 @@
     rows.slice(1).forEach(row => {
       const login = String(row[loginIndex] || '').trim();
       const status = String(row[statusIndex] || '').trim();
-      const amountUnit = parseAutoWdNumber(row[amountIndex]);
+      const amountUnit = parseAutoWdAmount(row[amountIndex]);
 
       if (!status || status.toLowerCase() !== 'approved') {
         result.skippedRows++;
@@ -8184,17 +8331,18 @@
         return;
       }
 
-      const autoWdAmount = -((amountUnit * 1000) + FIXED_AUTOWD_FEE);
-      result.records.push({
-        login_id: login.toUpperCase(),
-        application_time: timeIndex >= 0 ? String(row[timeIndex] || '').trim() : '',
-        amount: amountUnit,
-        fee_fixed: FIXED_AUTOWD_FEE,
-        autowd_amount: autoWdAmount,
+      const record = createAutoWdRecord({
+        login,
+        applicationTime: timeIndex >= 0 ? row[timeIndex] : '',
+        amount: row[amountIndex],
         status,
-        verified_by: verifiedIndex >= 0 ? String(row[verifiedIndex] || '').trim() : '',
-        _timestamp: parseAutoWdDate(timeIndex >= 0 ? row[timeIndex] : '')
+        verifiedBy: verifiedIndex >= 0 ? row[verifiedIndex] : ''
       });
+      if (!record) {
+        result.skippedRows++;
+        return;
+      }
+      result.records.push(record);
     });
 
     if (result.approvedRows === 0) {
@@ -8204,6 +8352,16 @@
     }
 
     return result;
+  }
+
+  function parseAutoWdText(rawText) {
+    const csvResult = parseAutoWdCsvText(rawText);
+    if (csvResult.records.length > 0) return csvResult;
+
+    const boResult = parseAutoWdBoRawText(rawText);
+    if (boResult.records.length > 0) return boResult;
+    if (boResult.totalRows > 0 || boResult.approvedRows > 0) return boResult;
+    return csvResult;
   }
 
   function renderAutoWdPreview(rows = autoWdRows, stats = null) {
@@ -8220,7 +8378,7 @@
     output.value = buildAutoWdCopyText(rows);
 
     if (rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="empty">Belum ada data AutoWD untuk ditampilkan</td></tr>';
       desc.textContent = 'Belum ada data. Paste raw atau upload CSV, lalu klik Parse AutoWD.';
       return;
     }
@@ -8235,6 +8393,7 @@
         <td class="num">${formatAutoWdAmount(row.fee_fixed)}</td>
         <td class="num"><strong>${formatAutoWdAmount(row.autowd_amount)}</strong></td>
         <td>${escapeHtml(row.status)}</td>
+        <td>${escapeHtml(row.verified_by || '-')}</td>
       </tr>
     `).join('');
   }
@@ -8247,7 +8406,7 @@
   }
 
   function parseAutoWdRowsFromInput(raw) {
-    const parsed = parseAutoWdCsvText(raw);
+    const parsed = parseAutoWdText(raw);
     autoWdRows = parsed.records;
     sortAutoWdRows();
     renderAutoWdPreview(autoWdRows, parsed);
