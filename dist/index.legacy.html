@@ -8215,13 +8215,25 @@
       .join('\n');
   }
 
+  function isValidAutoWdMemberName(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (/^\d+@\d+$/i.test(text)) return false;
+    if (/^\d{8,}$/.test(text.replace(/\D/g, ''))) return false;
+    if (/^62[-\d\s]+$/i.test(text)) return false;
+    if (/^(normal|qris im|onlinebanking|dana|gopay|linkaja|ovo|bni|bri|bca|mandiri|seab|system)$/i.test(text)) return false;
+    return true;
+  }
+
   function createAutoWdRecord({ login, applicationTime, amount, status, verifiedBy, namaRekening }) {
     const amountUnit = parseAutoWdAmount(amount);
     if (!login || !Number.isFinite(amountUnit)) return null;
+    const loginText = String(login).trim().toUpperCase();
+    const memberNameText = String(namaRekening || '').trim();
     const autoWdAmount = -((amountUnit * 1000) + FIXED_AUTOWD_FEE);
     return {
-      login_id: String(login).trim().toUpperCase(),
-      nama_rekening: String(namaRekening || '').trim() || '-',
+      login_id: loginText,
+      nama_rekening: isValidAutoWdMemberName(memberNameText) ? memberNameText : loginText,
       application_time: String(applicationTime || '').trim(),
       amount: amountUnit,
       amount_text: String(amount || '').trim() || formatAutoWdAmountUnit(amountUnit),
@@ -8268,15 +8280,8 @@
 
   function findAutoWdMemberName(lines, memberIndex, fallbackLogin) {
     const memberName = memberIndex >= 0 ? lines[memberIndex + 2] : '';
-    return String(memberName || fallbackLogin || '').trim();
-  }
-
-  function findAutoWdAccountName(lines, index, memberName) {
-    const statusRelativeIndex = 6;
-    const afterStatus = lines.slice(index + statusRelativeIndex + 1, Math.min(lines.length, index + 28));
-    const bookingDateIndex = afterStatus.findIndex(line => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(line));
-    const accountName = bookingDateIndex >= 0 ? afterStatus[bookingDateIndex + 1] : '';
-    return String(accountName || memberName || '').trim();
+    const cleanName = String(memberName || '').trim();
+    return isValidAutoWdMemberName(cleanName) ? cleanName : String(fallbackLogin || '').trim();
   }
 
   function parseAutoWdBoChunk(chunk) {
@@ -8390,8 +8395,7 @@
         result.skippedRows++;
         return;
       }
-      const memberName = findAutoWdMemberName(lines, memberIndex, login);
-      const namaRekening = findAutoWdAccountName(lines, index, memberName);
+      const namaRekening = findAutoWdMemberName(lines, memberIndex, login);
 
       const record = createAutoWdRecord({
         login,
@@ -8441,7 +8445,7 @@
 
     const headers = rows[0].map(normalizeAutoWdHeader);
     const loginIndex = findAutoWdHeaderIndex(headers, ['Login ID', 'LoginID', 'User ID']);
-    const memberNameIndex = findAutoWdHeaderIndex(headers, ['Member Acct Name', 'Member Account Name', 'Member Name', 'Nama Rekening', 'Account Name']);
+    const memberNameIndex = findAutoWdHeaderIndex(headers, ['Member Name']);
     const timeIndex = findAutoWdHeaderIndex(headers, ['Application Time (GMT+8)', 'Application Time', 'Apply Time']);
     let amountIndex = findAutoWdHeaderIndex(headers, ['Amount', 'Withdraw Amount', 'Nominal']);
     const statusIndex = findAutoWdHeaderIndex(headers, ['Status']);
