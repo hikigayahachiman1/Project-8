@@ -8170,6 +8170,16 @@
     return /^(approved|rejected|reject|pending)$/i.test(String(line || '').trim());
   }
 
+  function isValidAutoWdLoginId(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (/^MAGNUM188/i.test(text)) return false;
+    if (/^\d+@\d+$/i.test(text)) return false;
+    if (/^\d+$/.test(text)) return false;
+    if (/^NORMAL$/i.test(text)) return false;
+    return true;
+  }
+
   function findAutoWdVerifiedBy(lines, statusIndex) {
     const afterStatus = lines.slice(Math.max(statusIndex + 1, 0));
     const operatorLine = [...afterStatus].reverse().find(line => /^op\d+@g\d+$/i.test(line));
@@ -8234,33 +8244,68 @@
       errors: []
     };
 
-    const groupIndexes = [];
+    const rawJoined = lines.join('\n');
+    const looksLikeWithdrawReport = /trans\.\s*type/i.test(rawJoined)
+      && /withdraw/i.test(rawJoined)
+      && /qris\s*im/i.test(rawJoined);
+
+    const applicationTimeIndexes = [];
     lines.forEach((line, index) => {
-      if (/^MAGNUM188\s*\(G156\)$/i.test(line)) groupIndexes.push(index);
+      if (looksLikeBoDateTime(line)) applicationTimeIndexes.push(index);
     });
 
-    if (groupIndexes.length === 0) {
+    if (!looksLikeWithdrawReport || applicationTimeIndexes.length === 0) {
       result.errors.push('Header Amount/Login ID/Status tidak ditemukan. Pastikan file report withdraw benar.');
       return result;
     }
 
-    groupIndexes.forEach((startIndex, position) => {
-      const endIndex = groupIndexes[position + 1] || lines.length;
-      const chunk = lines.slice(startIndex, endIndex);
-      const row = parseAutoWdBoChunk(chunk);
-      if (!row) {
+    applicationTimeIndexes.forEach(index => {
+      const payment = lines[index + 1] || '';
+      const paymentMethod = lines[index + 2] || '';
+      const currency = lines[index + 3] || '';
+      const amount = lines[index + 4] || '';
+      const status = lines[index + 6] || '';
+
+      if (!/qris\s*im/i.test(payment)) return;
+      if (!paymentMethod) return;
+      if (!/^idr$/i.test(currency)) return;
+      if (!Number.isFinite(parseAutoWdAmount(amount))) {
+        result.skippedRows++;
+        return;
+      }
+      if (!looksLikeBoStatus(status)) {
         result.skippedRows++;
         return;
       }
 
       result.totalRows++;
-      if (String(row.status).trim().toLowerCase() !== 'approved') {
+      if (String(status).trim().toLowerCase() !== 'approved') {
         result.skippedRows++;
         return;
       }
       result.approvedRows++;
 
-      const record = createAutoWdRecord(row);
+      let memberIndex = -1;
+      for (let cursor = index - 1; cursor >= Math.max(0, index - 18); cursor--) {
+        if (looksLikeBoMemberId(lines[cursor]) && isValidAutoWdLoginId(lines[cursor + 1])) {
+          memberIndex = cursor;
+          break;
+        }
+      }
+
+      const login = memberIndex >= 0 ? lines[memberIndex + 1] : '';
+      if (!isValidAutoWdLoginId(login)) {
+        result.skippedRows++;
+        return;
+      }
+
+      const record = createAutoWdRecord({
+        login,
+        applicationTime: lines[index],
+        amount,
+        status,
+        verifiedBy: findAutoWdVerifiedBy(lines.slice(index, Math.min(lines.length, index + 28)), 6)
+      });
       if (!record) {
         result.skippedRows++;
         return;
