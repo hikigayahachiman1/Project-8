@@ -8120,6 +8120,12 @@
     return rounded.toLocaleString('id-ID');
   }
 
+  function formatAutoWdCopyNumber(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '';
+    return Number.isInteger(num) ? String(num) : String(num).replace(/\.0+$/, '');
+  }
+
   function parseAutoWdDate(value) {
     const parsed = parseDate(value);
     if (parsed && parsed.getTime && parsed.getTime() !== 0) return parsed;
@@ -8161,9 +8167,9 @@
       line.push(
         row.login_id,
         row.nama_rekening || '-',
-        row.amount_text || formatAutoWdAmountUnit(row.amount),
-        formatAutoWdAmount(row.fee_fixed),
-        formatAutoWdAmount(row.autowd_amount)
+        formatAutoWdCopyNumber(row.amount),
+        formatAutoWdCopyNumber(row.fee_fixed),
+        formatAutoWdCopyNumber(row.autowd_amount)
       );
       outputRows.push(line.join(separator));
     });
@@ -8197,9 +8203,9 @@
       line.push(
         row.login_id,
         row.nama_rekening || '-',
-        row.amount_text || formatAutoWdAmountUnit(row.amount),
-        formatAutoWdAmount(row.fee_fixed),
-        formatAutoWdAmount(row.autowd_amount)
+        formatAutoWdCopyNumber(row.amount),
+        formatAutoWdCopyNumber(row.fee_fixed),
+        formatAutoWdCopyNumber(row.autowd_amount)
       );
       csvRows.push(line);
     });
