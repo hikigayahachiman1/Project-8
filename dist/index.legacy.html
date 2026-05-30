@@ -2734,12 +2734,21 @@
           </div>
           <div class="bonus-copy" id="bonusCopyActions">
             <button id="bonusCopyAllBtn" class="success">Copy Login ID + Bonus</button>
+            <select id="adjustmentBatchMode" class="bonus-date" title="Mode export adjustment JSON">
+              <option value="DRY_RUN" selected>DRY_RUN</option>
+              <option value="REAL_CREATE">REAL_CREATE</option>
+            </select>
+            <button id="bonusExportAdjustmentJsonBtn" class="primary">Export Batch Adjustment JSON</button>
             <button id="bonusMarkDoneBtn" class="danger">🚨 Tandai Semua Sudah Dibonuskan</button>
             <button id="bonusClearDoneBtn" class="ghost">Hapus Cache Lokal Tanggal Ini</button>
           </div>
           <div class="source-note" id="bonusDoneInfo">Data sudah bonus tanggal ini: 0 ID (database pusat + Adjustment + lokal)</div>
           <div id="bonusLockWarning" class="lock-warning" style="display:none;"></div>
           <div id="bonusPendingTimer" class="pending-timer" style="display:none;"></div>
+          <div id="adjustmentBatchPreview" class="source-note" style="display:none;"></div>
+          <div id="adjustmentBatchDownloadActions" class="bonus-actions" style="display:none;">
+            <button id="adjustmentBatchDownloadBtn" class="success">Download JSON</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -3201,6 +3210,8 @@
   let autoWdLastStats = null;
   const FIXED_AUTOWD_FEE = 2500;
   let bonusRows = [];
+  let adjustmentBatchPayload = null;
+  let adjustmentBatchWarnings = [];
   let auditDoubleTicketRows = [];
   let auditDepositRows = [];
   let bonusRemark = '';
@@ -6622,6 +6633,7 @@
       stats.style.display = 'none';
       actions.style.display = 'flex';
       desc.textContent = 'Tidak ada output bonus untuk tanggal dan data yang diproses.';
+      resetAdjustmentBatchPreview();
       renderBonusDoneInfo();
       return;
     }
@@ -6681,6 +6693,7 @@
       showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
       return;
     }
+    resetAdjustmentBatchPreview();
 
     const processBtn = document.getElementById('bonusProcessBtn');
     setButtonLoading(processBtn, true, 'Memproses...');
@@ -6942,6 +6955,7 @@
     document.getElementById('bonusTable').innerHTML = '<tr><td colspan="9" class="empty">Belum ada data bonus untuk ditampilkan</td></tr>';
     document.getElementById('bonusStats').style.display = 'none';
     document.getElementById('bonusCopyActions').style.display = 'flex';
+    resetAdjustmentBatchPreview();
     hideBonusLockWarning();
     stopBonusPendingTimer();
     updateBonusSourceNote();
@@ -6962,6 +6976,197 @@
   function bonusCopyAll() {
     const text = bonusRows.map(row => bonusRowText(row)).join('\n');
     copyToClipboard(text, 'Login ID dan bonus');
+  }
+
+  function bonusDisplayLongDate(value) {
+    const [year, month, day] = String(value || '').split('-');
+    const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    const monthIndex = parseInt(month, 10) - 1;
+    if (!year || !month || !day || !months[monthIndex]) return String(value || '').trim();
+    return `${parseInt(day, 10)} ${months[monthIndex]} ${year}`;
+  }
+
+  function adjustmentBatchCompactDate(dateValue) {
+    return String(dateValue || '').replace(/-/g, '');
+  }
+
+  function adjustmentBatchFilenameStamp(date = new Date()) {
+    const pad = value => String(value).padStart(2, '0');
+    return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+  }
+
+  function resetAdjustmentBatchPreview() {
+    adjustmentBatchPayload = null;
+    adjustmentBatchWarnings = [];
+    const preview = document.getElementById('adjustmentBatchPreview');
+    const actions = document.getElementById('adjustmentBatchDownloadActions');
+    if (preview) {
+      preview.style.display = 'none';
+      preview.innerHTML = '';
+    }
+    if (actions) actions.style.display = 'none';
+  }
+
+  function validateAdjustmentBatchItems(rows, dateValue) {
+    const items = [];
+    const skipped = [];
+    const warnings = [];
+    const loginSeen = new Set();
+    const transSeen = new Set();
+    const compactDate = adjustmentBatchCompactDate(dateValue);
+    const note = `Bonus Harian ${bonusDisplayLongDate(dateValue)}`;
+
+    (rows || []).forEach((row, index) => {
+      const loginId = String(row.loginId || row.login_key || row.login_id || '').trim();
+      const amountBo = Number(row.bonus || row.bonus_amount || 0);
+      const amountRaw = Math.round(amountBo * 1000);
+      const baseSkipped = {
+        index: index + 1,
+        login_id: loginId || '',
+        reason: ''
+      };
+
+      if (!loginId) {
+        skipped.push({ ...baseSkipped, reason: 'LOGIN_ID_EMPTY' });
+        return;
+      }
+      if (!Number.isFinite(amountRaw) || amountRaw <= 0) {
+        skipped.push({ ...baseSkipped, reason: 'AMOUNT_RAW_INVALID' });
+        return;
+      }
+      if (!Number.isFinite(amountBo) || amountBo <= 0) {
+        skipped.push({ ...baseSkipped, reason: 'AMOUNT_BO_INVALID' });
+        return;
+      }
+
+      const loginKey = loginId.toUpperCase();
+      if (loginSeen.has(loginKey)) {
+        const reason = `Duplicate login_id dilewati: ${loginId}`;
+        warnings.push(reason);
+        skipped.push({ ...baseSkipped, reason: 'LOGIN_ID_DUPLICATE' });
+        return;
+      }
+
+      const transNo = `BH-${compactDate}-${loginId}`;
+      if (transSeen.has(transNo)) {
+        const reason = `Duplicate trans_no dilewati: ${transNo}`;
+        warnings.push(reason);
+        skipped.push({ ...baseSkipped, reason: 'TRANS_NO_DUPLICATE' });
+        return;
+      }
+
+      loginSeen.add(loginKey);
+      transSeen.add(transNo);
+      items.push({
+        login_id: loginId,
+        amount_raw: amountRaw,
+        amount_bo: amountBo,
+        bonus_date: dateValue,
+        bonus_type: 'BONUS_HARIAN',
+        trans_no: transNo,
+        note
+      });
+    });
+
+    return { items, skipped, warnings };
+  }
+
+  function buildAdjustmentBatchJson() {
+    const dateValue = document.getElementById('bonusDate').value;
+    const selectedMode = document.getElementById('adjustmentBatchMode')?.value || 'DRY_RUN';
+    const mode = selectedMode === 'REAL_CREATE' ? 'REAL_CREATE' : 'DRY_RUN';
+    const { items, skipped, warnings } = validateAdjustmentBatchItems(bonusRows, dateValue);
+    adjustmentBatchWarnings = warnings;
+    const totalAmountRaw = items.reduce((sum, item) => sum + item.amount_raw, 0);
+    const totalAmountBo = items.reduce((sum, item) => sum + item.amount_bo, 0);
+    const compactDate = adjustmentBatchCompactDate(dateValue);
+
+    return {
+      batch_code: `BH-${compactDate}-001`,
+      mode,
+      created_at: new Date().toISOString(),
+      source: 'parser-qris-webtools',
+      summary: {
+        total_items: items.length,
+        total_amount_raw: totalAmountRaw,
+        total_amount_bo: totalAmountBo,
+        skipped_items: skipped.length
+      },
+      items,
+      skipped
+    };
+  }
+
+  function renderAdjustmentBatchPreview(payload) {
+    const preview = document.getElementById('adjustmentBatchPreview');
+    const actions = document.getElementById('adjustmentBatchDownloadActions');
+    if (!preview || !actions) return;
+
+    const loginList = payload.items.map(item => escapeHtml(item.login_id)).join(', ') || '-';
+    const warningList = adjustmentBatchWarnings.map(warning => `<li>${escapeHtml(warning)}</li>`).join('');
+    const skippedList = (payload.skipped || []).slice(0, 10).map(item =>
+      `<li>${escapeHtml(item.login_id || '-')} - ${escapeHtml(item.reason || '-')}</li>`
+    ).join('');
+
+    preview.innerHTML = `
+      <strong>Preview Batch Adjustment JSON</strong><br>
+      Mode: <strong>${escapeHtml(payload.mode)}</strong><br>
+      Batch Code: <strong>${escapeHtml(payload.batch_code)}</strong><br>
+      Total item valid: <strong>${payload.summary.total_items}</strong><br>
+      Total amount_raw: <strong>${payload.summary.total_amount_raw}</strong><br>
+      Total amount_bo: <strong>${payload.summary.total_amount_bo}</strong><br>
+      Skipped: <strong>${payload.summary.skipped_items}</strong><br>
+      Login ID: ${loginList}
+      ${warningList ? `<div style="margin-top:8px;color:#ffe0a3;"><strong>Warning:</strong><ul>${warningList}</ul></div>` : ''}
+      ${skippedList ? `<details style="margin-top:8px;"><summary>Item diskip</summary><ul>${skippedList}</ul></details>` : ''}
+    `;
+    preview.style.display = 'block';
+    actions.style.display = payload.items.length ? 'flex' : 'none';
+  }
+
+  function previewAdjustmentBatchJson() {
+    const dateValue = document.getElementById('bonusDate').value;
+    if (!dateValue) {
+      showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
+      return;
+    }
+    if (!bonusRows.length) {
+      showToast('Tidak ada data bonus harian yang bisa diexport.', 'error');
+      resetAdjustmentBatchPreview();
+      return;
+    }
+
+    adjustmentBatchPayload = buildAdjustmentBatchJson();
+    renderAdjustmentBatchPreview(adjustmentBatchPayload);
+    if (!adjustmentBatchPayload.items.length) {
+      showToast('Tidak ada item valid untuk export JSON.', 'error');
+      return;
+    }
+    if (adjustmentBatchWarnings.length || adjustmentBatchPayload.skipped.length) {
+      showToast(`Preview JSON siap: ${adjustmentBatchPayload.items.length} valid, ${adjustmentBatchPayload.skipped.length} diskip.`, 'error');
+    } else {
+      showToast(`Preview JSON siap: ${adjustmentBatchPayload.items.length} item valid.`, 'success');
+    }
+  }
+
+  function downloadAdjustmentBatchJson() {
+    if (!adjustmentBatchPayload || !adjustmentBatchPayload.items || !adjustmentBatchPayload.items.length) {
+      previewAdjustmentBatchJson();
+      if (!adjustmentBatchPayload || !adjustmentBatchPayload.items || !adjustmentBatchPayload.items.length) return;
+    }
+
+    const blob = new Blob([JSON.stringify(adjustmentBatchPayload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const compactDate = adjustmentBatchCompactDate(adjustmentBatchPayload.items[0]?.bonus_date || document.getElementById('bonusDate').value);
+    const timePart = adjustmentBatchFilenameStamp().split('-')[1];
+    link.href = url;
+    link.download = `batch-adjustment-BH-${compactDate}-${timePart}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast('File JSON batch adjustment berhasil dibuat.', 'success');
   }
 
   let adjustmentSyncDebounce = null;
@@ -7627,6 +7832,11 @@
   document.getElementById('bonusProcessBtn').addEventListener('click', bonusProcess);
   document.getElementById('bonusResetBtn').addEventListener('click', bonusReset);
   document.getElementById('bonusCopyAllBtn').addEventListener('click', bonusCopyAll);
+  document.getElementById('bonusExportAdjustmentJsonBtn').addEventListener('click', previewAdjustmentBatchJson);
+  document.getElementById('adjustmentBatchDownloadBtn').addEventListener('click', downloadAdjustmentBatchJson);
+  document.getElementById('adjustmentBatchMode').addEventListener('change', () => {
+    if (adjustmentBatchPayload) previewAdjustmentBatchJson();
+  });
   document.getElementById('bonusMarkDoneBtn').addEventListener('click', markBonusRowsDone);
   document.getElementById('bonusClearDoneBtn').addEventListener('click', clearBonusDoneByDate);
   document.getElementById('bonusDate').addEventListener('change', renderBonusDoneInfo);
