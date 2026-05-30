@@ -2734,9 +2734,9 @@
           </div>
           <div class="bonus-copy" id="bonusCopyActions">
             <button id="bonusCopyAllBtn" class="success">Copy Login ID + Bonus</button>
-            <select id="adjustmentBatchMode" class="bonus-date" title="Mode export adjustment JSON">
+            <select id="adjustmentBatchMode" class="bonus-date" title="Export frontend selalu DRY_RUN. REAL_CREATE hanya dari BOT_MODE local runner." disabled>
               <option value="DRY_RUN" selected>DRY_RUN</option>
-              <option value="REAL_CREATE">REAL_CREATE</option>
+              <option value="REAL_CREATE" disabled>REAL_CREATE hanya via .env runner</option>
             </select>
             <button id="bonusExportAdjustmentJsonBtn" class="primary">Export Batch Adjustment JSON</button>
             <button id="bonusMarkDoneBtn" class="danger">🚨 Tandai Semua Sudah Dibonuskan</button>
@@ -7012,7 +7012,6 @@
     const skipped = [];
     const warnings = [];
     const loginSeen = new Set();
-    const transSeen = new Set();
     const compactDate = adjustmentBatchCompactDate(dateValue);
     const note = `Bonus Harian ${bonusDisplayLongDate(dateValue)}`;
 
@@ -7047,16 +7046,9 @@
         return;
       }
 
-      const transNo = `BH-${compactDate}-${loginId}`;
-      if (transSeen.has(transNo)) {
-        const reason = `Duplicate trans_no dilewati: ${transNo}`;
-        warnings.push(reason);
-        skipped.push({ ...baseSkipped, reason: 'TRANS_NO_DUPLICATE' });
-        return;
-      }
+      const transNo = note;
 
       loginSeen.add(loginKey);
-      transSeen.add(transNo);
       items.push({
         login_id: loginId,
         amount_raw: amountRaw,
@@ -7073,8 +7065,7 @@
 
   function buildAdjustmentBatchJson() {
     const dateValue = document.getElementById('bonusDate').value;
-    const selectedMode = document.getElementById('adjustmentBatchMode')?.value || 'DRY_RUN';
-    const mode = selectedMode === 'REAL_CREATE' ? 'REAL_CREATE' : 'DRY_RUN';
+    const mode = 'DRY_RUN';
     const { items, skipped, warnings } = validateAdjustmentBatchItems(bonusRows, dateValue);
     adjustmentBatchWarnings = warnings;
     const totalAmountRaw = items.reduce((sum, item) => sum + item.amount_raw, 0);
