@@ -2915,6 +2915,7 @@
         <section class="card">
           <div class="card-title">Hasil Audit Mistake Adjustment</div>
           <div class="card-desc" id="auditDesc">Hasil audit akan muncul di sini setelah Adjustment History diproses.</div>
+          <div id="auditDebugInfo" class="source-note" style="display:none;"></div>
           <div class="stats" id="auditStats" style="display:none;">
             <div class="stat">
               <div class="stat-label">Total Mistake</div>
@@ -6181,7 +6182,7 @@
       return text;
     } catch (error) {
       setLoadingError(error.message || 'Gagal membaca file.', 1);
-      showToast(error.message || 'Gagal membaca file.', 'error');
+      showToast(/^audit/i.test(inputId) ? 'File audit tidak terbaca. Coba paste raw langsung.' : (error.message || 'Gagal membaca file.'), 'error');
       return '';
     } finally {
       hideLoading();
@@ -6323,7 +6324,25 @@
   }
 
   function isBoStatusLine(value) {
-    return /^(APPROVED|REJECT|REJECTED)$/i.test(String(value || '').trim());
+    return /^(APPROVED|REJECT|REJECTED|PENDING|CANCELLED|CANCELED)$/i.test(String(value || '').trim());
+  }
+
+  function isRawAdjustmentRecordStart(lines, index) {
+    return Boolean(
+      lines[index] &&
+      lines[index + 1] &&
+      isValidAdjustmentLoginId(lines[index + 2]) &&
+      /^\d+@\d+$/i.test(String(lines[index + 3] || '').trim()) &&
+      /^\d{4,}$/.test(String(lines[index + 4] || '').trim()) &&
+      /^IDR$/i.test(String(lines[index + 5] || '').trim())
+    );
+  }
+
+  function findNextRawAdjustmentRecordStart(lines, fromIndex) {
+    for (let index = Math.max(0, fromIndex); index < lines.length - 6; index++) {
+      if (isRawAdjustmentRecordStart(lines, index)) return index;
+    }
+    return lines.length;
   }
 
   function firstValue(row, fields) {
@@ -6366,6 +6385,68 @@
     }
 
     const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const anchoredRecords = [];
+
+    for (let start = 0; start < lines.length - 12; start++) {
+      if (!isRawAdjustmentRecordStart(lines, start)) continue;
+
+      const nextStart = findNextRawAdjustmentRecordStart(lines, start + 1);
+      const recordEnd = Math.min(nextStart, lines.length);
+      const searchEnd = Math.min(recordEnd, start + 40);
+      let statusIndex = -1;
+
+      for (let cursor = start + 10; cursor < searchEnd; cursor++) {
+        if (isBoStatusLine(lines[cursor])) {
+          statusIndex = cursor;
+          break;
+        }
+      }
+      if (statusIndex === -1) continue;
+
+      const tail = lines.slice(statusIndex + 1, searchEnd);
+      const dateOffsets = [];
+      tail.forEach((line, offset) => {
+        if (isBoDateLine(line)) dateOffsets.push(offset);
+      });
+
+      const firstDateOffset = dateOffsets[0] ?? -1;
+      const secondDateOffset = dateOffsets[1] ?? -1;
+      const preDateTail = firstDateOffset === -1 ? tail : tail.slice(0, firstDateOffset);
+      const remark = preDateTail.join(' ').trim() || lines.slice(start + 10, statusIndex).join(' ').trim();
+      const dateCreated = firstDateOffset !== -1 ? tail[firstDateOffset] : '';
+      const createdBy = firstDateOffset !== -1 && tail[firstDateOffset + 1] && !isBoDateLine(tail[firstDateOffset + 1])
+        ? tail[firstDateOffset + 1]
+        : '';
+      const approvedTime = secondDateOffset !== -1 ? tail[secondDateOffset] : '';
+      const approvedBy = secondDateOffset !== -1 && tail[secondDateOffset + 1] && !isBoDateLine(tail[secondDateOffset + 1])
+        ? tail[secondDateOffset + 1]
+        : '';
+      const transactionNumber = lines.slice(start + 10, statusIndex).join(' ').trim();
+      const adjustedDateTime = adjustmentDateTimeGmt8ToWib(approvedTime || dateCreated);
+
+      anchoredRecords.push({
+        login_id: lines[start + 2],
+        login_key: normalizeLoginId(lines[start + 2]),
+        member_id: lines[start + 3] || '',
+        adjustment_id: lines[start + 4] || '',
+        adjustment_amount: lines[start + 8] || '',
+        status: lines[statusIndex] || '',
+        transaction_number: transactionNumber,
+        remark,
+        date_created: dateCreated,
+        created_by: createdBy,
+        approved_time: approvedTime,
+        approved_by: approvedBy,
+        adjusted_bonus_datetime_wib: adjustedDateTime,
+        adjusted_bonus_date: dateInputFromDate(adjustedDateTime),
+        raw_record: lines.slice(start, recordEnd).join('\n')
+      });
+
+      start = nextStart - 1;
+    }
+
+    if (anchoredRecords.length > 0) return anchoredRecords;
+
     const records = [];
 
     for (let i = 0; i < lines.length; i++) {
@@ -6509,7 +6590,11 @@
   }
 
   function isBonusHarianAdjustmentText(text) {
-    return /BONUS\s*HARIAN\b/i.test(String(text || ''));
+    const value = normalizeText(text);
+    if (/LUCKY\s*SPIN|LUCKYSPIN|KLAIM\s*FREESPIN|FREE\s*SPIN|FREESPIN|KLAIM\s*\d*\s*SCATTER|SCATTER|BUY\s*SPIN|BUYSPIN|SUPER\s*SCATTER|PRAGMATIC|MAHJONG|JP|JACKPOT/.test(value)) {
+      return false;
+    }
+    return /BONUS\s*HARIAN\b|BH[-\s]/i.test(String(text || ''));
   }
 
   function rowFromApprovedBonusHarianRecord(record) {
@@ -7486,14 +7571,39 @@
     return targetDates.includes(bonusGmt7Date(dateText));
   }
 
-  function makeAuditRecord(row, fallbackIndex, targetDates, allDates) {
-    const dateText = row['Approved Time'] || row['Date Created'] || '';
-    const parsedDate = parseDate(dateText);
-    if (!auditDateAllowed(dateText, targetDates, allDates)) return null;
+  function auditDateTextFromBonusRemark(text) {
+    const value = normalizeText(text);
+    const monthMap = {
+      JAN: 1, JANUARI: 1, JANUARY: 1,
+      FEB: 2, FEBRUARI: 2, FEBRUARY: 2,
+      MAR: 3, MARET: 3, MARCH: 3,
+      APR: 4, APRIL: 4,
+      MEI: 5, MAY: 5,
+      JUN: 6, JUNI: 6, JUNE: 6,
+      JUL: 7, JULI: 7, JULY: 7,
+      AGS: 8, AGUSTUS: 8, AUG: 8, AUGUST: 8,
+      SEP: 9, SEPT: 9, SEPTEMBER: 9,
+      OKT: 10, OCT: 10, OKTOBER: 10, OCTOBER: 10,
+      NOV: 11, NOVEMBER: 11,
+      DES: 12, DEC: 12, DESEMBER: 12, DECEMBER: 12
+    };
+    const compact = value.match(/\b(20\d{2})(\d{2})(\d{2})\b/);
+    if (compact) return `${compact[2]}/${compact[3]}/${compact[1]} 00:00:00`;
+    const named = value.match(/\b(\d{1,2})\s+([A-Z]+)\s+(20\d{2})\b/);
+    if (named && monthMap[named[2]]) {
+      return `${String(monthMap[named[2]]).padStart(2, '0')}/${String(named[1]).padStart(2, '0')}/${named[3]} 00:00:00`;
+    }
+    return '';
+  }
 
+  function makeAuditRecord(row, fallbackIndex, targetDates, allDates) {
     const transactionNumber = row['Transaction Number'] || '';
     const remark = row['Remark'] || '';
     const combinedText = `${transactionNumber} ${remark}`.trim();
+    const dateText = row['Approved Time'] || row['Date Created'] || auditDateTextFromBonusRemark(combinedText);
+    const parsedDate = parseDate(dateText);
+    if (!auditDateAllowed(dateText, targetDates, allDates)) return null;
+
     const status = row['Status'] || '';
     const amount = getSignedAmount(row);
     const tickets = extractTicketNumbers(combinedText);
@@ -7524,11 +7634,51 @@
     };
   }
 
+  function makeAuditRecordFromParsedAdjustment(record, targetDates, allDates) {
+    const dateText = record.approved_time || record.date_created || auditDateTextFromBonusRemark(`${record.transaction_number || ''} ${record.remark || ''}`);
+    const parsedDate = parseDate(dateText);
+    if (!auditDateAllowed(dateText, targetDates, allDates)) return null;
+
+    const transactionNumber = record.transaction_number || '';
+    const remark = record.remark || '';
+    const combinedText = `${transactionNumber} ${remark}`.trim();
+    const status = record.status || '';
+    const amount = parseNumber(record.adjustment_amount || 0);
+    const bonusType = getBonusType(combinedText);
+
+    return {
+      loginId: normalizeLoginId(record.login_id || record.login_key),
+      adjustmentId: String(record.adjustment_id || '').trim(),
+      status,
+      isApproved: isApprovedStatus(status),
+      isRejected: isRejectedStatus(status),
+      amount,
+      absAmount: Math.abs(amount),
+      transactionNumber,
+      remark,
+      combinedText,
+      dateText,
+      auditDate: parsedDate.getTime() !== 0 ? bonusGmt7Date(dateText) : (record.adjusted_bonus_date || ''),
+      timestamp: parsedDate.getTime(),
+      tickets: extractTicketNumbers(combinedText),
+      bonusType,
+      isPositive: isPositiveAdjustment(amount),
+      isNegative: isNegativeAdjustment(amount) || (bonusType === 'BONUS_HARIAN' && isCorrectionRemark(combinedText)),
+      isCorrection: isCorrectionRemark(combinedText),
+      isSalahId: isSalahIdRemark(combinedText),
+      corrected: false,
+      correctedPair: false,
+      correctsAdjustmentId: ''
+    };
+  }
+
   function parseAuditAdjustmentRecords(raw, targetDates, allDates) {
-    if (looksLikeCsv(raw)) {
-      return csvRecords(raw)
-        .map((row, index) => makeAuditRecord(row, index + 1, targetDates, allDates))
-        .filter(row => row && (row.isApproved || row.isRejected));
+    const parsedAdjustmentRecords = parseAdjustmentBoRecords(raw)
+      .map(record => makeAuditRecordFromParsedAdjustment(record, targetDates, allDates))
+      .filter(row => row && (row.isApproved || row.isRejected));
+
+    if (parsedAdjustmentRecords.length > 0) {
+      return parsedAdjustmentRecords;
     }
 
     const lines = String(raw || '').split('\n').map(line => line.trim()).filter(Boolean);
@@ -7646,36 +7796,43 @@
   function findBonusHarianMistakes(records) {
     const groups = {};
     records
-      .filter(row => row.bonusType === 'BONUS_HARIAN')
+      .filter(row => row.bonusType === 'BONUS_HARIAN' && row.isApproved)
       .forEach(row => {
         if (!row.loginId) return;
         const dateKey = row.auditDate || (row.dateText ? bonusGmt7Date(row.dateText) : '');
         if (!dateKey) return;
         const key = `${row.loginId}|${dateKey}`;
-        if (!groups[key]) groups[key] = { loginId: row.loginId, auditDate: dateKey, positives: [], negatives: [] };
-        if (row.isApproved && row.isPositive && !row.corrected) groups[key].positives.push(row);
-        if (row.isApproved && row.isNegative && !row.correctedPair) groups[key].negatives.push(row);
+        if (!groups[key]) groups[key] = { loginId: row.loginId, auditDate: dateKey, rows: [], positives: [], negatives: [] };
+        groups[key].rows.push(row);
+        if (row.isPositive) groups[key].positives.push(row);
+        if (row.isNegative) groups[key].negatives.push(row);
       });
 
     return Object.values(groups).flatMap(group => {
-      if (group.positives.length <= 1) return [];
+      if (!group.positives.length) return [];
       const totalPositive = group.positives.reduce((sum, row) => sum + row.amount, 0);
-      const totalNegative = group.negatives.reduce((sum, row) => sum + Math.abs(row.amount), 0);
-      const netAmount = totalPositive - totalNegative;
+      const totalNegative = group.negatives.reduce((sum, row) => sum + (row.amount < 0 ? row.amount : -Math.abs(row.amount)), 0);
+      const netAmount = totalPositive + totalNegative;
       const expectedFromDeposit = getExpectedDailyBonusFromDeposit(group.loginId, group.auditDate);
       const expectedAmount = expectedFromDeposit !== null
         ? expectedFromDeposit
         : getFallbackExpectedBonusFromHarianRows(group.positives);
-      if (!(netAmount > expectedAmount)) return [];
+      const mismatch = Math.abs(netAmount - expectedAmount) > 0.001;
+      if (!mismatch) return [];
+      const mistakeType = expectedFromDeposit !== null
+        ? 'NOMINAL_BONUS_TIDAK_SESUAI'
+        : 'DOUBLE_BONUS_HARIAN';
       return [buildMistakeRow({
-        mistakeType: 'DOUBLE_BONUS_HARIAN',
+        mistakeType,
         loginId: group.loginId,
         ticket: '-',
         bonusType: 'BONUS_HARIAN',
-        records: group.positives,
+        records: group.rows,
         totalApproved: netAmount,
         expectedAmount,
-        explanation: `Bonus harian approved masuk ${group.positives.length} kali. Reject tidak dihitung sebagai bonus masuk. Net approved ${netAmount}, estimasi seharusnya ${expectedAmount}.`
+        explanation: expectedFromDeposit !== null
+          ? `Bonus harian net approved ${netAmount}, seharusnya ${expectedAmount} berdasarkan deposit audit.`
+          : `Bonus harian approved masuk ${group.positives.length} kali. Reject tidak dihitung sebagai bonus masuk. Net approved ${netAmount}, estimasi seharusnya ${expectedAmount}.`
       })];
     });
   }
@@ -7686,17 +7843,51 @@
 
     const ticketMistakes = findDoubleTicketMistakes(records);
     const harianMistakes = findBonusHarianMistakes(records);
+    const approvedBonusHarian = records.filter(row => row.isApproved && row.bonusType === 'BONUS_HARIAN' && row.isPositive).length;
+    const rejectedIgnored = records.filter(row => row.isRejected).length;
+    const correctionCount = records.filter(row => row.isApproved && row.bonusType === 'BONUS_HARIAN' && (row.isNegative || row.isCorrection)).length;
+    const nonHarianIgnored = records.filter(row => row.isApproved && row.bonusType !== 'BONUS_HARIAN').length;
 
     return {
       mistakes: [...ticketMistakes, ...harianMistakes],
-      correctedCount: records.filter(row => row.corrected || row.correctedPair).length
+      correctedCount: records.filter(row => row.corrected || row.correctedPair).length,
+      debug: {
+        parsedAdjustmentRecords: records.length,
+        approvedBonusHarian,
+        rejectedIgnored,
+        correctionCount,
+        nonHarianIgnored,
+        parsedDepositAuditRows: auditDepositRows.length,
+        mistakeFound: ticketMistakes.length + harianMistakes.length
+      }
     };
+  }
+
+  function renderAuditDebugInfo(debug) {
+    const box = document.getElementById('auditDebugInfo');
+    if (!box) return;
+    if (!debug) {
+      box.style.display = 'none';
+      box.textContent = '';
+      return;
+    }
+    box.innerHTML = `
+      Parsed Adjustment Records: <strong>${debug.parsedAdjustmentRecords || 0}</strong> |
+      Approved Bonus Harian: <strong>${debug.approvedBonusHarian || 0}</strong> |
+      Rejected Ignored: <strong>${debug.rejectedIgnored || 0}</strong> |
+      Koreksi/Tarik Kembali: <strong>${debug.correctionCount || 0}</strong> |
+      Bonus Non-Harian Ignored: <strong>${debug.nonHarianIgnored || 0}</strong> |
+      Parsed Deposit Audit Rows: <strong>${debug.parsedDepositAuditRows || 0}</strong> |
+      Mistake Found: <strong>${debug.mistakeFound || 0}</strong>
+    `;
+    box.style.display = 'block';
   }
 
   function renderAuditDoubleTicketRows() {
     const table = document.getElementById('auditDoubleTicketTable');
     const stats = document.getElementById('auditStats');
     const desc = document.getElementById('auditDesc');
+    renderAuditDebugInfo(renderAuditDoubleTicketRows.debug || null);
 
     if (auditDoubleTicketRows.length === 0) {
       table.innerHTML = '<tr><td colspan="12" class="empty">Tidak ditemukan mistake adjustment pada data audit ini.</td></tr>';
@@ -7789,6 +7980,7 @@
     updateLoading('Menghitung selisih mistake...', 4, 3);
     auditDoubleTicketRows = result.mistakes;
     renderAuditDoubleTicketRows.correctedCount = result.correctedCount;
+    renderAuditDoubleTicketRows.debug = result.debug;
     updateLoading('Menyiapkan tabel audit...', 5, 4);
     renderAuditDoubleTicketRows();
     showToast(
@@ -7811,11 +8003,13 @@
     auditDoubleTicketRows = [];
     auditDepositRows = [];
     renderAuditDoubleTicketRows.correctedCount = 0;
+    renderAuditDoubleTicketRows.debug = null;
     document.getElementById('auditAdjustRaw').value = '';
     document.getElementById('auditAdjustFile').value = '';
     document.getElementById('auditDepositRaw').value = '';
     document.getElementById('auditDepositFile').value = '';
     document.getElementById('auditDesc').textContent = 'Hasil audit akan muncul di sini setelah Adjustment History diproses.';
+    renderAuditDebugInfo(null);
     document.getElementById('auditDoubleTicketTable').innerHTML = '<tr><td colspan="12" class="empty">Belum ada data audit untuk ditampilkan</td></tr>';
     document.getElementById('auditStats').style.display = 'none';
     showToast('Data audit dibersihkan.');
