@@ -3223,6 +3223,7 @@
   const OPERATOR_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
   const OPERATOR_SESSION_TOUCH_THROTTLE_MS = 60 * 1000;
   const bonusRemoteDoneCache = {};
+  const bonusRemotePendingCache = {};
   const bonusAdjustmentDoneCache = {};
   let bonusRemoteStatus = 'idle';
   let bonusPendingTimerInterval = null;
@@ -5211,14 +5212,16 @@
 
       const result = await response.json();
       const loginIds = Array.isArray(result.doneLoginIds) ? result.doneLoginIds : (Array.isArray(result.loginIds) ? result.loginIds : []);
+      const pendingIds = Array.isArray(result.ownPendingLoginIds) ? result.ownPendingLoginIds : [];
       bonusRemoteDoneCache[dateValue] = new Set(loginIds.map(login => String(login).toUpperCase()));
+      bonusRemotePendingCache[dateValue] = new Set(pendingIds.map(login => String(login).toUpperCase()));
       bonusRemoteStatus = 'online';
       return bonusRemoteDoneCache[dateValue];
     } catch (error) {
-      if (error.message === 'unauthorized') return new Set();
+      if (error.message === 'unauthorized') throw error;
       bonusRemoteStatus = 'offline';
       showToast('Database pusat tidak terhubung, memakai data lokal.', 'error');
-      return new Set();
+      throw error;
     }
   }
 
@@ -5252,6 +5255,7 @@
       const result = await response.json();
       bonusRemoteStatus = 'online';
       delete bonusRemoteDoneCache[dateValue];
+      delete bonusRemotePendingCache[dateValue];
       return result;
     } catch (error) {
       if (error.message === 'unauthorized') return { success: false, unauthorized: true };
@@ -5288,7 +5292,10 @@
       const dates = Array.isArray(result.dates)
         ? result.dates
         : [...new Set((rows || []).map(row => row.bonus_date).filter(Boolean))];
-      dates.forEach(date => delete bonusRemoteDoneCache[date]);
+      dates.forEach(date => {
+        delete bonusRemoteDoneCache[date];
+        delete bonusRemotePendingCache[date];
+      });
       return result;
     } catch (error) {
       bonusRemoteStatus = 'offline';
@@ -5298,7 +5305,7 @@
   }
 
   async function syncAdjustmentApprovedToDatabase(adjustRaw, options = {}) {
-    const rows = extractApprovedBonusHarianForDatabase(adjustRaw);
+    const rows = extractApprovedBonusHarianForDatabase(adjustRaw, options.selectedDate || options.dateValue || '');
     if (rows.length === 0) {
       if (!options.silent) showToast('Tidak ada Adjustment Approved baru untuk disinkronkan.', 'success');
       return {
@@ -5319,7 +5326,7 @@
   }
 
   async function syncAdjustmentApprovedToSupabase(dateValue, adjustRaw) {
-    return syncAdjustmentApprovedToDatabase(adjustRaw);
+    return syncAdjustmentApprovedToDatabase(adjustRaw, { selectedDate: dateValue });
   }
 
   async function finalizeRemoteBonusBatch(dateValue) {
@@ -5344,6 +5351,7 @@
 
     bonusRemoteStatus = 'online';
     delete bonusRemoteDoneCache[dateValue];
+    delete bonusRemotePendingCache[dateValue];
     return result;
   }
 
@@ -6057,14 +6065,15 @@
     const dateValue = document.getElementById('bonusDate').value;
     const localSet = dateValue ? getBonusDoneSet(dateValue) : new Set();
     const remoteSet = dateValue && bonusRemoteDoneCache[dateValue] ? bonusRemoteDoneCache[dateValue] : new Set();
+    const pendingSet = dateValue && bonusRemotePendingCache[dateValue] ? bonusRemotePendingCache[dateValue] : new Set();
     const adjustmentSet = dateValue && bonusAdjustmentDoneCache[dateValue] ? bonusAdjustmentDoneCache[dateValue] : new Set();
-    const combined = new Set([...localSet, ...remoteSet, ...adjustmentSet]);
+    const combined = new Set([...localSet, ...remoteSet, ...pendingSet, ...adjustmentSet]);
     if (bonusRemoteStatus === 'offline' || bonusRemoteStatus === 'unauthorized') {
       const localCombined = new Set([...localSet, ...adjustmentSet]);
       info.textContent = `Mode lokal: ${localCombined.size} ID (Adjustment + lokal). Database pusat tidak terhubung.`;
       return;
     }
-    info.textContent = `Data sudah bonus tanggal ini: ${combined.size} ID (database pusat + Adjustment + lokal)`;
+    info.textContent = `Data sudah bonus tanggal ini: ${combined.size} ID (database pusat DONE/PENDING + Adjustment + lokal)`;
   }
 
   function cleanCell(value) {
@@ -6283,6 +6292,62 @@
     return recordDateTimeWib >= startAt && recordDateTimeWib <= endAt;
   }
 
+  function extractBonusDateFromAdjustmentText(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return '';
+
+    const bhCode = raw.match(/\bBH[-\s]?(\d{4})(\d{2})(\d{2})\b/i);
+    if (bhCode) return `${bhCode[1]}-${bhCode[2]}-${bhCode[3]}`;
+
+    const monthMap = {
+      JAN: 1, JANUARI: 1, JANUARY: 1,
+      FEB: 2, FEBRUARI: 2, FEBRUARY: 2,
+      MAR: 3, MARET: 3, MARCH: 3,
+      APR: 4, APRIL: 4,
+      MEI: 5, MAY: 5,
+      JUN: 6, JUNI: 6, JUNE: 6,
+      JUL: 7, JULI: 7, JULY: 7,
+      AGS: 8, AGUSTUS: 8, AUG: 8, AUGUST: 8,
+      SEP: 9, SEPT: 9, SEPTEMBER: 9,
+      OKT: 10, OCT: 10, OKTOBER: 10, OCTOBER: 10,
+      NOV: 11, NOVEMBER: 11,
+      DES: 12, DEC: 12, DESEMBER: 12, DECEMBER: 12
+    };
+    const normalized = raw
+      .toUpperCase()
+      .replace(/[.,]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const namedDate = normalized.match(/\b(?:BONUS\s+HARIAN\s+)?(?:TGL\s+)?(\d{1,2})\s+([A-Z]+)\s+(\d{4})\b/);
+    if (!namedDate) return '';
+
+    const month = monthMap[namedDate[2]];
+    const day = Number(namedDate[1]);
+    const year = namedDate[3];
+    if (!month || day < 1 || day > 31) return '';
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  function finalizeAdjustmentRecordDates(record) {
+    const approvedTimeBo = String(record.approved_time || '').trim();
+    const dateCreatedBo = String(record.date_created || '').trim();
+    const approvedTimeWibDate = adjustmentDateTimeGmt8ToWib(approvedTimeBo);
+    const createdTimeWibDate = adjustmentDateTimeGmt8ToWib(dateCreatedBo);
+    const adjustedDateTime = approvedTimeWibDate || createdTimeWibDate;
+    const bonusDateFromRemark = extractBonusDateFromAdjustmentText(`${record.transaction_number || ''} ${record.remark || ''}`);
+    const finalBonusDate = bonusDateFromRemark || dateInputFromDate(adjustedDateTime);
+
+    return {
+      ...record,
+      approved_time_bo: approvedTimeBo,
+      approved_time_wib: approvedTimeWibDate ? approvedTimeWibDate.toISOString() : '',
+      bonus_date_from_remark: bonusDateFromRemark,
+      final_bonus_date: finalBonusDate,
+      adjusted_bonus_datetime_wib: adjustedDateTime,
+      adjusted_bonus_date: finalBonusDate
+    };
+  }
+
   function bonusMatchGmt7Date(dateText, targetDate) {
     return bonusGmt7Date(dateText) === targetDate;
   }
@@ -6363,8 +6428,7 @@
         const remark = String(firstValue(row, ['Remark', 'Remarks']) || '').trim();
         const approvedTime = String(firstValue(row, ['Approved Time', 'Approve Time']) || '').trim();
         const dateCreated = String(firstValue(row, ['Date Created', 'Created Time']) || '').trim();
-        const adjustedDateTime = adjustmentDateTimeGmt8ToWib(approvedTime || dateCreated);
-        return {
+        return finalizeAdjustmentRecordDates({
           login_id: loginId,
           login_key: normalizeLoginId(loginId),
           member_id: String(firstValue(row, ['Member ID', 'MemberID']) || '').trim(),
@@ -6377,10 +6441,8 @@
           created_by: String(firstValue(row, ['Create By', 'Created By']) || '').trim(),
           approved_time: approvedTime,
           approved_by: String(firstValue(row, ['Approved By', 'Approve By']) || '').trim(),
-          adjusted_bonus_datetime_wib: adjustedDateTime,
-          adjusted_bonus_date: dateInputFromDate(adjustedDateTime),
           raw_record: Object.values(row).join('\n')
-        };
+        });
       }).filter(row => isValidAdjustmentLoginId(row.login_id));
     }
 
@@ -6422,9 +6484,7 @@
         ? tail[secondDateOffset + 1]
         : '';
       const transactionNumber = lines.slice(start + 10, statusIndex).join(' ').trim();
-      const adjustedDateTime = adjustmentDateTimeGmt8ToWib(approvedTime || dateCreated);
-
-      anchoredRecords.push({
+      anchoredRecords.push(finalizeAdjustmentRecordDates({
         login_id: lines[start + 2],
         login_key: normalizeLoginId(lines[start + 2]),
         member_id: lines[start + 3] || '',
@@ -6437,10 +6497,8 @@
         created_by: createdBy,
         approved_time: approvedTime,
         approved_by: approvedBy,
-        adjusted_bonus_datetime_wib: adjustedDateTime,
-        adjusted_bonus_date: dateInputFromDate(adjustedDateTime),
         raw_record: lines.slice(start, recordEnd).join('\n')
-      });
+      }));
 
       start = nextStart - 1;
     }
@@ -6497,9 +6555,7 @@
       const approvedTime = approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '';
       const dateCreated = dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '';
 
-      const adjustedDateTime = adjustmentDateTimeGmt8ToWib(approvedTime || dateCreated);
-
-      records.push({
+      records.push(finalizeAdjustmentRecordDates({
         login_id: loginId,
         login_key: normalizeLoginId(loginId),
         member_id: lines[i - 2] || '',
@@ -6512,10 +6568,8 @@
         created_by: dateCreatedIndex !== -1 && !isBoDateLine(lines[dateCreatedIndex + 1]) ? (lines[dateCreatedIndex + 1] || '') : '',
         approved_time: approvedTime,
         approved_by: approvedTimeIndex !== -1 ? (lines[approvedTimeIndex + 1] || '') : '',
-        adjusted_bonus_datetime_wib: adjustedDateTime,
-        adjusted_bonus_date: dateInputFromDate(adjustedDateTime),
         raw_record: lines.slice(Math.max(0, i - 5), Math.min(lines.length, recordEnd + 1)).join('\n')
-      });
+      }));
 
       if (recordEnd > i) i = recordEnd;
     }
@@ -6565,9 +6619,7 @@
       const remark = lines.slice(statusIndex + 1, remarkEnd).join(' ').trim() || transactionNumber;
       const approvedTime = approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '';
       const dateCreated = dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '';
-      const adjustedDateTime = adjustmentDateTimeGmt8ToWib(approvedTime || dateCreated);
-
-      records.push({
+      records.push(finalizeAdjustmentRecordDates({
         login_id: loginId,
         login_key: normalizeLoginId(loginId),
         member_id: lines[i] || '',
@@ -6580,10 +6632,8 @@
         created_by: dateCreatedIndex !== -1 && !isBoDateLine(lines[dateCreatedIndex + 1]) ? (lines[dateCreatedIndex + 1] || '') : '',
         approved_time: approvedTime,
         approved_by: approvedTimeIndex !== -1 ? (lines[approvedTimeIndex + 1] || '') : '',
-        adjusted_bonus_datetime_wib: adjustedDateTime,
-        adjusted_bonus_date: dateInputFromDate(adjustedDateTime),
         raw_record: lines.slice(Math.max(0, i - 4), Math.min(lines.length, (approvedTimeIndex !== -1 ? approvedTimeIndex + 2 : searchEnd + 1))).join('\n')
-      });
+      }));
     }
 
     return records;
@@ -6609,7 +6659,11 @@
       remark: record.remark || record.transaction_number || 'BONUS HARIAN',
       source: 'adjustment_approved',
       adjustment_id: record.adjustment_id || '',
-      approved_time: record.approved_time || record.date_created || ''
+      approved_time: record.approved_time || record.date_created || '',
+      approved_time_bo: record.approved_time_bo || record.approved_time || '',
+      approved_time_wib: record.approved_time_wib || '',
+      bonus_date_from_remark: record.bonus_date_from_remark || '',
+      final_bonus_date: record.final_bonus_date || record.adjusted_bonus_date || ''
     };
   }
 
@@ -6628,12 +6682,25 @@
     );
   }
 
-  function extractApprovedBonusHarianForDatabase(raw) {
+  function normalizeBonusDateInput(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    if (text.includes('/')) return dateInputFromSlashDate(normalizeBonusTargetDate(text));
+    return text;
+  }
+
+  function shouldSyncApprovedBonusHarianRecord(record, selectedDateValue = '') {
+    const selectedDate = normalizeBonusDateInput(selectedDateValue);
+    if (selectedDate && record.adjusted_bonus_date === selectedDate) return true;
+    return isAdjustmentWithinLast48Hours(record.adjusted_bonus_datetime_wib);
+  }
+
+  function extractApprovedBonusHarianForDatabase(raw, selectedDateValue = '') {
     const map = new Map();
 
     parseAdjustmentBoRecords(raw).forEach(record => {
       if (!isApprovedBonusHarianRecord(record)) return;
-      if (!isAdjustmentWithinLast48Hours(record.adjusted_bonus_datetime_wib)) return;
+      if (!shouldSyncApprovedBonusHarianRecord(record, selectedDateValue)) return;
 
       const row = rowFromApprovedBonusHarianRecord(record);
       map.set(`${row.bonus_date}|${row.login_key}|BONUS_HARIAN`, row);
@@ -6808,10 +6875,30 @@
     const adjustmentAlreadySet = new Set(adjustmentApprovedRows.map(row => row.login_key));
     bonusAdjustmentDoneCache[dateValue] = adjustmentAlreadySet;
     updateLoading('Sinkron data Approved ke database pusat...', 1, 0);
-    const syncResult = await syncAdjustmentApprovedToDatabase(adjustRaw, { silent: true });
+    const syncResult = await syncAdjustmentApprovedToDatabase(adjustRaw, { silent: true, selectedDate: dateValue });
     if (syncResult.unauthorized) return;
+    if (syncResult && syncResult.success === false) {
+      bonusRows = [];
+      bonusRender();
+      throw new Error('Gagal sinkron Adjustment Approved ke database pusat. Proses dihentikan untuk mencegah double bonus.');
+    }
     updateLoading('Mengambil data sudah bonus dari database pusat...', 2, 1);
-    const remoteDone = await fetchRemoteBonusDone(dateValue);
+    delete bonusRemoteDoneCache[dateValue];
+    delete bonusRemotePendingCache[dateValue];
+    let remoteDone;
+    try {
+      remoteDone = await fetchRemoteBonusDone(dateValue);
+    } catch (fetchError) {
+      bonusRows = [];
+      bonusRender();
+      renderBonusDoneInfo();
+      showBonusLockWarning(
+        'DATABASE PUSAT GAGAL DIBACA',
+        'Gagal membaca data sudah bonus dari database pusat. Proses dihentikan untuk mencegah double bonus.'
+      );
+      throw new Error('Gagal membaca data sudah bonus dari database pusat. Proses dihentikan untuk mencegah double bonus.');
+    }
+    const remotePending = bonusRemotePendingCache[dateValue] || new Set();
     const localDone = getBonusDoneSet(dateValue);
 
     updateLoading('Membaca data deposit dari Parser QRIS...', 3, 2);
@@ -6867,7 +6954,7 @@
       }
     });
 
-    const candidateRows = Object.entries(byLogin).map(([key, info]) => {
+    const candidateRowsAll = Object.entries(byLogin).map(([key, info]) => {
       const bonus = info.maxDeposit >= 100000 ? 10 : info.maxDeposit >= 50000 ? 5 : 0;
       return {
         loginKey: key,
@@ -6881,7 +6968,48 @@
         bonus,
         remark: bonusRemark
       };
-    }).filter(row => row.bonus > 0 && !adjustmentAlreadySet.has(row.loginKey) && !localDone.has(row.loginKey) && !remoteDone.has(row.loginKey));
+    });
+    const alreadyDoneKeys = new Set([...adjustmentAlreadySet, ...remoteDone, ...remotePending, ...localDone].map(login => normalizeLoginId(login)).filter(Boolean));
+    const candidateDebugRows = candidateRowsAll.map(row => {
+      const hasBonus = row.bonus > 0;
+      const inAdjustment = adjustmentAlreadySet.has(row.loginKey);
+      const inRemoteDone = remoteDone.has(row.loginKey);
+      const inRemotePending = remotePending.has(row.loginKey);
+      const inLocalDone = localDone.has(row.loginKey);
+      const hidden = !hasBonus || alreadyDoneKeys.has(row.loginKey);
+      let reason = 'eligible_new';
+      if (!hasBonus) reason = 'not_eligible_deposit';
+      else if (inAdjustment) reason = 'already_adjusted';
+      else if (inRemoteDone) reason = 'already_done_remote';
+      else if (inRemotePending) reason = 'pending';
+      else if (inLocalDone) reason = 'local_done';
+      return {
+        login_id: row.loginId,
+        login_key: row.loginKey,
+        deposit_candidate: hasBonus,
+        local_adjustment: inAdjustment,
+        remote_done: inRemoteDone,
+        remote_pending: inRemotePending,
+        local_done: inLocalDone,
+        final_output: !hidden,
+        reason
+      };
+    });
+    const candidateRows = candidateRowsAll.filter(row => row.bonus > 0 && !alreadyDoneKeys.has(row.loginKey));
+    const bonusDebugSummary = {
+      parsed_adjustment_records: parseAdjustmentBoRecords(adjustRaw).length,
+      approved_bonus_harian_parsed: adjustmentApprovedRows.length,
+      synced_to_db: syncResult && syncResult.success ? (syncResult.syncedCount || 0) : 0,
+      remote_done_loaded: remoteDone.size,
+      remote_pending_loaded: remotePending.size,
+      candidate_deposit_rows: candidateRowsAll.filter(row => row.bonus > 0).length,
+      filtered_already_done: candidateDebugRows.filter(row => row.deposit_candidate && !row.final_output).length,
+      final_output_rows: candidateRows.length
+    };
+    if (currentOperator && ['admin', 'superadmin'].includes(currentOperator.role)) {
+      console.info('Bonus Harian sync/debug summary', bonusDebugSummary);
+      console.table(candidateDebugRows);
+    }
 
     updateLoading('Mengecek apakah ada operator lain yang sedang proses...', 4, 3);
     const claimResult = await claimRemoteBonusBatch(dateValue, candidateRows.map(row => ({
@@ -7376,7 +7504,10 @@
       const dates = Array.isArray(result.dates)
         ? result.dates
         : [...new Set(rowsForDatabase.map(row => row.bonus_date).filter(Boolean))];
-      dates.forEach(date => delete bonusRemoteDoneCache[date]);
+      dates.forEach(date => {
+        delete bonusRemoteDoneCache[date];
+        delete bonusRemotePendingCache[date];
+      });
 
       if (dateValue && dates.includes(dateValue)) {
         await fetchRemoteBonusDone(dateValue);
