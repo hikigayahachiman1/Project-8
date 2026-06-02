@@ -7102,6 +7102,7 @@
 
     (rows || []).forEach((row, index) => {
       const loginId = String(row.loginId || row.login_key || row.login_id || '').trim();
+      const memberName = String(row.memberName || row.member_name || row.namaMember || row.nama_member || row.name || row.nama || '').trim();
       const amountBo = Number(row.bonus || row.bonus_amount || 0);
       const amountRaw = Math.round(amountBo * 1000);
       const baseSkipped = {
@@ -7125,8 +7126,11 @@
 
       const loginKey = loginId.toUpperCase();
       if (loginSeen.has(loginKey)) {
-        const reason = `Duplicate login_id dilewati: ${loginId}`;
-        warnings.push(reason);
+        warnings.push({
+          type: 'DUPLICATE_LOGIN_ID',
+          login_id: loginId,
+          message: `Duplicate login_id dilewati: ${loginId}.`
+        });
         skipped.push({ ...baseSkipped, reason: 'LOGIN_ID_DUPLICATE' });
         return;
       }
@@ -7136,6 +7140,7 @@
       loginSeen.add(loginKey);
       items.push({
         login_id: loginId,
+        member_name: memberName,
         amount_raw: amountRaw,
         amount_bo: amountBo,
         bonus_date: dateValue,
@@ -7143,7 +7148,41 @@
         trans_no: transNo,
         note
       });
+
+      if (!memberName) {
+        warnings.push({
+          type: 'MISSING_MEMBER_NAME',
+          login_id: loginId,
+          message: `Member Name kosong untuk Login ID ${loginId}.`
+        });
+      }
+
+      if (loginId.length <= 5) {
+        warnings.push({
+          type: 'SHORT_LOGIN_ID',
+          login_id: loginId,
+          message: 'Login ID pendek, rawan match dengan ID lain.'
+        });
+      }
     });
+
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const left = String(items[i].login_id || '').toLowerCase();
+        const right = String(items[j].login_id || '').toLowerCase();
+        if (!left || !right || left === right) continue;
+        if (left.includes(right) || right.includes(left)) {
+          const primary = left.length <= right.length ? items[i] : items[j];
+          const similar = left.length <= right.length ? items[j] : items[i];
+          warnings.push({
+            type: 'SIMILAR_LOGIN_ID',
+            login_id: primary.login_id,
+            similar_to: similar.login_id,
+            message: `Login ID ${primary.login_id} mirip dengan ${similar.login_id}. Pastikan Member Name benar.`
+          });
+        }
+      }
+    }
 
     return { items, skipped, warnings };
   }
@@ -7156,6 +7195,9 @@
     const totalAmountRaw = items.reduce((sum, item) => sum + item.amount_raw, 0);
     const totalAmountBo = items.reduce((sum, item) => sum + item.amount_bo, 0);
     const compactDate = adjustmentBatchCompactDate(dateValue);
+    const missingMemberName = warnings.filter(warning => warning.type === 'MISSING_MEMBER_NAME').length;
+    const shortLoginWarning = warnings.filter(warning => warning.type === 'SHORT_LOGIN_ID').length;
+    const similarLoginWarning = warnings.filter(warning => warning.type === 'SIMILAR_LOGIN_ID').length;
 
     return {
       batch_code: `BH-${compactDate}-001`,
@@ -7166,10 +7208,14 @@
         total_items: items.length,
         total_amount_raw: totalAmountRaw,
         total_amount_bo: totalAmountBo,
-        skipped_items: skipped.length
+        skipped_items: skipped.length,
+        missing_member_name: missingMemberName,
+        short_login_id_warning: shortLoginWarning,
+        similar_login_id_warning: similarLoginWarning
       },
       items,
-      skipped
+      skipped,
+      warnings
     };
   }
 
@@ -7178,8 +7224,30 @@
     const actions = document.getElementById('adjustmentBatchDownloadActions');
     if (!preview || !actions) return;
 
-    const loginList = payload.items.map(item => escapeHtml(item.login_id)).join(', ') || '-';
-    const warningList = adjustmentBatchWarnings.map(warning => `<li>${escapeHtml(warning)}</li>`).join('');
+    const warningByLogin = {};
+    (payload.warnings || []).forEach(warning => {
+      const key = String(warning.login_id || '').trim();
+      if (!key) return;
+      if (!warningByLogin[key]) warningByLogin[key] = [];
+      warningByLogin[key].push(warning.message || warning.type || 'Warning');
+    });
+    const previewRows = payload.items.map(item => {
+      const warningText = (warningByLogin[item.login_id] || []).join(' | ');
+      return `
+        <tr>
+          <td>${escapeHtml(item.login_id)}</td>
+          <td>${escapeHtml(item.member_name || '')}</td>
+          <td class="num">${item.amount_raw}</td>
+          <td class="num">${item.amount_bo}</td>
+          <td>${escapeHtml(item.trans_no)}</td>
+          <td>${escapeHtml(item.note)}</td>
+          <td>${escapeHtml(warningText || '-')}</td>
+        </tr>
+      `;
+    }).join('');
+    const warningList = (payload.warnings || []).map(warning =>
+      `<li>${escapeHtml(warning.message || `${warning.type || 'WARNING'} ${warning.login_id || ''}`)}</li>`
+    ).join('');
     const skippedList = (payload.skipped || []).slice(0, 10).map(item =>
       `<li>${escapeHtml(item.login_id || '-')} - ${escapeHtml(item.reason || '-')}</li>`
     ).join('');
@@ -7192,7 +7260,25 @@
       Total amount_raw: <strong>${payload.summary.total_amount_raw}</strong><br>
       Total amount_bo: <strong>${payload.summary.total_amount_bo}</strong><br>
       Skipped: <strong>${payload.summary.skipped_items}</strong><br>
-      Login ID: ${loginList}
+      Missing Member Name: <strong>${payload.summary.missing_member_name || 0}</strong><br>
+      Short Login ID Warning: <strong>${payload.summary.short_login_id_warning || 0}</strong><br>
+      Similar Login ID Warning: <strong>${payload.summary.similar_login_id_warning || 0}</strong>
+      <div class="table-wrap" style="margin-top:10px; max-height:260px;">
+        <table>
+          <thead>
+            <tr>
+              <th>login_id</th>
+              <th>member_name</th>
+              <th class="num">amount_raw</th>
+              <th class="num">amount_bo</th>
+              <th>trans_no</th>
+              <th>note</th>
+              <th>warning</th>
+            </tr>
+          </thead>
+          <tbody>${previewRows || '<tr><td colspan="7" class="empty">Tidak ada item valid.</td></tr>'}</tbody>
+        </table>
+      </div>
       ${warningList ? `<div style="margin-top:8px;color:#ffe0a3;"><strong>Warning:</strong><ul>${warningList}</ul></div>` : ''}
       ${skippedList ? `<details style="margin-top:8px;"><summary>Item diskip</summary><ul>${skippedList}</ul></details>` : ''}
     `;
