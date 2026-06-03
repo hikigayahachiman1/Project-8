@@ -6762,6 +6762,7 @@
       return {
         loginKey: key,
         loginId: key,
+        memberId: '',
         memberName: '',
         maxDeposit: 0,
         time: '-',
@@ -6913,6 +6914,7 @@
       .filter(row => (!row.status || row.status === 'Approved') && bonusMatchGmt7Date(row.applicationTime, targetDate))
       .map(row => ({
         loginId: row.userId,
+        memberId: row.memberId || '',
         memberName: row.namaRekening,
         applicationTime: row.applicationTime,
         total: (parseNumber(row.nominal) + parseNumber(row.potonganQris)) * 1000,
@@ -6935,6 +6937,7 @@
       if (!byLogin[key]) {
         byLogin[key] = {
           loginId,
+          memberId: row.memberId || '',
           memberName: row.memberName,
           transactions: [],
           maxDeposit: 0,
@@ -6950,6 +6953,7 @@
         byLogin[key].timestamp = row.timestamp;
         byLogin[key].timeValue = row.timeValue;
         byLogin[key].memberName = row.memberName;
+        byLogin[key].memberId = row.memberId || byLogin[key].memberId || '';
         byLogin[key].loginId = loginId;
       }
     });
@@ -6959,6 +6963,7 @@
       return {
         loginKey: key,
         loginId: info.loginId,
+        memberId: info.memberId || '',
         memberName: info.memberName,
         maxDeposit: info.maxDeposit,
         time: info.time,
@@ -7224,12 +7229,19 @@
     const items = [];
     const skipped = [];
     const warnings = [];
-    const loginSeen = new Set();
-    const compactDate = adjustmentBatchCompactDate(dateValue);
     const note = `Bonus Harian ${bonusDisplayLongDate(dateValue)}`;
+    const summary = {
+      total_items: 0,
+      missing_login_id: 0,
+      missing_member_id: 0,
+      missing_amount: 0,
+      duplicate_login_id_same_date: 0,
+      duplicate_member_id_same_date: 0
+    };
 
     (rows || []).forEach((row, index) => {
       const loginId = String(row.loginId || row.login_key || row.login_id || '').trim();
+      const memberId = String(row.memberId || row.member_id || row.memberID || row.member || '').trim();
       const memberName = String(row.memberName || row.member_name || row.namaMember || row.nama_member || row.name || row.nama || '').trim();
       const amountBo = Number(row.bonus || row.bonus_amount || 0);
       const amountRaw = Math.round(amountBo * 1000);
@@ -7240,41 +7252,46 @@
       };
 
       if (!loginId) {
+        summary.missing_login_id += 1;
         skipped.push({ ...baseSkipped, reason: 'LOGIN_ID_EMPTY' });
         return;
       }
       if (!Number.isFinite(amountRaw) || amountRaw <= 0) {
+        summary.missing_amount += 1;
         skipped.push({ ...baseSkipped, reason: 'AMOUNT_RAW_INVALID' });
         return;
       }
       if (!Number.isFinite(amountBo) || amountBo <= 0) {
+        summary.missing_amount += 1;
         skipped.push({ ...baseSkipped, reason: 'AMOUNT_BO_INVALID' });
         return;
       }
 
       const loginKey = loginId.toUpperCase();
-      if (loginSeen.has(loginKey)) {
+      const transNo = note;
+      const itemWarnings = [];
+
+      if (!memberId) {
+        itemWarnings.push('Member ID kosong');
+        summary.missing_member_id += 1;
         warnings.push({
-          type: 'DUPLICATE_LOGIN_ID',
+          type: 'MISSING_MEMBER_ID',
           login_id: loginId,
-          message: `Duplicate login_id dilewati: ${loginId}.`
+          message: `Member ID kosong untuk Login ID ${loginId}.`
         });
-        skipped.push({ ...baseSkipped, reason: 'LOGIN_ID_DUPLICATE' });
-        return;
       }
 
-      const transNo = note;
-
-      loginSeen.add(loginKey);
       items.push({
         login_id: loginId,
+        member_id: memberId,
         member_name: memberName,
         amount_raw: amountRaw,
         amount_bo: amountBo,
         bonus_date: dateValue,
         bonus_type: 'BONUS_HARIAN',
         trans_no: transNo,
-        note
+        note,
+        warning: itemWarnings.join(' | ')
       });
 
       if (!memberName) {
@@ -7294,6 +7311,37 @@
       }
     });
 
+    const loginDateCounts = new Map();
+    const memberDateCounts = new Map();
+    items.forEach(item => {
+      const loginKey = normalizeLoginId(item.login_id);
+      const memberKey = String(item.member_id || '').trim().toUpperCase();
+      const loginDateKey = `${item.bonus_date}|${loginKey}`;
+      if (loginKey) loginDateCounts.set(loginDateKey, (loginDateCounts.get(loginDateKey) || 0) + 1);
+      if (memberKey) {
+        const memberDateKey = `${item.bonus_date}|${memberKey}`;
+        memberDateCounts.set(memberDateKey, (memberDateCounts.get(memberDateKey) || 0) + 1);
+      }
+    });
+
+    items.forEach(item => {
+      const itemWarnings = item.warning ? item.warning.split(' | ').filter(Boolean) : [];
+      const loginDateKey = `${item.bonus_date}|${normalizeLoginId(item.login_id)}`;
+      const memberDateKey = `${item.bonus_date}|${String(item.member_id || '').trim().toUpperCase()}`;
+
+      if (loginDateCounts.get(loginDateKey) > 1) {
+        itemWarnings.push('Duplicate Login ID tanggal sama');
+      }
+      if (item.member_id && memberDateCounts.get(memberDateKey) > 1) {
+        itemWarnings.push('Duplicate Member ID tanggal sama');
+      }
+      item.warning = [...new Set(itemWarnings)].join(' | ');
+    });
+
+    summary.duplicate_login_id_same_date = [...loginDateCounts.values()].filter(count => count > 1).length;
+    summary.duplicate_member_id_same_date = [...memberDateCounts.values()].filter(count => count > 1).length;
+    summary.total_items = items.length;
+
     for (let i = 0; i < items.length; i++) {
       for (let j = i + 1; j < items.length; j++) {
         const left = String(items[i].login_id || '').toLowerCase();
@@ -7312,13 +7360,13 @@
       }
     }
 
-    return { items, skipped, warnings };
+    return { items, skipped, warnings, validationSummary: summary };
   }
 
   function buildAdjustmentBatchJson() {
     const dateValue = document.getElementById('bonusDate').value;
-    const mode = 'DRY_RUN';
-    const { items, skipped, warnings } = validateAdjustmentBatchItems(bonusRows, dateValue);
+    const mode = 'BONUS_HARIAN';
+    const { items, skipped, warnings, validationSummary } = validateAdjustmentBatchItems(bonusRows, dateValue);
     adjustmentBatchWarnings = warnings;
     const totalAmountRaw = items.reduce((sum, item) => sum + item.amount_raw, 0);
     const totalAmountBo = items.reduce((sum, item) => sum + item.amount_bo, 0);
@@ -7333,7 +7381,7 @@
       created_at: new Date().toISOString(),
       source: 'parser-qris-webtools',
       summary: {
-        total_items: items.length,
+        ...validationSummary,
         total_amount_raw: totalAmountRaw,
         total_amount_bo: totalAmountBo,
         skipped_items: skipped.length,
@@ -7360,16 +7408,21 @@
       warningByLogin[key].push(warning.message || warning.type || 'Warning');
     });
     const previewRows = payload.items.map(item => {
-      const warningText = (warningByLogin[item.login_id] || []).join(' | ');
+      const warningText = [item.warning, ...(warningByLogin[item.login_id] || [])].filter(Boolean).join(' | ');
+      const warningBadge = warningText
+        ? `<span class="badge" style="background:rgba(255,200,87,.16);border-color:rgba(255,200,87,.45);color:#ffe0a3;">${escapeHtml(warningText)}</span>`
+        : '-';
       return `
         <tr>
           <td>${escapeHtml(item.login_id)}</td>
+          <td>${escapeHtml(item.member_id || '')}</td>
           <td>${escapeHtml(item.member_name || '')}</td>
           <td class="num">${item.amount_raw}</td>
           <td class="num">${item.amount_bo}</td>
+          <td>${escapeHtml(item.bonus_date || '')}</td>
           <td>${escapeHtml(item.trans_no)}</td>
           <td>${escapeHtml(item.note)}</td>
-          <td>${escapeHtml(warningText || '-')}</td>
+          <td>${warningBadge}</td>
         </tr>
       `;
     }).join('');
@@ -7388,6 +7441,11 @@
       Total amount_raw: <strong>${payload.summary.total_amount_raw}</strong><br>
       Total amount_bo: <strong>${payload.summary.total_amount_bo}</strong><br>
       Skipped: <strong>${payload.summary.skipped_items}</strong><br>
+      Missing Login ID: <strong>${payload.summary.missing_login_id || 0}</strong><br>
+      Missing Member ID: <strong>${payload.summary.missing_member_id || 0}</strong><br>
+      Missing Amount: <strong>${payload.summary.missing_amount || 0}</strong><br>
+      Duplicate Login ID + Date: <strong>${payload.summary.duplicate_login_id_same_date || 0}</strong><br>
+      Duplicate Member ID + Date: <strong>${payload.summary.duplicate_member_id_same_date || 0}</strong><br>
       Missing Member Name: <strong>${payload.summary.missing_member_name || 0}</strong><br>
       Short Login ID Warning: <strong>${payload.summary.short_login_id_warning || 0}</strong><br>
       Similar Login ID Warning: <strong>${payload.summary.similar_login_id_warning || 0}</strong>
@@ -7396,15 +7454,17 @@
           <thead>
             <tr>
               <th>login_id</th>
+              <th>member_id</th>
               <th>member_name</th>
               <th class="num">amount_raw</th>
               <th class="num">amount_bo</th>
+              <th>bonus_date</th>
               <th>trans_no</th>
               <th>note</th>
               <th>warning</th>
             </tr>
           </thead>
-          <tbody>${previewRows || '<tr><td colspan="7" class="empty">Tidak ada item valid.</td></tr>'}</tbody>
+          <tbody>${previewRows || '<tr><td colspan="9" class="empty">Tidak ada item valid.</td></tr>'}</tbody>
         </table>
       </div>
       ${warningList ? `<div style="margin-top:8px;color:#ffe0a3;"><strong>Warning:</strong><ul>${warningList}</ul></div>` : ''}
@@ -8396,6 +8456,7 @@
 
       rows.forEach(row => {
         const loginId = firstValue(row, ['Login ID', 'LoginID', 'User ID', 'USER ID']);
+        const memberId = firstValue(row, ['Member ID', 'MemberID', 'Member Id']);
         const namaRekening = firstValue(row, ['Member Name', 'Member Acct Name', 'Nama Rekening', 'Account Name']);
         const applicationTime = firstValue(row, ['Application Time (GMT+8)', 'Application Time', 'Apply Time', 'Date Created']);
         const payment = firstValue(row, ['Payment', 'Channel']);
@@ -8416,6 +8477,7 @@
 
         records.push({
           userId: loginId,
+          memberId: String(memberId || '').trim(),
           namaRekening: namaRekening || '-',
           applicationTime,
           nominal,
@@ -8464,11 +8526,13 @@
       // Extract fields based on anchor offsets:
       // LOGIN ID   at i-5
       // NAMA REK   at i-4
+      // MEMBER ID  usually at i-6 in BO raw copy
       // APP TIME   at i
       // NOMINAL    at i+4
       // POTONGAN   at i+5
       const loginId = lines[i-5];
       const namaRekening = lines[i-4];
+      const memberId = lines[i-6] || '';
 
       // Sanity check: LOGIN ID should not be M/empty/ id pattern
       if (/^MAGNUM188/i.test(loginId) || /@\d+$/.test(loginId)) {
@@ -8478,6 +8542,7 @@
 
       records.push({
         userId: loginId,
+        memberId: /^\d+@?\d*$/i.test(String(memberId || '').trim()) ? String(memberId || '').trim() : '',
         namaRekening: namaRekening,
         applicationTime: lines[i],
         nominal: lines[i+4],
