@@ -6292,40 +6292,76 @@
     return recordDateTimeWib >= startAt && recordDateTimeWib <= endAt;
   }
 
-  function extractBonusDateFromAdjustmentText(text) {
-    const raw = String(text || '').trim();
-    if (!raw) return '';
-
-    const bhCode = raw.match(/\bBH[-\s]?(\d{4})(\d{2})(\d{2})\b/i);
-    if (bhCode) return `${bhCode[1]}-${bhCode[2]}-${bhCode[3]}`;
-
-    const monthMap = {
-      JAN: 1, JANUARI: 1, JANUARY: 1,
-      FEB: 2, FEBRUARI: 2, FEBRUARY: 2,
-      MAR: 3, MARET: 3, MARCH: 3,
-      APR: 4, APRIL: 4,
-      MEI: 5, MAY: 5,
-      JUN: 6, JUNI: 6, JUNE: 6,
-      JUL: 7, JULI: 7, JULY: 7,
-      AGS: 8, AGUSTUS: 8, AUG: 8, AUGUST: 8,
-      SEP: 9, SEPT: 9, SEPTEMBER: 9,
-      OKT: 10, OCT: 10, OKTOBER: 10, OCTOBER: 10,
-      NOV: 11, NOVEMBER: 11,
-      DES: 12, DEC: 12, DESEMBER: 12, DECEMBER: 12
-    };
-    const normalized = raw
+  function normalizeBonusText(text) {
+    return String(text || '')
       .toUpperCase()
-      .replace(/[.,]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    const namedDate = normalized.match(/\b(?:BONUS\s+HARIAN\s+)?(?:TGL\s+)?(\d{1,2})\s+([A-Z]+)\s+(\d{4})\b/);
-    if (!namedDate) return '';
+      .trim()
+      .replace(/[^\w\s/@.-]/g, ' ')
+      .replace(/[\s.-]+$/g, '')
+      .replace(/\s+/g, ' ');
+  }
 
-    const month = monthMap[namedDate[2]];
-    const day = Number(namedDate[1]);
-    const year = namedDate[3];
-    if (!month || day < 1 || day > 31) return '';
-    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  function bonusMonthMap() {
+    return {
+      JANUARI: 1, JANUARY: 1, JAN: 1,
+      FEBRUARI: 2, FEBRUARY: 2, FEB: 2,
+      MARET: 3, MARCH: 3, MAR: 3,
+      APRIL: 4, APR: 4,
+      MEI: 5, MAY: 5,
+      JUNI: 6, JUNE: 6, JUN: 6,
+      JULI: 7, JULY: 7, JUL: 7,
+      AGUSTUS: 8, AUGUST: 8, AGU: 8, AUG: 8,
+      SEPTEMBER: 9, SEP: 9,
+      OKTOBER: 10, OCTOBER: 10, OKT: 10, OCT: 10,
+      NOVEMBER: 11, NOV: 11,
+      DESEMBER: 12, DECEMBER: 12, DES: 12, DEC: 12
+    };
+  }
+
+  function dateInputFromParts(year, month, day) {
+    const y = Number(year);
+    const m = Number(month);
+    const d = Number(day);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return '';
+    if (y < 2000 || m < 1 || m > 12 || d < 1 || d > 31) return '';
+    return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+
+  function parseBonusDateFromRemark(text, fallbackDate) {
+    const normalized = normalizeBonusText(text);
+    if (!normalized) return '';
+
+    const fallback = fallbackDate instanceof Date && !Number.isNaN(fallbackDate.getTime())
+      ? fallbackDate
+      : parseDate(String(fallbackDate || '').trim());
+    const fallbackYear = fallback && fallback.getTime && fallback.getTime() !== 0 ? fallback.getFullYear() : '';
+
+    const bhCode = normalized.match(/\bBH[-\s]?(\d{4})(\d{2})(\d{2})\b/);
+    if (bhCode) return dateInputFromParts(bhCode[1], bhCode[2], bhCode[3]);
+
+    const compact = normalized.match(/\b(20\d{2})(\d{2})(\d{2})\b/);
+    if (compact) return dateInputFromParts(compact[1], compact[2], compact[3]);
+
+    const slash = normalized.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/);
+    if (slash) {
+      const first = Number(slash[1]);
+      const second = Number(slash[2]);
+      const month = first > 12 ? second : first;
+      const day = first > 12 ? first : second;
+      return dateInputFromParts(slash[3], month, day);
+    }
+
+    const months = bonusMonthMap();
+    const named = normalized.match(/\b(?:BONUS\s+HARIAN\s+)?(?:TGL\s+)?(\d{1,2})\s+([A-Z]+)(?:\s+(20\d{2}))?\b/);
+    if (!named) return '';
+    const month = months[named[2]];
+    const year = named[3] || fallbackYear;
+    if (!month || !year) return '';
+    return dateInputFromParts(year, month, named[1]);
+  }
+
+  function extractBonusDateFromAdjustmentText(text, fallbackDate) {
+    return parseBonusDateFromRemark(text, fallbackDate);
   }
 
   function finalizeAdjustmentRecordDates(record) {
@@ -6334,7 +6370,8 @@
     const approvedTimeWibDate = adjustmentDateTimeGmt8ToWib(approvedTimeBo);
     const createdTimeWibDate = adjustmentDateTimeGmt8ToWib(dateCreatedBo);
     const adjustedDateTime = approvedTimeWibDate || createdTimeWibDate;
-    const bonusDateFromRemark = extractBonusDateFromAdjustmentText(`${record.transaction_number || ''} ${record.remark || ''}`);
+    const fallbackBoDate = parseDate(approvedTimeBo || dateCreatedBo);
+    const bonusDateFromRemark = extractBonusDateFromAdjustmentText(`${record.transaction_number || ''} ${record.remark || ''}`, fallbackBoDate);
     const finalBonusDate = bonusDateFromRemark || dateInputFromDate(adjustedDateTime);
 
     return {
@@ -6640,11 +6677,11 @@
   }
 
   function isBonusHarianAdjustmentText(text) {
-    const value = normalizeText(text);
+    const value = normalizeBonusText(text);
     if (/LUCKY\s*SPIN|LUCKYSPIN|KLAIM\s*FREESPIN|FREE\s*SPIN|FREESPIN|KLAIM\s*\d*\s*SCATTER|SCATTER|BUY\s*SPIN|BUYSPIN|SUPER\s*SCATTER|PRAGMATIC|MAHJONG|JP|JACKPOT/.test(value)) {
       return false;
     }
-    return /BONUS\s*HARIAN\b|BH[-\s]/i.test(String(text || ''));
+    return /\bBONUS\s*HARIAN\b|\bBH[-\s]/.test(value);
   }
 
   function rowFromApprovedBonusHarianRecord(record) {
@@ -6654,6 +6691,7 @@
       bonus_date: record.adjusted_bonus_date || '',
       login_id: record.login_id || loginKey,
       login_key: loginKey,
+      member_id: record.member_id || '',
       bonus_type: 'BONUS_HARIAN',
       bonus_amount: amountText ? parseNumber(amountText) : null,
       remark: record.remark || record.transaction_number || 'BONUS HARIAN',
@@ -6682,6 +6720,30 @@
     );
   }
 
+  function adjustmentBonusHarianDebugRow(record, syncEligible = false) {
+    const combinedText = `${record.transaction_number || ''} ${record.remark || ''}`.trim();
+    const detected = isBonusHarianAdjustmentText(combinedText);
+    return {
+      login_id: record.login_id || '',
+      member_id: record.member_id || '',
+      amount: record.adjustment_amount || '',
+      status: record.status || '',
+      transNumber: record.transaction_number || '',
+      remark: record.remark || '',
+      approvedTime: record.approved_time || '',
+      normalizedRemark: normalizeBonusText(combinedText),
+      detectedBonusType: detected ? 'BONUS_HARIAN' : getBonusType(combinedText),
+      parsedBonusDate: record.adjusted_bonus_date || '',
+      syncEligible: Boolean(syncEligible)
+    };
+  }
+
+  function logAdjustmentBonusHarianDebug(rows, label = 'Adjustment BONUS_HARIAN debug') {
+    if (!rows || rows.length === 0) return;
+    console.info(label);
+    console.table(rows);
+  }
+
   function normalizeBonusDateInput(value) {
     const text = String(value || '').trim();
     if (!text) return '';
@@ -6697,15 +6759,19 @@
 
   function extractApprovedBonusHarianForDatabase(raw, selectedDateValue = '') {
     const map = new Map();
+    const debugRows = [];
 
     parseAdjustmentBoRecords(raw).forEach(record => {
       if (!isApprovedBonusHarianRecord(record)) return;
-      if (!shouldSyncApprovedBonusHarianRecord(record, selectedDateValue)) return;
+      const syncEligible = shouldSyncApprovedBonusHarianRecord(record, selectedDateValue);
+      debugRows.push(adjustmentBonusHarianDebugRow(record, syncEligible));
+      if (!syncEligible) return;
 
       const row = rowFromApprovedBonusHarianRecord(record);
       map.set(`${row.bonus_date}|${row.login_key}|BONUS_HARIAN`, row);
     });
 
+    logAdjustmentBonusHarianDebug(debugRows);
     return [...map.values()];
   }
 
@@ -6714,15 +6780,18 @@
       ? dateInputFromSlashDate(normalizeBonusTargetDate(dateValue))
       : String(dateValue || '').trim();
     const map = new Map();
+    const debugRows = [];
 
     parseAdjustmentBoRecords(raw).forEach(record => {
       if (!isApprovedBonusHarianRecord(record)) return;
       if (record.adjusted_bonus_date !== targetDate) return;
+      debugRows.push(adjustmentBonusHarianDebugRow(record, true));
 
       const row = rowFromApprovedBonusHarianRecord(record);
       map.set(`${row.login_key}|BONUS_HARIAN`, row);
     });
 
+    logAdjustmentBonusHarianDebug(debugRows, 'Adjustment BONUS_HARIAN date-filter debug');
     return [...map.values()];
   }
 
