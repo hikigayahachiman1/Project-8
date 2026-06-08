@@ -2498,6 +2498,7 @@
       <button class="tool-tab active" data-panel="parser">Parser QRIS</button>
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" data-panel="claim-mahjong">Klaim Mahjong</button>
+      <button class="tool-tab" id="dashboardTab" data-panel="dashboard" style="display:none;">Dashboard</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
       <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
@@ -2696,6 +2697,10 @@
             <button id="bonusProcessBtn" class="primary">Proses Bonus Harian</button>
             <button id="bonusExpirePendingBtn" class="ghost">Bersihkan Pending Expired</button>
             <button id="bonusRefreshStatusBtn" class="ghost">Refresh Status Bonus</button>
+            <button id="bonusPendingActiveBtn" class="ghost">Lihat Pending Aktif</button>
+            <button id="bonusBatchDoneBtn" class="success">Tandai Batch DONE</button>
+            <button id="bonusBatchExpireBtn" class="danger">Batalkan / Expire Batch Saya</button>
+            <button id="bonusCopyExcelBtn" class="primary">Copy Output Bonus Harian ke Excel</button>
             <button id="bonusResetBtn" class="ghost">Reset Bonus</button>
           </div>
           <div class="source-note" id="bonusStatusRefreshInfo" style="display:none;"></div>
@@ -3054,6 +3059,140 @@
               </thead>
               <tbody id="adminOperatorTable">
                 <tr><td colspan="7" class="empty">Login sebagai admin untuk melihat operator.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="tool-panel" id="panel-dashboard">
+      <div class="bonus-grid">
+        <section class="card">
+          <div class="card-title">Connection</div>
+          <div class="card-desc">Status koneksi dashboard superadmin.</div>
+          <div class="monitor-grid">
+            <div class="stat">
+              <div class="stat-label">Hermes</div>
+              <div class="stat-value" id="dashboardHermesStatus">-</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Supabase</div>
+              <div class="stat-value" id="dashboardSupabaseStatus">-</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Parser API</div>
+              <div class="stat-value" id="dashboardParserStatus">-</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Server Time</div>
+              <div class="stat-value" id="dashboardServerTime">-</div>
+            </div>
+          </div>
+          <div class="bonus-actions">
+            <button id="dashboardRefreshConnectionBtn" class="primary">Refresh Connection</button>
+          </div>
+          <div id="dashboardConnectionNote" class="source-note" style="display:none;"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-title">Bonus Harian Status</div>
+          <div class="card-desc">Ringkasan status bonus untuk tanggal dashboard.</div>
+          <div class="date-row">
+            <input id="dashboardBonusDate" class="bonus-date" type="date">
+            <button id="dashboardRefreshStatusBtn" class="primary">Refresh Status</button>
+            <button id="dashboardExpirePendingBtn" class="ghost">Bersihkan Pending Expired</button>
+          </div>
+          <div class="monitor-grid">
+            <div class="stat">
+              <div class="stat-label">DONE</div>
+              <div class="stat-value" id="dashboardDoneCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">PENDING Aktif</div>
+              <div class="stat-value" id="dashboardPendingActiveCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">PENDING Expired</div>
+              <div class="stat-value" id="dashboardPendingExpiredCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">EXPIRED</div>
+              <div class="stat-value" id="dashboardExpiredCount">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">EMPTY Batch</div>
+              <div class="stat-value" id="dashboardEmptyCount">0</div>
+            </div>
+          </div>
+          <div id="dashboardStatusNote" class="source-note" style="display:none;"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-title">Pending / Running Transactions</div>
+          <div class="card-desc">Pending aktif dan pending expired untuk Bonus Harian atau Klaim Mahjong jika datanya sudah tersimpan.</div>
+          <div class="date-row">
+            <select id="dashboardBonusTypeFilter" class="bonus-date">
+              <option value="ALL">ALL</option>
+              <option value="BONUS_HARIAN">BONUS_HARIAN</option>
+              <option value="KLAIM_MAHJONG">KLAIM_MAHJONG</option>
+            </select>
+            <button id="dashboardRefreshPendingBtn" class="primary">Refresh Pending</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Bonus Date</th>
+                  <th>Type</th>
+                  <th>Login ID</th>
+                  <th class="num">Amount</th>
+                  <th>Operator</th>
+                  <th>Claim Batch ID</th>
+                  <th>Expires</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardPendingTable">
+                <tr><td colspan="9" class="empty">Klik Refresh Pending untuk memuat data.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-title">Output Excel</div>
+          <div class="card-desc">TSV siap copy langsung ke Excel.</div>
+          <div class="bonus-actions">
+            <button id="dashboardCopyBonusExcelBtn" class="success">Copy Excel Bonus Harian</button>
+            <button id="dashboardDownloadCsvBtn" class="ghost">Download CSV</button>
+          </div>
+          <textarea id="dashboardExcelPreview" style="min-height:220px;" placeholder="TSV preview akan muncul di sini..." readonly></textarea>
+        </section>
+
+        <section class="card">
+          <div class="card-title">Hermes Workflow</div>
+          <div class="card-desc">Preview queue dari Hermes Telegram sebelum release manual ke worker.</div>
+          <div class="bonus-actions">
+            <button id="dashboardRefreshHermesBtn" class="primary">Refresh Hermes Preview</button>
+            <button id="dashboardCopyHermesExcelBtn" class="ghost">Copy Excel Preview</button>
+          </div>
+          <div id="dashboardHermesNote" class="source-note">Hermes preview queue belum dimuat.</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Batch</th>
+                  <th>Type</th>
+                  <th>Operator</th>
+                  <th>Created</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardHermesTable">
+                <tr><td colspan="6" class="empty">Hermes preview queue belum dibuat.</td></tr>
               </tbody>
             </table>
           </div>
@@ -3823,8 +3962,14 @@
     const unlockBtn = document.getElementById('unlockAuditBtn');
     const adminTab = document.getElementById('adminOperatorsTab');
     const monitorTab = document.getElementById('bonusMonitoringTab');
+    const dashboardTab = document.getElementById('dashboardTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
+    if (dashboardTab) dashboardTab.style.display = isSuperAdmin() ? '' : 'none';
+    if (!isSuperAdmin() && document.getElementById('panel-dashboard')?.classList.contains('active')) {
+      document.querySelector('[data-panel="parser"]').click();
+      if (currentOperator) showToast('Dashboard hanya untuk Superadmin.', 'error');
+    }
     if (hasAuditAccess()) {
       unlockBtn.style.display = 'none';
       auditTab.style.display = '';
@@ -5054,6 +5199,9 @@
   if (document.getElementById('monitorBonusDateFilter')) {
     document.getElementById('monitorBonusDateFilter').value = getTodayWibInputValue();
   }
+  if (document.getElementById('dashboardBonusDate')) {
+    document.getElementById('dashboardBonusDate').value = getTodayWibInputValue();
+  }
 
   function getBonusDoneStore() {
     try {
@@ -5232,8 +5380,9 @@
   function renderBonusStatusRefreshInfo(result, expireResult = null) {
     const box = document.getElementById('bonusStatusRefreshInfo');
     if (!box) return;
-    const statusSummary = result && result.statusSummary ? result.statusSummary : {};
+    const statusSummary = result && (result.statusSummary || result.summary) ? (result.statusSummary || result.summary) : {};
     const lock = result && result.lock ? result.lock : null;
+    const locks = Array.isArray(result && result.locks) ? result.locks : [];
     const expiredBonusRows = Number(
       (expireResult && expireResult.expired_bonus_rows) ||
       (result && result.expireResult && result.expireResult.expired_bonus_rows) ||
@@ -5246,18 +5395,44 @@
       (result && result.expired_lock_rows) ||
       0
     );
+    const doneCount = Number(statusSummary.done ?? statusSummary.DONE ?? 0);
+    const pendingActiveCount = Number(statusSummary.pending_active ?? statusSummary.PENDING_ACTIVE ?? 0);
+    const expiredCount = Number(statusSummary.expired ?? statusSummary.EXPIRED ?? 0);
     const parts = [
       `Expired bonus dibersihkan: ${expiredBonusRows}`,
       `Expired lock dibersihkan: ${expiredLockRows}`,
-      `DONE: ${Number(statusSummary.done || 0)}`,
-      `Pending aktif: ${Number(statusSummary.pending_active || 0)}`,
-      `EXPIRED: ${Number(statusSummary.expired || 0)}`
+      `DONE: ${doneCount}`,
+      `Pending aktif: ${pendingActiveCount}`,
+      `EXPIRED: ${expiredCount}`
     ];
     if (lock && lock.lock_status === 'PENDING') {
       parts.push(`Lock aktif: ${escapeHtml(lock.operator_name || lock.claim_owner || 'operator')}`);
     }
-    box.innerHTML = parts.map(escapeHtml).join(' &bull; ');
+    const lockList = locks.slice(0, 5).map(item =>
+      `${item.lock_status || '-'} ${item.claim_batch_id || '-'} ${item.operator_name || item.claim_owner || ''}`
+    );
+    box.innerHTML = [
+      parts.map(escapeHtml).join(' &bull; '),
+      lockList.length ? `<br>Locks: ${lockList.map(escapeHtml).join(' | ')}` : ''
+    ].join('');
     box.style.display = 'block';
+  }
+
+  async function bonusControlApi(action, payload = {}) {
+    const response = await fetch('/api/bonus-control', {
+      method: 'POST',
+      headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ action, ...payload })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      handleOperatorUnauthorized();
+      throw new Error('Session operator expired, silakan login ulang.');
+    }
+    if (!response.ok || (result.ok !== true && action !== 'health')) {
+      throw new Error(result.message || result.error || `Gagal menjalankan ${action}.`);
+    }
+    return result;
   }
 
   async function expirePendingBonusFromUi() {
@@ -5266,18 +5441,7 @@
     const btn = document.getElementById('bonusExpirePendingBtn');
     setButtonLoading(btn, true, 'Membersihkan...');
     try {
-      const response = await fetch('/api/bonus-expire-pending', {
-        method: 'POST',
-        headers: operatorAuthHeaders()
-      });
-      const result = await response.json().catch(() => ({}));
-      if (response.status === 401) {
-        handleOperatorUnauthorized();
-        return;
-      }
-      if (!response.ok || result.ok !== true) {
-        throw new Error(result.message || result.error || 'Gagal membersihkan pending expired.');
-      }
+      const result = await bonusControlApi('expire_pending');
       if (dateValue) {
         delete bonusRemoteDoneCache[dateValue];
         delete bonusRemotePendingCache[dateValue];
@@ -5285,6 +5449,7 @@
       renderBonusStatusRefreshInfo(result, result);
       showToast(`Pending expired dibersihkan. Bonus: ${result.expired_bonus_rows || 0}, lock: ${result.expired_lock_rows || 0}.`, 'success');
     } catch (error) {
+      console.error('bonus-control expire_pending error:', error);
       showToast(error.message || 'Gagal membersihkan pending expired.', 'error');
     } finally {
       setButtonLoading(btn, false);
@@ -5303,13 +5468,150 @@
     try {
       delete bonusRemoteDoneCache[dateValue];
       delete bonusRemotePendingCache[dateValue];
-      await fetchRemoteBonusDone(dateValue);
+      const result = await bonusControlApi('status', { bonus_date: dateValue });
+      renderBonusStatusRefreshInfo(result);
       renderBonusDoneInfo();
       showToast('Status bonus berhasil diperbarui.', 'success');
     } catch (error) {
+      console.error('bonus-control status error:', error);
       if (error.message !== 'unauthorized') {
         showToast(error.message || 'Gagal refresh status bonus.', 'error');
       }
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  function renderPendingActiveInfo(result) {
+    const box = document.getElementById('bonusStatusRefreshInfo');
+    if (!box) return;
+    const rows = Array.isArray(result.rows) ? result.rows : [];
+    const preview = rows.slice(0, 20).map((row, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(row.login_id || row.login_key || '')}</td>
+        <td>${escapeHtml(String(row.bonus_amount ?? ''))}</td>
+        <td>${escapeHtml(row.operator_name || row.claim_owner || '')}</td>
+        <td>${escapeHtml(row.claim_batch_id || '')}</td>
+        <td>${escapeHtml(row.pending_expires_at || '')}</td>
+      </tr>
+    `).join('');
+    box.innerHTML = `
+      Pending aktif: <strong>${rows.length}</strong> data untuk ${escapeHtml(result.bonus_date || '')}.
+      <div class="table-wrap" style="margin-top:8px; max-height:260px;">
+        <table>
+          <thead>
+            <tr><th>#</th><th>Login ID</th><th>Bonus</th><th>Operator</th><th>Claim Batch ID</th><th>Expires</th></tr>
+          </thead>
+          <tbody>${preview || '<tr><td colspan="6" class="empty">Tidak ada pending aktif.</td></tr>'}</tbody>
+        </table>
+      </div>
+    `;
+    box.style.display = 'block';
+  }
+
+  async function showPendingActiveFromUi() {
+    if (!requireOperator()) return;
+    const dateValue = document.getElementById('bonusDate').value;
+    if (!dateValue) {
+      showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
+      return;
+    }
+    const btn = document.getElementById('bonusPendingActiveBtn');
+    setButtonLoading(btn, true, 'Memuat...');
+    try {
+      const result = await bonusControlApi('pending_active', { bonus_date: dateValue });
+      renderPendingActiveInfo(result);
+      showToast(`Pending aktif: ${result.count || 0} data.`, result.count ? 'success' : '');
+    } catch (error) {
+      console.error('bonus-control pending_active error:', error);
+      showToast(error.message || 'Gagal melihat pending aktif.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  function promptBonusBatchId(message) {
+    return String(window.prompt(message || 'Masukkan Claim Batch ID:') || '').trim();
+  }
+
+  function currentOperatorName() {
+    return currentOperator ? (currentOperator.display_name || currentOperator.username || 'Operator') : 'Operator';
+  }
+
+  async function markBatchDoneFromUi() {
+    if (!requireOperator()) return;
+    const claimBatchId = promptBonusBatchId('Masukkan Claim Batch ID yang akan ditandai DONE:');
+    if (!claimBatchId) return;
+    const btn = document.getElementById('bonusBatchDoneBtn');
+    setButtonLoading(btn, true, 'Finalisasi...');
+    try {
+      const result = await bonusControlApi('mark_done', {
+        claim_batch_id: claimBatchId,
+        operator_name: currentOperatorName()
+      });
+      const dateValue = document.getElementById('bonusDate').value;
+      if (dateValue) {
+        delete bonusRemoteDoneCache[dateValue];
+        delete bonusRemotePendingCache[dateValue];
+      }
+      renderBonusStatusRefreshInfo({ summary: { done: result.done_count, pending_active: 0, expired: 0 } });
+      renderBonusDoneInfo();
+      showToast(`Batch DONE. Rows: ${result.done_count || 0}, locks: ${result.lock_done_count || 0}.`, 'success');
+    } catch (error) {
+      console.error('bonus-control mark_done error:', error);
+      showToast(error.message || 'Gagal tandai batch DONE.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  async function expireBatchFromUi() {
+    if (!requireOperator()) return;
+    const claimBatchId = promptBonusBatchId('Masukkan Claim Batch ID yang akan di-expire:');
+    if (!claimBatchId) return;
+    if (!window.confirm(`Expire batch ${claimBatchId}? Data PENDING dalam batch ini akan menjadi EXPIRED.`)) return;
+    const btn = document.getElementById('bonusBatchExpireBtn');
+    setButtonLoading(btn, true, 'Expire...');
+    try {
+      const result = await bonusControlApi('expire_batch', {
+        claim_batch_id: claimBatchId,
+        operator_name: currentOperatorName()
+      });
+      const dateValue = document.getElementById('bonusDate').value;
+      if (dateValue) {
+        delete bonusRemoteDoneCache[dateValue];
+        delete bonusRemotePendingCache[dateValue];
+      }
+      renderBonusStatusRefreshInfo({ summary: { done: 0, pending_active: 0, expired: result.expired_count } });
+      renderBonusDoneInfo();
+      showToast(`Batch di-expire. Rows: ${result.expired_count || 0}, locks: ${result.lock_expired_count || 0}.`, 'success');
+    } catch (error) {
+      console.error('bonus-control expire_batch error:', error);
+      showToast(error.message || 'Gagal expire batch.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  async function copyBonusOutputExcelFromUi() {
+    if (!requireOperator()) return;
+    const dateValue = document.getElementById('bonusDate').value;
+    if (!dateValue) {
+      showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
+      return;
+    }
+    const btn = document.getElementById('bonusCopyExcelBtn');
+    setButtonLoading(btn, true, 'Copy...');
+    try {
+      const result = await bonusControlApi('export_bonus', { bonus_date: dateValue });
+      if (!result.tsv) throw new Error('Output TSV kosong.');
+      await copyTextToClipboard(result.tsv);
+      renderBonusStatusRefreshInfo({ summary: { done: result.rows.filter(row => row.Status === 'DONE').length, pending_active: result.rows.filter(row => row.Status === 'PENDING').length, expired: result.rows.filter(row => row.Status === 'EXPIRED').length } });
+      showToast(`Output Bonus Harian dicopy ke clipboard: ${result.count || 0} baris.`, 'success');
+    } catch (error) {
+      console.error('bonus-control export_bonus error:', error);
+      showToast(error.message || 'Gagal copy output Bonus Harian.', 'error');
     } finally {
       setButtonLoading(btn, false);
     }
@@ -5810,6 +6112,293 @@
     const ok = document.execCommand('copy');
     document.body.removeChild(textarea);
     if (!ok) throw new Error('Browser tidak mengizinkan copy otomatis.');
+  }
+
+  function dashboardRequireSuperadmin() {
+    if (isSuperAdmin()) return true;
+    showToast('Dashboard hanya untuk Superadmin.', 'error');
+    return false;
+  }
+
+  function dashboardDateValue() {
+    return document.getElementById('dashboardBonusDate')?.value || document.getElementById('bonusDate')?.value || getTodayWibInputValue();
+  }
+
+  function dashboardBonusTypeValue() {
+    return document.getElementById('dashboardBonusTypeFilter')?.value || 'ALL';
+  }
+
+  function dashboardSetText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }
+
+  function dashboardFormatAmount(value) {
+    return formatInt(Number(value || 0));
+  }
+
+  function dashboardSummaryItem(summary, key) {
+    return summary && summary[key] ? summary[key] : { count: 0, amount: 0 };
+  }
+
+  async function dashboardRefreshConnection() {
+    if (!dashboardRequireSuperadmin()) return;
+    const btn = document.getElementById('dashboardRefreshConnectionBtn');
+    setButtonLoading(btn, true, 'Refresh...');
+    try {
+      const result = await bonusControlApi('health');
+      dashboardSetText('dashboardHermesStatus', result.hermes_connected === null ? 'N/A' : (result.hermes_connected ? 'Connected' : 'Error'));
+      dashboardSetText('dashboardSupabaseStatus', result.supabase_connected ? 'Connected' : 'Error');
+      dashboardSetText('dashboardParserStatus', result.parser_api_connected ? 'OK' : 'Error');
+      dashboardSetText('dashboardServerTime', result.server_time || '-');
+      const note = document.getElementById('dashboardConnectionNote');
+      if (note) {
+        note.textContent = result.error || 'Connection check selesai.';
+        note.style.display = 'block';
+      }
+      showToast('Connection dashboard diperbarui.', result.supabase_connected ? 'success' : 'error');
+    } catch (error) {
+      console.error('dashboard health error:', error);
+      showToast(error.message || 'Gagal refresh connection.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  function dashboardRenderStatus(result) {
+    const summary = result.summary || {};
+    const done = dashboardSummaryItem(summary, 'DONE');
+    const pendingActive = dashboardSummaryItem(summary, 'PENDING_ACTIVE');
+    const pendingExpired = dashboardSummaryItem(summary, 'PENDING_EXPIRED');
+    const expired = dashboardSummaryItem(summary, 'EXPIRED');
+    const empty = dashboardSummaryItem(summary, 'EMPTY');
+    dashboardSetText('dashboardDoneCount', `${done.count} / ${dashboardFormatAmount(done.amount)}`);
+    dashboardSetText('dashboardPendingActiveCount', `${pendingActive.count} / ${dashboardFormatAmount(pendingActive.amount)}`);
+    dashboardSetText('dashboardPendingExpiredCount', `${pendingExpired.count} / ${dashboardFormatAmount(pendingExpired.amount)}`);
+    dashboardSetText('dashboardExpiredCount', `${expired.count} / ${dashboardFormatAmount(expired.amount)}`);
+    dashboardSetText('dashboardEmptyCount', String(empty.count || 0));
+    const note = document.getElementById('dashboardStatusNote');
+    if (note) {
+      const batches = Array.isArray(result.recent_batches) ? result.recent_batches.length : 0;
+      const claimSummary = result.by_bonus_type && result.by_bonus_type.KLAIM_MAHJONG ? result.by_bonus_type.KLAIM_MAHJONG : null;
+      const claimDone = claimSummary ? dashboardSummaryItem(claimSummary, 'DONE').count : 0;
+      const claimPending = claimSummary ? dashboardSummaryItem(claimSummary, 'PENDING_ACTIVE').count + dashboardSummaryItem(claimSummary, 'PENDING_EXPIRED').count : 0;
+      const claimText = claimSummary
+        ? `Klaim Mahjong: DONE ${claimDone}, PENDING ${claimPending}.`
+        : 'Klaim Mahjong belum masuk dashboard karena belum ada mapping penyimpanan Supabase.';
+      note.textContent = `Recent batches: ${batches}. Bonus date: ${result.bonus_date || dashboardDateValue()}. ${claimText}`;
+      note.style.display = 'block';
+    }
+  }
+
+  async function dashboardRefreshStatus() {
+    if (!dashboardRequireSuperadmin()) return;
+    const btn = document.getElementById('dashboardRefreshStatusBtn');
+    setButtonLoading(btn, true, 'Refresh...');
+    try {
+      const result = await bonusControlApi('dashboard_status', { bonus_date: dashboardDateValue() });
+      dashboardRenderStatus(result);
+      showToast('Status Dashboard diperbarui.', 'success');
+    } catch (error) {
+      console.error('dashboard status error:', error);
+      showToast(error.message || 'Gagal refresh status dashboard.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  async function dashboardExpirePending() {
+    if (!dashboardRequireSuperadmin()) return;
+    const btn = document.getElementById('dashboardExpirePendingBtn');
+    setButtonLoading(btn, true, 'Membersihkan...');
+    try {
+      const result = await bonusControlApi('expire_pending');
+      showToast(`Pending expired dibersihkan. Bonus: ${result.expired_bonus_rows || 0}, lock: ${result.expired_lock_rows || 0}.`, 'success');
+      await dashboardRefreshStatus();
+      await dashboardRefreshPending();
+    } catch (error) {
+      console.error('dashboard expire_pending error:', error);
+      showToast(error.message || 'Gagal bersihkan pending expired.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  function dashboardPendingActionButtons(row) {
+    const batchId = row.claim_batch_id || '';
+    if (!batchId) return '-';
+    return `
+      <button class="success" onclick="dashboardMarkBatchDone('${escapeHtml(batchId)}')">DONE</button>
+      <button class="danger" onclick="dashboardExpireBatch('${escapeHtml(batchId)}')">Expire</button>
+    `;
+  }
+
+  function dashboardRenderPending(activeRows, expiredRows) {
+    const table = document.getElementById('dashboardPendingTable');
+    if (!table) return;
+    const rows = [
+      ...(activeRows || []).map(row => ({ ...row, dashboardStatus: 'PENDING_ACTIVE' })),
+      ...(expiredRows || []).map(row => ({ ...row, dashboardStatus: 'PENDING_EXPIRED' }))
+    ];
+    table.innerHTML = rows.map(row => `
+      <tr>
+        <td><span class="status-badge ${row.dashboardStatus === 'PENDING_ACTIVE' ? 'pending' : 'expired'}">${escapeHtml(row.dashboardStatus)}</span></td>
+        <td>${escapeHtml(row.bonus_date || '')}</td>
+        <td>${escapeHtml(row.bonus_type || '')}</td>
+        <td>${escapeHtml(row.login_id || row.login_key || '')}</td>
+        <td class="num">${escapeHtml(String(row.bonus_amount ?? ''))}</td>
+        <td>${escapeHtml(row.operator_name || row.claim_owner || '')}</td>
+        <td>${escapeHtml(row.claim_batch_id || '')}</td>
+        <td>${escapeHtml(row.pending_expires_at || '')}</td>
+        <td class="row-actions">${dashboardPendingActionButtons(row)}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="9" class="empty">Tidak ada pending aktif/expired untuk filter ini.</td></tr>';
+  }
+
+  async function dashboardRefreshPending() {
+    if (!dashboardRequireSuperadmin()) return;
+    const btn = document.getElementById('dashboardRefreshPendingBtn');
+    setButtonLoading(btn, true, 'Refresh...');
+    try {
+      const payload = { bonus_date: dashboardDateValue(), bonus_type: dashboardBonusTypeValue() };
+      const active = await bonusControlApi('pending_active', payload);
+      const expired = await bonusControlApi('pending_expired', payload);
+      dashboardRenderPending(active.rows || [], expired.rows || []);
+      showToast(`Pending aktif ${active.count || 0}, pending expired ${expired.count || 0}.`, 'success');
+    } catch (error) {
+      console.error('dashboard pending error:', error);
+      showToast(error.message || 'Gagal refresh pending dashboard.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  async function dashboardMarkBatchDone(claimBatchId) {
+    if (!dashboardRequireSuperadmin() || !claimBatchId) return;
+    if (!window.confirm(`Superadmin akan menandai batch ${claimBatchId} sebagai DONE. Lanjutkan?`)) return;
+    try {
+      const result = await bonusControlApi('mark_done', {
+        claim_batch_id: claimBatchId,
+        operator_name: currentOperatorName(),
+        role: currentOperator?.role || ''
+      });
+      showToast(`Batch DONE. Rows: ${result.done_count || 0}.`, 'success');
+      await dashboardRefreshStatus();
+      await dashboardRefreshPending();
+    } catch (error) {
+      console.error('dashboard mark_done error:', error);
+      showToast(error.message || 'Gagal tandai batch DONE.', 'error');
+    }
+  }
+
+  async function dashboardExpireBatch(claimBatchId) {
+    if (!dashboardRequireSuperadmin() || !claimBatchId) return;
+    if (!window.confirm(`Superadmin akan mengubah batch ${claimBatchId} menjadi EXPIRED. Lanjutkan?`)) return;
+    try {
+      const result = await bonusControlApi('expire_batch', {
+        claim_batch_id: claimBatchId,
+        operator_name: currentOperatorName(),
+        role: currentOperator?.role || ''
+      });
+      showToast(`Batch di-expire. Rows: ${result.expired_count || 0}.`, 'success');
+      await dashboardRefreshStatus();
+      await dashboardRefreshPending();
+    } catch (error) {
+      console.error('dashboard expire_batch error:', error);
+      showToast(error.message || 'Gagal expire batch.', 'error');
+    }
+  }
+
+  function csvEscape(value) {
+    const text = String(value ?? '');
+    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  async function dashboardCopyBonusExcel() {
+    if (!dashboardRequireSuperadmin()) return;
+    const btn = document.getElementById('dashboardCopyBonusExcelBtn');
+    setButtonLoading(btn, true, 'Copy...');
+    try {
+      const result = await bonusControlApi('export_bonus', { bonus_date: dashboardDateValue() });
+      const preview = document.getElementById('dashboardExcelPreview');
+      if (preview) preview.value = result.tsv || '';
+      await copyTextToClipboard(result.tsv || '');
+      showToast(`TSV Bonus Harian dicopy: ${result.count || 0} baris.`, 'success');
+    } catch (error) {
+      console.error('dashboard export_bonus error:', error);
+      showToast(error.message || 'Gagal copy Excel Bonus Harian.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  function dashboardDownloadCsv() {
+    const preview = document.getElementById('dashboardExcelPreview');
+    const text = preview?.value || '';
+    if (!text.trim()) {
+      showToast('Preview TSV masih kosong.', 'error');
+      return;
+    }
+    const csv = text.split(/\r?\n/).map(line => line.split('\t').map(csvEscape).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `bonus-harian-dashboard-${dashboardDateValue()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function dashboardRefreshHermes() {
+    if (!dashboardRequireSuperadmin()) return;
+    const btn = document.getElementById('dashboardRefreshHermesBtn');
+    setButtonLoading(btn, true, 'Refresh...');
+    try {
+      const result = await bonusControlApi('hermes_preview_status');
+      const note = document.getElementById('dashboardHermesNote');
+      const table = document.getElementById('dashboardHermesTable');
+      if (note) note.textContent = result.message || 'Hermes preview queue dimuat.';
+      const rows = Array.isArray(result.rows) ? result.rows : [];
+      if (table) {
+        table.innerHTML = rows.map(row => `
+          <tr>
+            <td>${escapeHtml(row.status || '')}</td>
+            <td>${escapeHtml(row.batch_code || row.claim_batch_id || '')}</td>
+            <td>${escapeHtml(row.bonus_type || row.type || '')}</td>
+            <td>${escapeHtml(row.operator_name || '')}</td>
+            <td>${escapeHtml(row.created_at || '')}</td>
+            <td class="row-actions"><button disabled>Approve/Release</button></td>
+          </tr>
+        `).join('') || '<tr><td colspan="6" class="empty">Hermes preview queue belum dibuat.</td></tr>';
+      }
+      showToast(result.message || 'Hermes preview status dimuat.', rows?.length ? 'success' : '');
+    } catch (error) {
+      console.error('dashboard hermes_preview_status error:', error);
+      showToast(error.message || 'Gagal refresh Hermes preview.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  async function dashboardCopyHermesExcel() {
+    if (!dashboardRequireSuperadmin()) return;
+    try {
+      const result = await bonusControlApi('hermes_preview_status');
+      const rows = Array.isArray(result.rows) ? result.rows : [];
+      if (!rows.length) {
+        showToast(result.message || 'Hermes preview queue belum dibuat.', 'error');
+        return;
+      }
+      const columns = Object.keys(rows[0]);
+      const tsv = [columns.join('\t'), ...rows.map(row => columns.map(column => String(row[column] ?? '').replace(/\t/g, ' ')).join('\t'))].join('\n');
+      await copyTextToClipboard(tsv);
+      showToast('Preview Hermes dicopy ke Excel.', 'success');
+    } catch (error) {
+      console.error('dashboard copy hermes error:', error);
+      showToast(error.message || 'Gagal copy Hermes preview.', 'error');
+    }
   }
 
   async function adminLogBonusClaimCopy(copiedCount) {
@@ -8498,6 +9087,10 @@
   document.getElementById('bonusProcessBtn').addEventListener('click', bonusProcess);
   document.getElementById('bonusExpirePendingBtn').addEventListener('click', expirePendingBonusFromUi);
   document.getElementById('bonusRefreshStatusBtn').addEventListener('click', refreshBonusStatusFromUi);
+  document.getElementById('bonusPendingActiveBtn').addEventListener('click', showPendingActiveFromUi);
+  document.getElementById('bonusBatchDoneBtn').addEventListener('click', markBatchDoneFromUi);
+  document.getElementById('bonusBatchExpireBtn').addEventListener('click', expireBatchFromUi);
+  document.getElementById('bonusCopyExcelBtn').addEventListener('click', copyBonusOutputExcelFromUi);
   document.getElementById('bonusResetBtn').addEventListener('click', bonusReset);
   document.getElementById('bonusCopyAllBtn').addEventListener('click', bonusCopyAll);
   document.getElementById('bonusExportAdjustmentJsonBtn').addEventListener('click', previewAdjustmentBatchJson);
@@ -8519,6 +9112,19 @@
   document.getElementById('monitorLoadMoreBtn').addEventListener('click', adminLoadMoreBonusMonitoring);
   document.getElementById('monitorStatusFilter').addEventListener('change', () => adminFetchBonusMonitoring({ resetPage: true }));
   document.getElementById('monitorBonusDateFilter').addEventListener('change', () => adminFetchBonusMonitoring({ resetPage: true }));
+  document.getElementById('dashboardRefreshConnectionBtn').addEventListener('click', dashboardRefreshConnection);
+  document.getElementById('dashboardRefreshStatusBtn').addEventListener('click', dashboardRefreshStatus);
+  document.getElementById('dashboardExpirePendingBtn').addEventListener('click', dashboardExpirePending);
+  document.getElementById('dashboardRefreshPendingBtn').addEventListener('click', dashboardRefreshPending);
+  document.getElementById('dashboardCopyBonusExcelBtn').addEventListener('click', dashboardCopyBonusExcel);
+  document.getElementById('dashboardDownloadCsvBtn').addEventListener('click', dashboardDownloadCsv);
+  document.getElementById('dashboardRefreshHermesBtn').addEventListener('click', dashboardRefreshHermes);
+  document.getElementById('dashboardCopyHermesExcelBtn').addEventListener('click', dashboardCopyHermesExcel);
+  document.getElementById('dashboardBonusDate').addEventListener('change', () => {
+    dashboardRefreshStatus();
+    dashboardRefreshPending();
+  });
+  document.getElementById('dashboardBonusTypeFilter').addEventListener('change', dashboardRefreshPending);
   let monitorOperatorFilterTimer = null;
   document.getElementById('monitorOperatorFilter').addEventListener('input', () => {
     clearTimeout(monitorOperatorFilterTimer);
