@@ -1,3 +1,5 @@
+import { createClient } from '@supabase/supabase-js';
+
 export const config = {
   api: {
     bodyParser: false
@@ -6,6 +8,11 @@ export const config = {
 
 const FIXED_SOURCE = 'hermes-telegram';
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const supabaseUrl = process.env.SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = supabaseUrl && serviceRoleKey
+  ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
+  : null;
 
 function json(res, status, body) {
   res.status(status).json(body);
@@ -82,6 +89,20 @@ function displayLongDate(value) {
 
 function compactDate(value) {
   return String(value || '').replace(/-/g, '');
+}
+
+function addMinutes(date, minutes) {
+  return new Date(date.getTime() + minutes * 60 * 1000).toISOString();
+}
+
+function addDays(date, days) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function createBatchCode(dateValue) {
+  const now = new Date();
+  const tail = `${String(now.getUTCHours()).padStart(2, '0')}${String(now.getUTCMinutes()).padStart(2, '0')}${String(now.getUTCSeconds()).padStart(2, '0')}`;
+  return `BH-${compactDate(dateValue)}-${tail}`;
 }
 
 function bonusMonthMap() {
@@ -651,6 +672,306 @@ function buildBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source }) {
   };
 }
 
+async function expireOldBonusPending() {
+  if (!supabase) throw new Error('Konfigurasi Supabase belum lengkap.');
+
+  const { data, error } = await supabase.rpc('expire_old_bonus_pending');
+  if (!error) {
+    return {
+      ok: true,
+      expired_bonus_rows: Number(data?.expired_bonus_rows || 0),
+      expired_lock_rows: Number(data?.expired_lock_rows || 0)
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { data: bonusRows, error: bonusFetchError } = await supabase
+    .from('bonus_done_daily')
+    .select('id')
+    .eq('bonus_status', 'PENDING')
+    .lt('pending_expires_at', now);
+  if (bonusFetchError) throw bonusFetchError;
+
+  const { error: bonusUpdateError } = await supabase
+    .from('bonus_done_daily')
+    .update({
+      bonus_status: 'EXPIRED',
+      updated_at: now,
+      finalized_note: 'Auto expired karena pending_expires_at sudah lewat'
+    })
+    .eq('bonus_status', 'PENDING')
+    .lt('pending_expires_at', now);
+  if (bonusUpdateError && bonusUpdateError.code === '42703') {
+    const retry = await supabase
+      .from('bonus_done_daily')
+      .update({
+        bonus_status: 'EXPIRED',
+        updated_at: now
+      })
+      .eq('bonus_status', 'PENDING')
+      .lt('pending_expires_at', now);
+    if (retry.error) throw retry.error;
+  } else if (bonusUpdateError) {
+    throw bonusUpdateError;
+  }
+
+  const { data: lockRows, error: lockFetchError } = await supabase
+    .from('bonus_process_locks')
+    .select('id')
+    .eq('lock_status', 'PENDING')
+    .lt('pending_expires_at', now);
+  if (lockFetchError) throw lockFetchError;
+
+  const { error: lockUpdateError } = await supabase
+    .from('bonus_process_locks')
+    .update({
+      lock_status: 'EXPIRED',
+      updated_at: now,
+      finalized_note: 'Auto expired karena pending_expires_at sudah lewat'
+    })
+    .eq('lock_status', 'PENDING')
+    .lt('pending_expires_at', now);
+  if (lockUpdateError && lockUpdateError.code === '42703') {
+    const retry = await supabase
+      .from('bonus_process_locks')
+      .update({
+        lock_status: 'EXPIRED',
+        updated_at: now
+      })
+      .eq('lock_status', 'PENDING')
+      .lt('pending_expires_at', now);
+    if (retry.error) throw retry.error;
+  } else if (lockUpdateError) {
+    throw lockUpdateError;
+  }
+
+  return {
+    ok: true,
+    expired_bonus_rows: bonusRows?.length || 0,
+    expired_lock_rows: lockRows?.length || 0
+  };
+}
+
+async function fetchBonusStatusRows(dateValue) {
+  const baseSelect = 'id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at, done_at';
+  let { data, error } = await supabase
+    .from('bonus_done_daily')
+    .select(`${baseSelect}, member_id`)
+    .eq('bonus_date', dateValue)
+    .eq('bonus_type', 'BONUS_HARIAN')
+    .order('created_at', { ascending: true });
+  if (error && error.code === '42703') {
+    const fallback = await supabase
+      .from('bonus_done_daily')
+      .select(baseSelect)
+      .eq('bonus_date', dateValue)
+      .eq('bonus_type', 'BONUS_HARIAN')
+      .order('created_at', { ascending: true });
+    data = fallback.data;
+    error = fallback.error;
+  }
+  if (error) throw error;
+  return data || [];
+}
+
+async function fetchActivePendingLock(dateValue) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('bonus_process_locks')
+    .select('*')
+    .eq('bonus_date', dateValue)
+    .eq('lock_status', 'PENDING')
+    .gt('pending_expires_at', now)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function classifyReadyItems(items, existingRows, activeLock) {
+  const nowMs = Date.now();
+  const doneKeys = new Set();
+  const pendingKeys = new Set();
+  const doneMemberIds = new Set();
+  const pendingMemberIds = new Set();
+  let expiredReleased = 0;
+
+  (existingRows || []).forEach(row => {
+    const loginKey = normalizeLoginId(row.login_key || row.login_id);
+    const memberId = cleanCell(row.member_id || '').toUpperCase();
+    const status = String(row.bonus_status || '').toUpperCase();
+    const pendingMs = row.pending_expires_at ? new Date(row.pending_expires_at).getTime() : 0;
+    if (status === 'DONE') {
+      if (loginKey) doneKeys.add(loginKey);
+      if (memberId) doneMemberIds.add(memberId);
+    } else if (status === 'PENDING' && pendingMs >= nowMs) {
+      if (loginKey) pendingKeys.add(loginKey);
+      if (memberId) pendingMemberIds.add(memberId);
+    } else if (status === 'EXPIRED' || (status === 'PENDING' && pendingMs && pendingMs < nowMs)) {
+      expiredReleased += 1;
+    }
+  });
+
+  const ready = [];
+  const skipped = [];
+  const manualReview = [];
+
+  items.forEach(item => {
+    const loginKey = normalizeLoginId(item.login_id);
+    const memberKey = cleanCell(item.member_id).toUpperCase();
+    if (doneKeys.has(loginKey) || (memberKey && doneMemberIds.has(memberKey))) {
+      skipped.push({
+        ...item,
+        status: 'SKIPPED_ALREADY_GIVEN',
+        reason: 'SKIPPED_ALREADY_GIVEN'
+      });
+      return;
+    }
+    if (pendingKeys.has(loginKey) || (memberKey && pendingMemberIds.has(memberKey)) || activeLock) {
+      skipped.push({
+        ...item,
+        status: 'PENDING_OTHER_BATCH',
+        reason: 'PENDING_OTHER_BATCH',
+        claim_batch_id: activeLock?.claim_batch_id || ''
+      });
+      return;
+    }
+    if (item.warning) {
+      manualReview.push({
+        ...item,
+        status: 'MANUAL_REVIEW',
+        reason: item.warning
+      });
+    }
+    ready.push(item);
+  });
+
+  return { ready, skipped, manualReview, expiredReleased };
+}
+
+async function reserveReadyItems({ items, dateValue, batchCode, source }) {
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const pendingExpiresAt = addMinutes(nowDate, 5);
+  const expiresAt = addDays(nowDate, 2);
+  const claimOwner = 'HERMES-TELEGRAM';
+  const operatorName = 'Hermes Telegram';
+
+  const lockPayload = {
+    bonus_date: dateValue,
+    lock_status: 'PENDING',
+    claim_owner: claimOwner,
+    claim_batch_id: batchCode,
+    operator_name: operatorName,
+    started_at: now,
+    updated_at: now,
+    pending_expires_at: pendingExpiresAt,
+    expires_at: expiresAt
+  };
+  const { error: lockError } = await supabase
+    .from('bonus_process_locks')
+    .insert(lockPayload);
+  if (lockError) throw lockError;
+
+  const rows = items.map(item => ({
+    bonus_date: dateValue,
+    login_id: item.login_id,
+    login_key: normalizeLoginId(item.login_id),
+    member_id: item.member_id || '',
+    bonus_type: 'BONUS_HARIAN',
+    bonus_amount: item.amount_bo,
+    remark: item.note,
+    source: source || 'hermes_telegram',
+    operator_name: operatorName,
+    bonus_status: 'PENDING',
+    claim_owner: claimOwner,
+    claim_batch_id: batchCode,
+    claimed_at: now,
+    updated_at: now,
+    pending_expires_at: pendingExpiresAt,
+    expires_at: expiresAt
+  }));
+
+  let { data, error } = await supabase
+    .from('bonus_done_daily')
+    .insert(rows)
+    .select('id, login_key, bonus_status, claim_batch_id, pending_expires_at');
+  if (error && error.code === '42703') {
+    const fallbackRows = rows.map(({ member_id, ...row }) => row);
+    const fallback = await supabase
+      .from('bonus_done_daily')
+      .insert(fallbackRows)
+      .select('id, login_key, bonus_status, claim_batch_id, pending_expires_at');
+    data = fallback.data;
+    error = fallback.error;
+  }
+  if (error) throw error;
+  return { rows: data || [], lock: lockPayload, pending_expires_at: pendingExpiresAt };
+}
+
+async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source }) {
+  if (!supabase) throw new Error('Konfigurasi Supabase belum lengkap.');
+  const batch = buildBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source });
+  const dateValue = batch.items[0]?.bonus_date || (isValidDate(bonusDate) ? bonusDate : getTodayJakartaInput());
+  const batchCode = createBatchCode(dateValue);
+  batch.batch_code = batchCode;
+
+  const expireResult = await expireOldBonusPending();
+  const existingRows = await fetchBonusStatusRows(dateValue);
+  const activeLock = await fetchActivePendingLock(dateValue);
+  const classified = classifyReadyItems(batch.items, existingRows, activeLock);
+
+  batch.skipped = [...batch.skipped, ...classified.skipped];
+  batch.warnings = [...batch.warnings];
+  batch.items = classified.ready;
+  batch.summary = {
+    ...batch.summary,
+    total_eligible_from_deposit: classified.ready.length + classified.skipped.length,
+    ready_items: classified.ready.length,
+    skipped_already_given: classified.skipped.filter(item => item.reason === 'SKIPPED_ALREADY_GIVEN').length,
+    pending_other_batch: classified.skipped.filter(item => item.reason === 'PENDING_OTHER_BATCH').length,
+    expired_released: classified.expiredReleased + (expireResult.expired_bonus_rows || 0),
+    manual_review_items: classified.manualReview.length,
+    total_amount_bo_ready: classified.ready.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
+    total_items: classified.ready.length,
+    total_amount_raw: classified.ready.reduce((sum, item) => sum + Number(item.amount_raw || 0), 0),
+    total_amount_bo: classified.ready.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
+    skipped_items: batch.skipped.length
+  };
+
+  if (classified.ready.length === 0) {
+    return {
+      batch,
+      should_create_task: false,
+      skipped: batch.skipped,
+      manual_review: classified.manualReview
+    };
+  }
+
+  const reserve = await reserveReadyItems({
+    items: classified.ready,
+    dateValue,
+    batchCode,
+    source: 'hermes_telegram'
+  });
+
+  batch.items = batch.items.map(item => ({
+    ...item,
+    status: 'READY',
+    claim_batch_id: batchCode,
+    pending_expires_at: reserve.pending_expires_at
+  }));
+
+  return {
+    batch,
+    should_create_task: true,
+    skipped: batch.skipped,
+    manual_review: classified.manualReview,
+    reserve
+  };
+}
+
 async function readRequestBody(req) {
   const chunks = [];
   let total = 0;
@@ -814,20 +1135,22 @@ export default async function handler(req, res) {
       return json(res, 400, { ok: false, error: 'INVALID_BONUS_DATE', message: 'bonus_date harus YYYY-MM-DD.' });
     }
 
-    const batch = buildBonusBatch({
+    const result = await buildAndReserveBonusBatch({
       depositRaw,
       adjustmentRaw,
       bonusDate,
       source
     });
+    const { batch } = result;
 
     if (!batch.items.length) {
-      return json(res, 400, {
-        ok: false,
-        error: 'EMPTY_BATCH',
-        message: 'Tidak ada item bonus yang bisa diproses.',
+      return json(res, 200, {
+        ok: true,
+        should_create_task: false,
+        message: 'Tidak ada item READY untuk diproses.',
         summary: batch.summary,
-        batch
+        skipped: result.skipped || batch.skipped || [],
+        manual_review: result.manual_review || []
       });
     }
 
@@ -835,10 +1158,13 @@ export default async function handler(req, res) {
 
     return json(res, 200, {
       ok: true,
+      should_create_task: true,
       batch_code: batch.batch_code,
       batch_file: batchFile,
       summary: batch.summary,
-      batch
+      batch,
+      skipped: result.skipped || batch.skipped || [],
+      manual_review: result.manual_review || []
     });
   } catch (error) {
     console.error('generate-json parser error:', error);
