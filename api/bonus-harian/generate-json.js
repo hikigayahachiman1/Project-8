@@ -5,6 +5,7 @@ export const config = {
 };
 
 const FIXED_SOURCE = 'hermes-telegram';
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 function json(res, status, body) {
   res.status(status).json(body);
@@ -241,16 +242,16 @@ function parseDepositRows(rawText) {
 
   if (looksLikeCsv(text)) {
     csvRecords(text).forEach(row => {
-      const loginId = cleanCell(firstValue(row, ['Login ID', 'LoginID', 'User ID', 'USER ID']));
-      const memberId = cleanCell(firstValue(row, ['Member ID', 'MemberID', 'Member Id']));
-      const memberName = cleanCell(firstValue(row, ['Member Name', 'Member Acct Name', 'Nama Rekening', 'Account Name']));
-      const applicationTime = cleanCell(firstValue(row, ['Application Time (GMT+8)', 'Application Time', 'Apply Time', 'Date Created']));
+      const loginId = cleanCell(firstValue(row, ['Login ID', 'LoginID', 'login_id', 'User ID', 'USER ID', 'Username', 'User Name']));
+      const memberId = cleanCell(firstValue(row, ['Member ID', 'MemberID', 'member_id', 'Member Id']));
+      const memberName = cleanCell(firstValue(row, ['Member Name', 'MemberName', 'Member Acct Name', 'Nama Rekening', 'Account Name', 'Bank Account Name', 'Name']));
+      const applicationTime = cleanCell(firstValue(row, ['Application Time (GMT+8)', 'Application Time', 'Apply Time', 'Date Created', 'Created Time', 'Date']));
       const payment = cleanCell(firstValue(row, ['Payment', 'Channel']));
       const method = cleanCell(firstValue(row, ['Payment Method', 'Payment Method ', 'Method']));
       const currency = cleanCell(firstValue(row, ['Currency']));
-      const amount = cleanCell(firstValue(row, ['Amount', 'Nominal', 'Deposit Amount']));
+      const amount = cleanCell(firstValue(row, ['Amount', 'Nominal', 'Deposit Amount', 'Approved Amount']));
       const fee = cleanCell(firstValue(row, ['Fee', 'QRIS Fee', 'Potongan QRIS']));
-      const status = cleanCell(firstValue(row, ['Status']));
+      const status = cleanCell(firstValue(row, ['Status', 'Trans. Status', 'Transaction Status']));
 
       if (!applicationTime || !loginId || !amount) return;
       if (payment && payment.toUpperCase() !== 'QRIS IM') return;
@@ -329,14 +330,15 @@ function parseAdjustmentRows(rawText) {
 
   if (looksLikeCsv(text)) {
     return csvRecords(text).map(row => {
-      const loginId = cleanCell(firstValue(row, ['Login ID', 'LoginID', 'User ID']));
-      const memberId = cleanCell(firstValue(row, ['Member ID', 'MemberID']));
-      const status = cleanCell(firstValue(row, ['Status']));
+      const loginId = cleanCell(firstValue(row, ['Login ID', 'LoginID', 'login_id', 'User ID', 'Username', 'User Name']));
+      const memberId = cleanCell(firstValue(row, ['Member ID', 'MemberID', 'member_id']));
+      const status = cleanCell(firstValue(row, ['Status', 'Trans. Status', 'Transaction Status']));
       const transactionNumber = cleanCell(firstValue(row, ['Transaction Number', 'Trans. Number', 'Trans Number']));
       const remark = cleanCell(firstValue(row, ['Remark', 'Remarks']));
       const approvedTime = cleanCell(firstValue(row, ['Approved Time', 'Approve Time']));
       const dateCreated = cleanCell(firstValue(row, ['Date Created', 'Created Time']));
-      const bonusDate = parseBonusDateFromRemark(`${transactionNumber} ${remark}`, null);
+      const rowDate = parseBoDate(approvedTime) || parseBoDate(dateCreated);
+      const bonusDate = parseBonusDateFromRemark(`${transactionNumber} ${remark}`, rowDate) || gmt7DateInput(approvedTime || dateCreated);
       return {
         loginId,
         loginKey: normalizeLoginId(loginId),
@@ -395,7 +397,10 @@ function parseAdjustmentRows(rawText) {
     const transactionNumber = lines.slice(i + 8, statusIndex).join(' ').trim();
     const remarkEnd = dateCreatedIndex === -1 ? Math.min(lines.length, statusIndex + 4) : dateCreatedIndex;
     const remark = lines.slice(statusIndex + 1, remarkEnd).join(' ').trim() || transactionNumber;
-    const bonusDate = parseBonusDateFromRemark(`${transactionNumber} ${remark}`, null);
+    const dateCreated = dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '';
+    const approvedTime = approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '';
+    const rowDate = parseBoDate(approvedTime) || parseBoDate(dateCreated);
+    const bonusDate = parseBonusDateFromRemark(`${transactionNumber} ${remark}`, rowDate) || gmt7DateInput(approvedTime || dateCreated);
 
     records.push({
       loginId,
@@ -406,8 +411,8 @@ function parseAdjustmentRows(rawText) {
       status: lines[statusIndex],
       transactionNumber,
       remark,
-      dateCreated: dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '',
-      approvedTime: approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '',
+      dateCreated,
+      approvedTime,
       bonusDate
     });
   }
@@ -470,7 +475,7 @@ function validateBatchItems(rows, dateValue) {
     }
 
     items.push({
-      login_id: loginId,
+      login_id: normalizeLoginId(loginId),
       member_id: memberId,
       member_name: memberName,
       amount_raw: amountRaw,
@@ -648,7 +653,16 @@ function buildBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source }) {
 
 async function readRequestBody(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(Buffer.from(chunk));
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > MAX_UPLOAD_BYTES) {
+      const error = new Error('Ukuran upload terlalu besar. Maksimal 10MB.');
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(Buffer.from(chunk));
+  }
   return Buffer.concat(chunks);
 }
 
@@ -704,13 +718,20 @@ function parseMultipart(buffer, contentType) {
   return { fields, files };
 }
 
-function fileBufferToText(file, fieldName) {
+async function fileBufferToText(file, fieldName) {
   if (!file || !file.buffer || file.buffer.length === 0) {
     if (fieldName === 'deposit_file') throw new Error('deposit_file wajib diisi.');
     return '';
   }
   if (/\.xlsx$/i.test(file.filename || '')) {
-    throw new Error('XLSX belum didukung di endpoint ini karena dependency Excel belum tersedia. Kirim CSV/raw text.');
+    try {
+      const xlsx = await import('xlsx');
+      const workbook = xlsx.read(file.buffer, { type: 'buffer', cellDates: false });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      return xlsx.utils.sheet_to_csv(firstSheet, { FS: ',', blankrows: false });
+    } catch (error) {
+      throw new Error('XLSX belum didukung di endpoint ini karena dependency Excel belum tersedia. Kirim CSV/raw text.');
+    }
   }
   return file.buffer.toString('utf8').replace(/^\uFEFF/, '');
 }
@@ -730,6 +751,10 @@ export default async function handler(req, res) {
     if (!/multipart\/form-data/i.test(String(contentType))) {
       return json(res, 400, { ok: false, error: 'INVALID_CONTENT_TYPE', message: 'Gunakan multipart/form-data.' });
     }
+    const contentLength = Number(req.headers['content-length'] || 0);
+    if (contentLength > MAX_UPLOAD_BYTES) {
+      return json(res, 413, { ok: false, error: 'PAYLOAD_TOO_LARGE', message: 'Ukuran upload terlalu besar. Maksimal 10MB.' });
+    }
 
     const bodyBuffer = await readRequestBody(req);
     const { fields, files } = parseMultipart(bodyBuffer, contentType);
@@ -743,8 +768,8 @@ export default async function handler(req, res) {
       return json(res, 400, { ok: false, error: 'INVALID_SOURCE', message: 'source harus hermes-telegram.' });
     }
 
-    const depositRaw = fileBufferToText(files.deposit_file, 'deposit_file');
-    const adjustmentRaw = files.adjustment_file ? fileBufferToText(files.adjustment_file, 'adjustment_file') : '';
+    const depositRaw = await fileBufferToText(files.deposit_file, 'deposit_file');
+    const adjustmentRaw = files.adjustment_file ? await fileBufferToText(files.adjustment_file, 'adjustment_file') : '';
     const bonusDate = String(fields.bonus_date || '').trim();
 
     if (bonusDate && !isValidDate(bonusDate)) {
@@ -768,8 +793,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
-    const batchFile = `batch-adjustment-${batch.batch_code}-${stamp}.json`;
+    const batchFile = `batch-adjustment-${batch.batch_code}.json`;
 
     return json(res, 200, {
       ok: true,
@@ -780,9 +804,9 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('generate-json parser error:', error);
-    return json(res, 500, {
+    return json(res, error.statusCode || 500, {
       ok: false,
-      error: 'PARSER_FAILED',
+      error: error.statusCode === 413 ? 'PAYLOAD_TOO_LARGE' : 'PARSER_FAILED',
       message: error.message || 'Parser gagal memproses file.'
     });
   }
