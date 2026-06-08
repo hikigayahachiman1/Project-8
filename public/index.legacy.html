@@ -3163,10 +3163,36 @@
 
         <section class="card">
           <div class="card-title">Output Excel</div>
-          <div class="card-desc">TSV siap copy langsung ke Excel.</div>
+          <div class="card-desc">Output Bonus Harian dari database pusat, siap copy langsung ke Excel.</div>
           <div class="bonus-actions">
-            <button id="dashboardCopyBonusExcelBtn" class="success">Copy Excel Bonus Harian</button>
+            <button id="dashboardRefreshOutputBonusBtn" class="primary">Refresh Output Bonus</button>
+            <button id="dashboardCopyBonusExcelBtn" class="success">Copy Excel</button>
             <button id="dashboardDownloadCsvBtn" class="ghost">Download CSV</button>
+          </div>
+          <div id="dashboardOutputBonusNote" class="source-note" style="display:none;"></div>
+          <div class="table-wrap" style="margin-top:10px; max-height:320px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>No</th>
+                  <th>Bonus Date</th>
+                  <th>Login ID</th>
+                  <th>Login Key</th>
+                  <th>Bonus Type</th>
+                  <th class="num">Amount BO</th>
+                  <th>Remark</th>
+                  <th>Status</th>
+                  <th>Operator</th>
+                  <th>Claim Batch ID</th>
+                  <th>Pending Expires At</th>
+                  <th>Done At</th>
+                  <th>Created At</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardOutputBonusTable">
+                <tr><td colspan="13" class="empty">Klik Refresh Output Bonus untuk memuat data.</td></tr>
+              </tbody>
+            </table>
           </div>
           <textarea id="dashboardExcelPreview" style="min-height:220px;" placeholder="TSV preview akan muncul di sini..." readonly></textarea>
         </section>
@@ -6314,18 +6340,80 @@
     return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   }
 
+  let dashboardBonusOutputTsv = '';
+
+  function dashboardRenderBonusOutput(result) {
+    const table = document.getElementById('dashboardOutputBonusTable');
+    const note = document.getElementById('dashboardOutputBonusNote');
+    const preview = document.getElementById('dashboardExcelPreview');
+    const rows = Array.isArray(result.rows) ? result.rows : [];
+    dashboardBonusOutputTsv = result.tsv || '';
+    if (preview) preview.value = dashboardBonusOutputTsv;
+
+    if (note) {
+      note.textContent = rows.length
+        ? `Output Bonus Harian: ${rows.length} baris untuk ${result.bonus_date || dashboardDateValue()}.`
+        : 'Tidak ada output Bonus Harian untuk tanggal ini.';
+      note.style.display = 'block';
+    }
+
+    if (!table) return;
+    table.innerHTML = rows.map(row => `
+      <tr>
+        <td>${escapeHtml(String(row.No ?? ''))}</td>
+        <td>${escapeHtml(row['Bonus Date'] || '')}</td>
+        <td>${escapeHtml(row['Login ID'] || '')}</td>
+        <td>${escapeHtml(row['Login Key'] || '')}</td>
+        <td>${escapeHtml(row['Bonus Type'] || '')}</td>
+        <td class="num">${escapeHtml(String(row['Amount BO'] ?? ''))}</td>
+        <td>${escapeHtml(row.Remark || '')}</td>
+        <td>${escapeHtml(row.Status || '')}</td>
+        <td>${escapeHtml(row.Operator || '')}</td>
+        <td>${escapeHtml(row['Claim Batch ID'] || '')}</td>
+        <td>${escapeHtml(row['Pending Expires At'] || '')}</td>
+        <td>${escapeHtml(row['Done At'] || '')}</td>
+        <td>${escapeHtml(row['Created At'] || '')}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="13" class="empty">Tidak ada output Bonus Harian untuk tanggal ini.</td></tr>';
+  }
+
+  async function dashboardRefreshBonusOutput() {
+    if (!dashboardRequireSuperadmin()) return;
+    const btn = document.getElementById('dashboardRefreshOutputBonusBtn');
+    setButtonLoading(btn, true, 'Refresh...');
+    try {
+      const result = await bonusControlApi('export_bonus', { bonus_date: dashboardDateValue() });
+      dashboardRenderBonusOutput(result);
+      if (!result.count) {
+        showToast('Tidak ada output Bonus Harian untuk tanggal ini.', 'error');
+        return;
+      }
+      showToast(`Output Bonus Harian dimuat: ${result.count || 0} baris.`, 'success');
+    } catch (error) {
+      console.error('dashboard export_bonus error:', error);
+      showToast(error.message || 'Gagal refresh output Bonus Harian.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
   async function dashboardCopyBonusExcel() {
     if (!dashboardRequireSuperadmin()) return;
     const btn = document.getElementById('dashboardCopyBonusExcelBtn');
     setButtonLoading(btn, true, 'Copy...');
     try {
-      const result = await bonusControlApi('export_bonus', { bonus_date: dashboardDateValue() });
-      const preview = document.getElementById('dashboardExcelPreview');
-      if (preview) preview.value = result.tsv || '';
-      await copyTextToClipboard(result.tsv || '');
-      showToast(`TSV Bonus Harian dicopy: ${result.count || 0} baris.`, 'success');
+      if (!dashboardBonusOutputTsv) {
+        const result = await bonusControlApi('export_bonus', { bonus_date: dashboardDateValue() });
+        dashboardRenderBonusOutput(result);
+      }
+      if (!dashboardBonusOutputTsv) {
+        showToast('Tidak ada output Bonus Harian untuk tanggal ini.', 'error');
+        return;
+      }
+      await copyTextToClipboard(dashboardBonusOutputTsv);
+      showToast('Output Bonus Harian dicopy ke Excel.', 'success');
     } catch (error) {
-      console.error('dashboard export_bonus error:', error);
+      console.error('dashboard copy bonus excel error:', error);
       showToast(error.message || 'Gagal copy Excel Bonus Harian.', 'error');
     } finally {
       setButtonLoading(btn, false);
@@ -6333,8 +6421,7 @@
   }
 
   function dashboardDownloadCsv() {
-    const preview = document.getElementById('dashboardExcelPreview');
-    const text = preview?.value || '';
+    const text = dashboardBonusOutputTsv || document.getElementById('dashboardExcelPreview')?.value || '';
     if (!text.trim()) {
       showToast('Preview TSV masih kosong.', 'error');
       return;
@@ -9116,11 +9203,19 @@
   document.getElementById('dashboardRefreshStatusBtn').addEventListener('click', dashboardRefreshStatus);
   document.getElementById('dashboardExpirePendingBtn').addEventListener('click', dashboardExpirePending);
   document.getElementById('dashboardRefreshPendingBtn').addEventListener('click', dashboardRefreshPending);
+  document.getElementById('dashboardRefreshOutputBonusBtn').addEventListener('click', dashboardRefreshBonusOutput);
   document.getElementById('dashboardCopyBonusExcelBtn').addEventListener('click', dashboardCopyBonusExcel);
   document.getElementById('dashboardDownloadCsvBtn').addEventListener('click', dashboardDownloadCsv);
   document.getElementById('dashboardRefreshHermesBtn').addEventListener('click', dashboardRefreshHermes);
   document.getElementById('dashboardCopyHermesExcelBtn').addEventListener('click', dashboardCopyHermesExcel);
   document.getElementById('dashboardBonusDate').addEventListener('change', () => {
+    dashboardBonusOutputTsv = '';
+    const preview = document.getElementById('dashboardExcelPreview');
+    const table = document.getElementById('dashboardOutputBonusTable');
+    const note = document.getElementById('dashboardOutputBonusNote');
+    if (preview) preview.value = '';
+    if (table) table.innerHTML = '<tr><td colspan="13" class="empty">Klik Refresh Output Bonus untuk memuat data.</td></tr>';
+    if (note) note.style.display = 'none';
     dashboardRefreshStatus();
     dashboardRefreshPending();
   });
