@@ -682,7 +682,8 @@ function splitBuffer(buffer, separator) {
 function parseMultipart(buffer, contentType) {
   const boundaryMatch = String(contentType || '').match(/boundary=(?:"([^"]+)"|([^;]+))/i);
   if (!boundaryMatch) throw new Error('Boundary multipart tidak ditemukan.');
-  const boundary = Buffer.from(`--${boundaryMatch[1] || boundaryMatch[2]}`);
+  const boundaryValue = String(boundaryMatch[1] || boundaryMatch[2] || '').trim();
+  const boundary = Buffer.from(`--${boundaryValue}`);
   const parts = splitBuffer(buffer, boundary);
   const fields = {};
   const files = {};
@@ -691,23 +692,32 @@ function parseMultipart(buffer, contentType) {
     let chunk = part;
     if (chunk.length === 0) return;
     if (chunk.slice(0, 2).toString() === '\r\n') chunk = chunk.slice(2);
+    if (chunk.slice(0, 1).toString() === '\n') chunk = chunk.slice(1);
     if (chunk.slice(-2).toString() === '\r\n') chunk = chunk.slice(0, -2);
+    if (chunk.slice(-1).toString() === '\n') chunk = chunk.slice(0, -1);
     if (chunk.toString() === '--') return;
     if (chunk.slice(-2).toString() === '--') chunk = chunk.slice(0, -2);
 
-    const headerEnd = chunk.indexOf(Buffer.from('\r\n\r\n'));
+    let headerEnd = chunk.indexOf(Buffer.from('\r\n\r\n'));
+    let separatorLength = 4;
+    if (headerEnd === -1) {
+      headerEnd = chunk.indexOf(Buffer.from('\n\n'));
+      separatorLength = 2;
+    }
     if (headerEnd === -1) return;
     const headerText = chunk.slice(0, headerEnd).toString('utf8');
-    let content = chunk.slice(headerEnd + 4);
+    let content = chunk.slice(headerEnd + separatorLength);
     if (content.slice(-2).toString() === '\r\n') content = content.slice(0, -2);
+    if (content.slice(-1).toString() === '\n') content = content.slice(0, -1);
 
-    const nameMatch = headerText.match(/name="([^"]+)"/i);
+    const nameMatch = headerText.match(/name=(?:"([^"]+)"|([^;\r\n]+))/i);
     if (!nameMatch) return;
-    const filenameMatch = headerText.match(/filename="([^"]*)"/i);
-    const name = nameMatch[1];
-    if (filenameMatch && filenameMatch[1]) {
+    const filenameMatch = headerText.match(/filename\*?=(?:UTF-8''|)(?:"([^"]*)"|([^;\r\n]*))/i);
+    const name = String(nameMatch[1] || nameMatch[2] || '').trim();
+    const filename = filenameMatch ? decodeURIComponent(String(filenameMatch[1] || filenameMatch[2] || '').trim()) : '';
+    if (filenameMatch) {
       files[name] = {
-        filename: filenameMatch[1],
+        filename,
         buffer: content
       };
     } else {
@@ -718,9 +728,25 @@ function parseMultipart(buffer, contentType) {
   return { fields, files };
 }
 
+function multipartPartFromField(files, fields, fieldName) {
+  if (files[fieldName] && files[fieldName].buffer && files[fieldName].buffer.length > 0) return files[fieldName];
+  if (fields[fieldName]) {
+    return {
+      filename: `${fieldName}.txt`,
+      buffer: Buffer.from(String(fields[fieldName]), 'utf8')
+    };
+  }
+  return null;
+}
+
 async function fileBufferToText(file, fieldName) {
   if (!file || !file.buffer || file.buffer.length === 0) {
-    if (fieldName === 'deposit_file') throw new Error('deposit_file wajib diisi.');
+    if (fieldName === 'deposit_file') {
+      const error = new Error('deposit_file wajib diisi.');
+      error.statusCode = 400;
+      error.code = 'DEPOSIT_FILE_REQUIRED';
+      throw error;
+    }
     return '';
   }
   if (/\.xlsx$/i.test(file.filename || '')) {
@@ -758,6 +784,16 @@ export default async function handler(req, res) {
 
     const bodyBuffer = await readRequestBody(req);
     const { fields, files } = parseMultipart(bodyBuffer, contentType);
+    const fileSummary = Object.fromEntries(Object.entries(files).map(([name, file]) => [name, {
+      filename: file.filename || '',
+      size: file.buffer ? file.buffer.length : 0
+    }]));
+    console.info('generate-json multipart received', {
+      contentType: String(contentType || '').split(';')[0],
+      fileFields: Object.keys(files),
+      textFields: Object.keys(fields),
+      files: fileSummary
+    });
     const mode = String(fields.mode || '').trim();
     const source = String(fields.source || FIXED_SOURCE).trim();
 
@@ -768,8 +804,10 @@ export default async function handler(req, res) {
       return json(res, 400, { ok: false, error: 'INVALID_SOURCE', message: 'source harus hermes-telegram.' });
     }
 
-    const depositRaw = await fileBufferToText(files.deposit_file, 'deposit_file');
-    const adjustmentRaw = files.adjustment_file ? await fileBufferToText(files.adjustment_file, 'adjustment_file') : '';
+    const depositPart = multipartPartFromField(files, fields, 'deposit_file');
+    const adjustmentPart = multipartPartFromField(files, fields, 'adjustment_file');
+    const depositRaw = await fileBufferToText(depositPart, 'deposit_file');
+    const adjustmentRaw = adjustmentPart ? await fileBufferToText(adjustmentPart, 'adjustment_file') : '';
     const bonusDate = String(fields.bonus_date || '').trim();
 
     if (bonusDate && !isValidDate(bonusDate)) {
@@ -806,7 +844,7 @@ export default async function handler(req, res) {
     console.error('generate-json parser error:', error);
     return json(res, error.statusCode || 500, {
       ok: false,
-      error: error.statusCode === 413 ? 'PAYLOAD_TOO_LARGE' : 'PARSER_FAILED',
+      error: error.code || (error.statusCode === 413 ? 'PAYLOAD_TOO_LARGE' : 'PARSER_FAILED'),
       message: error.message || 'Parser gagal memproses file.'
     });
   }
