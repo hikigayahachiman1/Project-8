@@ -124,6 +124,99 @@ function addSummary(summary, key, row) {
   summary[key].amount += Number(row.bonus_amount || 0);
 }
 
+function isHermesLock(lock) {
+  const owner = String(lock?.claim_owner || '').toUpperCase();
+  const operator = String(lock?.operator_name || '').toUpperCase();
+  return owner.includes('HERMES') || operator.includes('HERMES');
+}
+
+function previewStatusFromLock(lock) {
+  const status = String(lock?.lock_status || '').toUpperCase();
+  if (status === 'PENDING') return 'WAITING_SUPERADMIN_APPROVAL';
+  if (status === 'RELEASED_TO_WORKER') return 'RELEASED_TO_WORKER';
+  if (status === 'DONE') return 'COMPLETED';
+  if (status === 'EXPIRED') return 'CANCELLED';
+  if (status === 'FAILED') return 'FAILED';
+  if (status === 'EMPTY') return 'PREVIEW';
+  return status || 'PREVIEW';
+}
+
+function batchCodeFromLock(lock) {
+  return lock?.claim_batch_id || '';
+}
+
+function requireSuperadmin(authContext) {
+  if (authContext?.role === 'superadmin') return;
+  const error = new Error('Hanya Superadmin yang boleh menjalankan aksi preview Hermes.');
+  error.statusCode = 403;
+  error.code = 'SUPERADMIN_REQUIRED';
+  throw error;
+}
+
+async function fetchHermesLocks(bonusDate = '') {
+  let query = supabase
+    .from('bonus_process_locks')
+    .select('id, bonus_date, lock_status, claim_batch_id, claim_owner, operator_name, pending_expires_at, started_at, created_at, updated_at, done_at, done_by_name')
+    .order('updated_at', { ascending: false })
+    .limit(100);
+  if (bonusDate) query = query.eq('bonus_date', bonusDate);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).filter(isHermesLock);
+}
+
+async function fetchRowsByBatch(claimBatchId) {
+  if (!claimBatchId) return [];
+  const baseSelect = 'id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at, done_at';
+  let { data, error } = await supabase
+    .from('bonus_done_daily')
+    .select(`${baseSelect}, member_id`)
+    .eq('claim_batch_id', claimBatchId)
+    .order('created_at', { ascending: true });
+  if (error && error.code === '42703') {
+    const fallback = await supabase
+      .from('bonus_done_daily')
+      .select(baseSelect)
+      .eq('claim_batch_id', claimBatchId)
+      .order('created_at', { ascending: true });
+    data = fallback.data;
+    error = fallback.error;
+  }
+  if (error) throw error;
+  return data || [];
+}
+
+function summarizePreviewRows(rows) {
+  return {
+    total_eligible: rows.length,
+    ready_items: rows.filter(row => String(row.bonus_status || '').toUpperCase() === 'PENDING').length,
+    skipped_already_given: 0,
+    pending_other_batch: 0,
+    manual_review: 0,
+    total_amount_bo: rows.reduce((sum, row) => sum + Number(row.bonus_amount || 0), 0)
+  };
+}
+
+function previewListItem(lock, rows) {
+  const summary = summarizePreviewRows(rows);
+  return {
+    batch_code: batchCodeFromLock(lock),
+    claim_batch_id: lock.claim_batch_id || '',
+    source: 'hermes-telegram',
+    bonus_date: lock.bonus_date || '',
+    total_eligible: summary.total_eligible,
+    ready_items: summary.ready_items,
+    skipped_already_given: summary.skipped_already_given,
+    pending_other_batch: summary.pending_other_batch,
+    manual_review: summary.manual_review,
+    total_amount_bo: summary.total_amount_bo,
+    status: previewStatusFromLock(lock),
+    created_at: lock.created_at || lock.started_at || '',
+    updated_at: lock.updated_at || '',
+    lock_status: lock.lock_status || ''
+  };
+}
+
 async function health() {
   const serverTime = new Date().toISOString();
   const hasSupabaseEnv = Boolean(supabaseUrl && serviceRoleKey);
@@ -630,12 +723,224 @@ async function exportClaimMahjong(body) {
 }
 
 async function hermesPreviewStatus() {
+  const list = await hermesPreviewList({});
   return {
     ok: true,
     action: 'hermes_preview_status',
-    message: 'Hermes preview queue belum dibuat.',
-    preview_statuses: ['PREVIEW', 'WAITING_APPROVAL', 'RELEASED_TO_WORKER', 'COMPLETED', 'FAILED'],
-    rows: []
+    message: list.rows.length ? 'Hermes preview queue dimuat.' : 'Hermes preview queue belum dibuat.',
+    preview_statuses: ['PREVIEW', 'WAITING_SUPERADMIN_APPROVAL', 'RELEASED_TO_WORKER', 'COMPLETED', 'FAILED', 'CANCELLED'],
+    rows: list.rows
+  };
+}
+
+async function hermesPreviewList(body) {
+  const bonusDate = String(body.bonus_date || '').trim();
+  if (bonusDate && !isValidDate(bonusDate)) {
+    const error = new Error('bonus_date wajib format YYYY-MM-DD.');
+    error.statusCode = 400;
+    error.code = 'INVALID_BONUS_DATE';
+    throw error;
+  }
+  const locks = await fetchHermesLocks(bonusDate);
+  const batchIds = locks.map(lock => lock.claim_batch_id).filter(Boolean);
+  let rows = [];
+  if (batchIds.length) {
+    const { data, error } = await supabase
+      .from('bonus_done_daily')
+      .select('bonus_date, bonus_type, bonus_amount, bonus_status, claim_batch_id')
+      .in('claim_batch_id', batchIds);
+    if (error) throw error;
+    rows = data || [];
+  }
+  const rowMap = new Map();
+  rows.forEach(row => {
+    const key = row.claim_batch_id || '';
+    if (!rowMap.has(key)) rowMap.set(key, []);
+    rowMap.get(key).push(row);
+  });
+  const previews = locks.map(lock => previewListItem(lock, rowMap.get(lock.claim_batch_id) || []));
+  return {
+    ok: true,
+    action: 'hermes_preview_list',
+    bonus_date: bonusDate,
+    count: previews.length,
+    rows: previews,
+    message: previews.length ? 'Hermes preview queue dimuat.' : 'Hermes preview queue belum dibuat.'
+  };
+}
+
+async function hermesPreviewDetail(body) {
+  const claimBatchId = String(body.claim_batch_id || body.batch_code || '').trim();
+  if (!claimBatchId) {
+    const error = new Error('claim_batch_id atau batch_code wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'CLAIM_BATCH_ID_REQUIRED';
+    throw error;
+  }
+  const { data: lock, error: lockError } = await supabase
+    .from('bonus_process_locks')
+    .select('id, bonus_date, lock_status, claim_batch_id, claim_owner, operator_name, pending_expires_at, started_at, created_at, updated_at, done_at')
+    .eq('claim_batch_id', claimBatchId)
+    .maybeSingle();
+  if (lockError) throw lockError;
+  if (!lock || !isHermesLock(lock)) {
+    const error = new Error('Preview Hermes tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'HERMES_PREVIEW_NOT_FOUND';
+    throw error;
+  }
+  const rawRows = await fetchRowsByBatch(claimBatchId);
+  const rows = rawRows.map((row, index) => ({
+    No: index + 1,
+    bonus_date: row.bonus_date || '',
+    login_id: row.login_id || row.login_key || '',
+    login_key: row.login_key || row.login_id || '',
+    member_id: row.member_id || '',
+    amount_bo: row.bonus_amount ?? '',
+    remark: row.remark || '',
+    status: String(row.bonus_status || '').toUpperCase() === 'PENDING' ? 'READY' : row.bonus_status || '',
+    reason: '',
+    warning: '',
+    claim_batch_id: row.claim_batch_id || '',
+    created_at: row.created_at || ''
+  }));
+  return {
+    ok: true,
+    action: 'hermes_preview_detail',
+    batch: previewListItem(lock, rawRows),
+    rows
+  };
+}
+
+async function hermesPreviewExport(body) {
+  const detail = await hermesPreviewDetail(body);
+  const columns = ['No', 'Bonus Date', 'Login ID', 'Login Key', 'Amount BO', 'Remark', 'Status', 'Reason', 'Batch Code', 'Created At'];
+  const rows = detail.rows.map(row => ({
+    No: row.No,
+    'Bonus Date': row.bonus_date,
+    'Login ID': row.login_id,
+    'Login Key': row.login_key,
+    'Amount BO': row.amount_bo,
+    Remark: row.remark,
+    Status: row.status,
+    Reason: row.reason,
+    'Batch Code': row.claim_batch_id,
+    'Created At': row.created_at
+  }));
+  return {
+    ok: true,
+    action: 'hermes_preview_export',
+    batch: detail.batch,
+    count: rows.length,
+    rows,
+    tsv: [columns.join('\t'), ...rows.map(row => columns.map(column => tsvEscape(row[column])).join('\t'))].join('\n')
+  };
+}
+
+async function hermesPreviewRelease(body, authContext) {
+  requireSuperadmin(authContext);
+  const claimBatchId = String(body.claim_batch_id || body.batch_code || '').trim();
+  const operatorName = String(body.operator_name || authContext?.operator?.display_name || authContext?.operator?.username || 'Superadmin').trim();
+  if (!claimBatchId) {
+    const error = new Error('claim_batch_id atau batch_code wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'CLAIM_BATCH_ID_REQUIRED';
+    throw error;
+  }
+  const { data: lock, error: lockReadError } = await supabase
+    .from('bonus_process_locks')
+    .select('id, bonus_date, lock_status, claim_batch_id, claim_owner, operator_name, pending_expires_at, started_at, created_at, updated_at')
+    .eq('claim_batch_id', claimBatchId)
+    .maybeSingle();
+  if (lockReadError) throw lockReadError;
+  if (!lock || !isHermesLock(lock)) {
+    const error = new Error('Preview Hermes tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'HERMES_PREVIEW_NOT_FOUND';
+    throw error;
+  }
+  const previewStatus = previewStatusFromLock(lock);
+  if (!['PREVIEW', 'WAITING_SUPERADMIN_APPROVAL'].includes(previewStatus)) {
+    const error = new Error(`Preview tidak bisa release karena status sekarang ${previewStatus}.`);
+    error.statusCode = 409;
+    error.code = 'PREVIEW_NOT_RELEASABLE';
+    throw error;
+  }
+  const now = new Date().toISOString();
+  const { data: updatedLock, error } = await supabase
+    .from('bonus_process_locks')
+    .update({
+      lock_status: 'RELEASED_TO_WORKER',
+      updated_at: now,
+      done_by_name: operatorName
+    })
+    .eq('claim_batch_id', claimBatchId)
+    .select('id, bonus_date, lock_status, claim_batch_id, claim_owner, operator_name, pending_expires_at, updated_at')
+    .maybeSingle();
+  if (error) throw error;
+  const detail = await hermesPreviewDetail({ claim_batch_id: claimBatchId });
+  return {
+    ok: true,
+    action: 'hermes_preview_release',
+    status: 'RELEASED_TO_WORKER',
+    batch_code: claimBatchId,
+    claim_batch_id: claimBatchId,
+    lock: updatedLock,
+    task_payload: {
+      source: 'hermes-telegram',
+      mode: 'BONUS_HARIAN',
+      batch_code: claimBatchId,
+      claim_batch_id: claimBatchId,
+      bonus_date: lock.bonus_date,
+      rows: detail.rows
+    }
+  };
+}
+
+async function hermesPreviewCancel(body, authContext) {
+  requireSuperadmin(authContext);
+  const claimBatchId = String(body.claim_batch_id || body.batch_code || '').trim();
+  if (!claimBatchId) {
+    const error = new Error('claim_batch_id atau batch_code wajib diisi.');
+    error.statusCode = 400;
+    error.code = 'CLAIM_BATCH_ID_REQUIRED';
+    throw error;
+  }
+  const { data: lock, error: lockReadError } = await supabase
+    .from('bonus_process_locks')
+    .select('id, lock_status, claim_batch_id, claim_owner, operator_name')
+    .eq('claim_batch_id', claimBatchId)
+    .maybeSingle();
+  if (lockReadError) throw lockReadError;
+  if (!lock || !isHermesLock(lock)) {
+    const error = new Error('Preview Hermes tidak ditemukan.');
+    error.statusCode = 404;
+    error.code = 'HERMES_PREVIEW_NOT_FOUND';
+    throw error;
+  }
+  const now = new Date().toISOString();
+  const { data: rows, error: rowError } = await supabase
+    .from('bonus_done_daily')
+    .update({ bonus_status: 'EXPIRED', updated_at: now })
+    .eq('claim_batch_id', claimBatchId)
+    .eq('bonus_status', 'PENDING')
+    .select('id');
+  if (rowError) throw rowError;
+  const { data: updatedLock, error: lockError } = await supabase
+    .from('bonus_process_locks')
+    .update({ lock_status: 'EXPIRED', updated_at: now })
+    .eq('claim_batch_id', claimBatchId)
+    .select('id, bonus_date, lock_status, claim_batch_id, updated_at')
+    .maybeSingle();
+  if (lockError) throw lockError;
+  return {
+    ok: true,
+    action: 'hermes_preview_cancel',
+    status: 'CANCELLED',
+    batch_code: claimBatchId,
+    claim_batch_id: claimBatchId,
+    cancelled_rows: rows?.length || 0,
+    lock: updatedLock
   };
 }
 
@@ -664,6 +969,11 @@ export default async function handler(req, res) {
     if (action === 'export_bonus') return json(res, 200, await exportBonus(body));
     if (action === 'export_claim_mahjong') return json(res, 200, await exportClaimMahjong(body));
     if (action === 'hermes_preview_status') return json(res, 200, await hermesPreviewStatus());
+    if (action === 'hermes_preview_list') return json(res, 200, await hermesPreviewList(body));
+    if (action === 'hermes_preview_detail') return json(res, 200, await hermesPreviewDetail(body));
+    if (action === 'hermes_preview_export') return json(res, 200, await hermesPreviewExport(body));
+    if (action === 'hermes_preview_release') return json(res, 200, await hermesPreviewRelease(body, authContext));
+    if (action === 'hermes_preview_cancel') return json(res, 200, await hermesPreviewCancel(body, authContext));
 
     return json(res, 400, { ok: false, error: 'UNKNOWN_ACTION', message: 'Action tidak dikenal.' });
   } catch (error) {
