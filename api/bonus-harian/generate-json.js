@@ -8,6 +8,8 @@ export const config = {
 
 const FIXED_SOURCE = 'hermes-telegram';
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const GENERATE_TIMEOUT_MS = 20 * 1000;
+const MAX_PREVIEW_ITEMS = 50;
 const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = supabaseUrl && serviceRoleKey
@@ -15,7 +17,76 @@ const supabase = supabaseUrl && serviceRoleKey
   : null;
 
 function json(res, status, body) {
+  if (res.writableEnded || res.headersSent) return false;
   res.status(status).json(body);
+  return true;
+}
+
+function createRequestContext() {
+  return {
+    request_id: `parser-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    last_step: 'INIT',
+    deadline_ms: Date.now() + GENERATE_TIMEOUT_MS
+  };
+}
+
+function logStep(ctx, step, meta = {}) {
+  ctx.last_step = step;
+  console.info('generate-json step', {
+    request_id: ctx.request_id,
+    step,
+    ...meta,
+    at: new Date().toISOString()
+  });
+}
+
+function parserError(code, message, statusCode = 400, extra = {}) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  Object.assign(error, extra);
+  return error;
+}
+
+function supabaseError(error, message = 'Supabase gagal memproses data Bonus Harian.') {
+  return parserError('SUPABASE_ERROR', error?.message || message, 500, {
+    supabase_error: {
+      code: error?.code || '',
+      details: error?.details || '',
+      hint: error?.hint || ''
+    }
+  });
+}
+
+function safeErrorMessage(error) {
+  return String(error?.message || 'Parser gagal memproses file.').slice(0, 500);
+}
+
+function responseFromError(error, ctx) {
+  const status = Number(error?.statusCode || 500);
+  return {
+    status,
+    body: {
+      ok: false,
+      error: error?.code || (status === 413 ? 'PAYLOAD_TOO_LARGE' : 'PARSER_FAILED'),
+      message: safeErrorMessage(error),
+      last_step: ctx.last_step,
+      request_id: ctx.request_id
+    }
+  };
+}
+
+function detectUploadType(file) {
+  const filename = String(file?.filename || '').toLowerCase();
+  if (/\.xlsx$/.test(filename)) return 'xlsx';
+  if (/\.csv$/.test(filename)) return 'csv';
+  if (/\.tsv$/.test(filename)) return 'tsv';
+  return filename ? 'raw_text' : 'missing';
+}
+
+function ensureWithinDeadline(ctx) {
+  if (Date.now() <= ctx.deadline_ms) return;
+  throw parserError('PARSER_TIMEOUT', 'Generate preview melebihi batas waktu.', 504);
 }
 
 function bearerToken(req) {
@@ -103,6 +174,10 @@ function createBatchCode(dateValue) {
   const now = new Date();
   const tail = `${String(now.getUTCHours()).padStart(2, '0')}${String(now.getUTCMinutes()).padStart(2, '0')}${String(now.getUTCSeconds()).padStart(2, '0')}`;
   return `BH-${compactDate(dateValue)}-${tail}`;
+}
+
+function isHermesSource(source) {
+  return String(source || '').trim().toLowerCase() === FIXED_SOURCE;
 }
 
 function bonusMonthMap() {
@@ -673,7 +748,7 @@ function buildBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source }) {
 }
 
 async function expireOldBonusPending() {
-  if (!supabase) throw new Error('Konfigurasi Supabase belum lengkap.');
+  if (!supabase) throw supabaseError(null, 'Konfigurasi Supabase belum lengkap.');
 
   const { data, error } = await supabase.rpc('expire_old_bonus_pending');
   if (!error) {
@@ -690,7 +765,7 @@ async function expireOldBonusPending() {
     .select('id')
     .eq('bonus_status', 'PENDING')
     .lt('pending_expires_at', now);
-  if (bonusFetchError) throw bonusFetchError;
+  if (bonusFetchError) throw supabaseError(bonusFetchError);
 
   const { error: bonusUpdateError } = await supabase
     .from('bonus_done_daily')
@@ -710,9 +785,9 @@ async function expireOldBonusPending() {
       })
       .eq('bonus_status', 'PENDING')
       .lt('pending_expires_at', now);
-    if (retry.error) throw retry.error;
+    if (retry.error) throw supabaseError(retry.error);
   } else if (bonusUpdateError) {
-    throw bonusUpdateError;
+    throw supabaseError(bonusUpdateError);
   }
 
   const { data: lockRows, error: lockFetchError } = await supabase
@@ -720,7 +795,7 @@ async function expireOldBonusPending() {
     .select('id')
     .eq('lock_status', 'PENDING')
     .lt('pending_expires_at', now);
-  if (lockFetchError) throw lockFetchError;
+  if (lockFetchError) throw supabaseError(lockFetchError);
 
   const { error: lockUpdateError } = await supabase
     .from('bonus_process_locks')
@@ -740,9 +815,9 @@ async function expireOldBonusPending() {
       })
       .eq('lock_status', 'PENDING')
       .lt('pending_expires_at', now);
-    if (retry.error) throw retry.error;
+    if (retry.error) throw supabaseError(retry.error);
   } else if (lockUpdateError) {
-    throw lockUpdateError;
+    throw supabaseError(lockUpdateError);
   }
 
   return {
@@ -770,7 +845,7 @@ async function fetchBonusStatusRows(dateValue) {
     data = fallback.data;
     error = fallback.error;
   }
-  if (error) throw error;
+  if (error) throw supabaseError(error);
   return data || [];
 }
 
@@ -785,7 +860,7 @@ async function fetchActivePendingLock(dateValue) {
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
+  if (error) throw supabaseError(error);
   return data || null;
 }
 
@@ -853,8 +928,8 @@ function classifyReadyItems(items, existingRows, activeLock) {
 async function reserveReadyItems({ items, dateValue, batchCode, source }) {
   const nowDate = new Date();
   const now = nowDate.toISOString();
-  const pendingExpiresAt = addMinutes(nowDate, 5);
   const expiresAt = addDays(nowDate, 2);
+  const pendingExpiresAt = isHermesSource(source) ? expiresAt : addMinutes(nowDate, 5);
   const claimOwner = 'HERMES-TELEGRAM';
   const operatorName = 'Hermes Telegram';
 
@@ -872,7 +947,7 @@ async function reserveReadyItems({ items, dateValue, batchCode, source }) {
   const { error: lockError } = await supabase
     .from('bonus_process_locks')
     .insert(lockPayload);
-  if (lockError) throw lockError;
+  if (lockError) throw supabaseError(lockError);
 
   const rows = items.map(item => ({
     bonus_date: dateValue,
@@ -906,56 +981,139 @@ async function reserveReadyItems({ items, dateValue, batchCode, source }) {
     data = fallback.data;
     error = fallback.error;
   }
-  if (error) throw error;
+  if (error) throw supabaseError(error);
   return { rows: data || [], lock: lockPayload, pending_expires_at: pendingExpiresAt };
 }
 
-async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source }) {
-  if (!supabase) throw new Error('Konfigurasi Supabase belum lengkap.');
+async function reserveEmptyHermesPreview({ dateValue, batchCode }) {
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const expiresAt = addDays(nowDate, 2);
+  const { error } = await supabase
+    .from('bonus_process_locks')
+    .insert({
+      bonus_date: dateValue,
+      lock_status: 'EMPTY',
+      claim_owner: 'HERMES-TELEGRAM',
+      claim_batch_id: batchCode,
+      operator_name: 'Hermes Telegram',
+      started_at: now,
+      updated_at: now,
+      pending_expires_at: expiresAt,
+      expires_at: expiresAt
+    });
+  if (error && error.code !== '23505') throw supabaseError(error);
+  return {
+    claim_batch_id: batchCode,
+    pending_expires_at: expiresAt
+  };
+}
+
+async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source, ctx }) {
+  if (!supabase) throw supabaseError(null, 'Konfigurasi Supabase belum lengkap.');
   const batch = buildBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source });
+  logStep(ctx, 'FILE_PARSED', {
+    parsed_items: batch.items.length,
+    skipped_items: batch.skipped.length,
+    warnings: batch.warnings.length
+  });
   const dateValue = batch.items[0]?.bonus_date || (isValidDate(bonusDate) ? bonusDate : getTodayJakartaInput());
   const batchCode = createBatchCode(dateValue);
   batch.batch_code = batchCode;
 
+  ensureWithinDeadline(ctx);
+  logStep(ctx, 'EXPIRE_PENDING_STARTED', { bonus_date: dateValue });
   const expireResult = await expireOldBonusPending();
+  logStep(ctx, 'EXPIRE_PENDING_DONE', {
+    expired_bonus_rows: expireResult.expired_bonus_rows || 0,
+    expired_lock_rows: expireResult.expired_lock_rows || 0
+  });
+  ensureWithinDeadline(ctx);
+  logStep(ctx, 'SUPABASE_HISTORY_STARTED', { bonus_date: dateValue });
   const existingRows = await fetchBonusStatusRows(dateValue);
   const activeLock = await fetchActivePendingLock(dateValue);
+  logStep(ctx, 'SUPABASE_HISTORY_DONE', {
+    existing_rows: existingRows.length,
+    active_lock: activeLock?.claim_batch_id || ''
+  });
   const classified = classifyReadyItems(batch.items, existingRows, activeLock);
+  const readyLimited = classified.ready.slice(0, MAX_PREVIEW_ITEMS);
+  const limitedItems = classified.ready.slice(MAX_PREVIEW_ITEMS);
+  if (limitedItems.length) {
+    classified.skipped.push(...limitedItems.map(item => ({
+      ...item,
+      status: 'SKIPPED_PREVIEW_LIMIT',
+      reason: `PREVIEW_LIMIT_${MAX_PREVIEW_ITEMS}`
+    })));
+  }
+  logStep(ctx, 'ELIGIBLE_CALCULATED', {
+    ready_items: readyLimited.length,
+    ready_before_limit: classified.ready.length,
+    skipped_items: classified.skipped.length,
+    manual_review_items: classified.manualReview.length
+  });
 
+  ensureWithinDeadline(ctx);
   batch.skipped = [...batch.skipped, ...classified.skipped];
   batch.warnings = [...batch.warnings];
-  batch.items = classified.ready;
+  batch.items = readyLimited;
   batch.summary = {
     ...batch.summary,
     expired_bonus_rows: expireResult.expired_bonus_rows || 0,
     expired_lock_rows: expireResult.expired_lock_rows || 0,
-    total_eligible_from_deposit: classified.ready.length + classified.skipped.length,
-    ready_items: classified.ready.length,
+    total_eligible_from_deposit: readyLimited.length + classified.skipped.length,
+    ready_items: readyLimited.length,
+    ready_items_before_limit: classified.ready.length,
+    preview_limit: MAX_PREVIEW_ITEMS,
+    preview_limited_items: limitedItems.length,
     skipped_already_given: classified.skipped.filter(item => item.reason === 'SKIPPED_ALREADY_GIVEN').length,
     pending_other_batch: classified.skipped.filter(item => item.reason === 'PENDING_OTHER_BATCH').length,
     expired_released: classified.expiredReleased + (expireResult.expired_bonus_rows || 0),
     manual_review_items: classified.manualReview.length,
-    total_amount_bo_ready: classified.ready.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
-    total_items: classified.ready.length,
-    total_amount_raw: classified.ready.reduce((sum, item) => sum + Number(item.amount_raw || 0), 0),
-    total_amount_bo: classified.ready.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
+    total_amount_bo_ready: readyLimited.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
+    total_items: readyLimited.length,
+    total_amount_raw: readyLimited.reduce((sum, item) => sum + Number(item.amount_raw || 0), 0),
+    total_amount_bo: readyLimited.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
     skipped_items: batch.skipped.length
   };
 
-  if (classified.ready.length === 0) {
+  logStep(ctx, 'PREVIEW_SAVE_STARTED', {
+    bonus_date: dateValue,
+    claim_batch_id: batchCode,
+    ready_items: readyLimited.length
+  });
+
+  ensureWithinDeadline(ctx);
+  if (readyLimited.length === 0) {
+    const emptyPreview = isHermesSource(source)
+      ? await reserveEmptyHermesPreview({ dateValue, batchCode })
+      : null;
+    logStep(ctx, 'PREVIEW_SAVE_DONE', {
+      claim_batch_id: emptyPreview?.claim_batch_id || batchCode,
+      saved_rows: 0,
+      lock_status: isHermesSource(source) ? 'EMPTY' : ''
+    });
     return {
       batch,
       should_create_task: false,
+      needs_superadmin_approval: isHermesSource(source),
+      preview_status: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : '',
+      claim_batch_id: emptyPreview?.claim_batch_id || batchCode,
       skipped: batch.skipped,
       manual_review: classified.manualReview
     };
   }
 
   const reserve = await reserveReadyItems({
-    items: classified.ready,
+    items: readyLimited,
     dateValue,
     batchCode,
-    source: 'hermes_telegram'
+    source: source || 'hermes_telegram'
+  });
+  logStep(ctx, 'PREVIEW_SAVE_DONE', {
+    claim_batch_id: batchCode,
+    saved_rows: reserve.rows.length,
+    lock_status: 'PENDING'
   });
 
   batch.items = batch.items.map(item => ({
@@ -967,7 +1125,10 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
 
   return {
     batch,
-    should_create_task: true,
+    should_create_task: !isHermesSource(source),
+    needs_superadmin_approval: isHermesSource(source),
+    preview_status: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : '',
+    claim_batch_id: batchCode,
     skipped: batch.skipped,
     manual_review: classified.manualReview,
     reserve
@@ -980,9 +1141,7 @@ async function readRequestBody(req) {
   for await (const chunk of req) {
     total += chunk.length;
     if (total > MAX_UPLOAD_BYTES) {
-      const error = new Error('Ukuran upload terlalu besar. Maksimal 10MB.');
-      error.statusCode = 413;
-      throw error;
+      throw parserError('PAYLOAD_TOO_LARGE', 'Ukuran upload terlalu besar. Maksimal 10MB.', 413);
     }
     chunks.push(Buffer.from(chunk));
   }
@@ -1065,115 +1224,211 @@ function multipartPartFromField(files, fields, fieldName) {
 async function fileBufferToText(file, fieldName) {
   if (!file || !file.buffer || file.buffer.length === 0) {
     if (fieldName === 'deposit_file') {
-      const error = new Error('deposit_file wajib diisi.');
-      error.statusCode = 400;
-      error.code = 'DEPOSIT_FILE_REQUIRED';
-      throw error;
+      throw parserError('DEPOSIT_FILE_REQUIRED', 'deposit_file wajib diisi.', 400);
     }
     return '';
   }
   if (/\.xlsx$/i.test(file.filename || '')) {
     try {
+      if (file.buffer.slice(0, 2).toString('utf8') !== 'PK') {
+        throw new Error('File bukan format XLSX valid.');
+      }
       const xlsx = await import('xlsx');
       const workbook = xlsx.read(file.buffer, { type: 'buffer', cellDates: false });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      return xlsx.utils.sheet_to_csv(firstSheet, { FS: ',', blankrows: false });
+      if (!firstSheet) throw new Error('Workbook tidak memiliki sheet.');
+      const text = xlsx.utils.sheet_to_csv(firstSheet, { FS: ',', blankrows: false });
+      if (!String(text || '').trim()) throw new Error('Sheet kosong atau tidak bisa dikonversi.');
+      return text;
     } catch (error) {
-      throw new Error('XLSX belum didukung di endpoint ini karena dependency Excel belum tersedia. Kirim CSV/raw text.');
+      throw parserError('XLSX_PARSE_FAILED', `Gagal membaca XLSX: ${safeErrorMessage(error)}`, 400);
     }
   }
-  return file.buffer.toString('utf8').replace(/^\uFEFF/, '');
+  try {
+    return file.buffer.toString('utf8').replace(/^\uFEFF/, '');
+  } catch (error) {
+    throw parserError('CSV_PARSE_FAILED', `Gagal membaca CSV: ${safeErrorMessage(error)}`, 400);
+  }
 }
 
-export default async function handler(req, res) {
+async function processGenerateJson(req, ctx) {
+  logStep(ctx, 'REQUEST_RECEIVED', {
+    method: req.method,
+    url: req.url || ''
+  });
+
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return json(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
+    throw parserError('METHOD_NOT_ALLOWED', 'Method harus POST.', 405);
   }
 
   if (!assertAuth(req)) {
-    return json(res, 401, { ok: false, error: 'UNAUTHORIZED' });
+    throw parserError('UNAUTHORIZED', 'Token Hermes Parser tidak valid.', 401);
+  }
+  logStep(ctx, 'AUTH_OK');
+
+  const contentType = req.headers['content-type'] || req.headers['Content-Type'] || '';
+  if (!/multipart\/form-data/i.test(String(contentType))) {
+    throw parserError('INVALID_CONTENT_TYPE', 'Gunakan multipart/form-data.', 400);
+  }
+  const contentLength = Number(req.headers['content-length'] || 0);
+  if (contentLength > MAX_UPLOAD_BYTES) {
+    throw parserError('PAYLOAD_TOO_LARGE', 'Ukuran upload terlalu besar. Maksimal 10MB.', 413);
+  }
+
+  const bodyBuffer = await readRequestBody(req);
+  const { fields, files } = parseMultipart(bodyBuffer, contentType);
+  const fileSummary = Object.fromEntries(Object.entries(files).map(([name, file]) => [name, {
+    filename: file.filename || '',
+    size: file.buffer ? file.buffer.length : 0,
+    type: detectUploadType(file)
+  }]));
+  logStep(ctx, 'MULTIPART_PARSED', {
+    content_type: String(contentType || '').split(';')[0],
+    file_fields: Object.keys(files),
+    text_fields: Object.keys(fields),
+    files: fileSummary
+  });
+  const mode = String(fields.mode || '').trim();
+  const source = String(fields.source || FIXED_SOURCE).trim();
+
+  if (mode && mode !== 'BONUS_HARIAN') {
+    throw parserError('INVALID_MODE', 'mode harus BONUS_HARIAN.', 400);
+  }
+  if (source && source !== FIXED_SOURCE) {
+    throw parserError('INVALID_SOURCE', 'source harus hermes-telegram.', 400);
+  }
+
+  const depositPart = multipartPartFromField(files, fields, 'deposit_file');
+  const adjustmentPart = multipartPartFromField(files, fields, 'adjustment_file');
+  logStep(ctx, 'FILE_RECEIVED', {
+    deposit_filename: depositPart?.filename || '',
+    deposit_size: depositPart?.buffer?.length || 0,
+    adjustment_filename: adjustmentPart?.filename || '',
+    adjustment_size: adjustmentPart?.buffer?.length || 0
+  });
+  logStep(ctx, 'FILE_TYPE_DETECTED', {
+    deposit_type: detectUploadType(depositPart),
+    adjustment_type: detectUploadType(adjustmentPart)
+  });
+  const depositRaw = await fileBufferToText(depositPart, 'deposit_file');
+  const adjustmentRaw = adjustmentPart ? await fileBufferToText(adjustmentPart, 'adjustment_file') : '';
+  const bonusDate = String(fields.bonus_date || '').trim();
+
+  if (bonusDate && !isValidDate(bonusDate)) {
+    throw parserError('INVALID_BONUS_DATE', 'bonus_date harus YYYY-MM-DD.', 400);
   }
 
   try {
-    const contentType = req.headers['content-type'] || req.headers['Content-Type'] || '';
-    if (!/multipart\/form-data/i.test(String(contentType))) {
-      return json(res, 400, { ok: false, error: 'INVALID_CONTENT_TYPE', message: 'Gunakan multipart/form-data.' });
-    }
-    const contentLength = Number(req.headers['content-length'] || 0);
-    if (contentLength > MAX_UPLOAD_BYTES) {
-      return json(res, 413, { ok: false, error: 'PAYLOAD_TOO_LARGE', message: 'Ukuran upload terlalu besar. Maksimal 10MB.' });
-    }
-
-    const bodyBuffer = await readRequestBody(req);
-    const { fields, files } = parseMultipart(bodyBuffer, contentType);
-    const fileSummary = Object.fromEntries(Object.entries(files).map(([name, file]) => [name, {
-      filename: file.filename || '',
-      size: file.buffer ? file.buffer.length : 0
-    }]));
-    console.info('generate-json multipart received', {
-      contentType: String(contentType || '').split(';')[0],
-      fileFields: Object.keys(files),
-      textFields: Object.keys(fields),
-      files: fileSummary
-    });
-    const mode = String(fields.mode || '').trim();
-    const source = String(fields.source || FIXED_SOURCE).trim();
-
-    if (mode && mode !== 'BONUS_HARIAN') {
-      return json(res, 400, { ok: false, error: 'INVALID_MODE', message: 'mode harus BONUS_HARIAN.' });
-    }
-    if (source && source !== FIXED_SOURCE) {
-      return json(res, 400, { ok: false, error: 'INVALID_SOURCE', message: 'source harus hermes-telegram.' });
-    }
-
-    const depositPart = multipartPartFromField(files, fields, 'deposit_file');
-    const adjustmentPart = multipartPartFromField(files, fields, 'adjustment_file');
-    const depositRaw = await fileBufferToText(depositPart, 'deposit_file');
-    const adjustmentRaw = adjustmentPart ? await fileBufferToText(adjustmentPart, 'adjustment_file') : '';
-    const bonusDate = String(fields.bonus_date || '').trim();
-
-    if (bonusDate && !isValidDate(bonusDate)) {
-      return json(res, 400, { ok: false, error: 'INVALID_BONUS_DATE', message: 'bonus_date harus YYYY-MM-DD.' });
-    }
-
     const result = await buildAndReserveBonusBatch({
       depositRaw,
       adjustmentRaw,
       bonusDate,
-      source
+      source,
+      ctx
     });
-    const { batch } = result;
+    result.source = source || FIXED_SOURCE;
+    return result;
+  } catch (error) {
+    if (error?.code === 'SUPABASE_ERROR') throw error;
+    const fileType = detectUploadType(depositPart);
+    if (fileType === 'xlsx') {
+      throw parserError('XLSX_PARSE_FAILED', `Gagal membaca XLSX: ${safeErrorMessage(error)}`, 400);
+    }
+    throw parserError('CSV_PARSE_FAILED', `Gagal membaca CSV: ${safeErrorMessage(error)}`, 400);
+  }
+}
 
-    if (!batch.items.length) {
-      return json(res, 200, {
+function buildSuccessResponse(result, source, ctx) {
+  const { batch } = result;
+
+  if (!batch.items.length) {
+    logStep(ctx, 'RESPONSE_READY', {
+      ok: true,
+      ready_items: 0,
+      should_create_task: false
+    });
+    return {
+      status: 200,
+      body: {
         ok: true,
+        source,
         should_create_task: false,
+        needs_superadmin_approval: result.needs_superadmin_approval || false,
+        preview_status: result.preview_status || '',
+        batch_code: batch.batch_code,
+        claim_batch_id: result.claim_batch_id || batch.batch_code,
         message: 'Tidak ada item READY untuk diproses.',
         summary: batch.summary,
+        batch,
         skipped: result.skipped || batch.skipped || [],
         manual_review: result.manual_review || []
-      });
-    }
+      }
+    };
+  }
 
-    const batchFile = `batch-adjustment-${batch.batch_code}.json`;
+  const batchFile = `batch-adjustment-${batch.batch_code}.json`;
+  logStep(ctx, 'RESPONSE_READY', {
+    ok: true,
+    ready_items: batch.items.length,
+    should_create_task: result.should_create_task === true
+  });
 
-    return json(res, 200, {
+  return {
+    status: 200,
+    body: {
       ok: true,
-      should_create_task: true,
+      source,
+      should_create_task: result.should_create_task === true,
+      needs_superadmin_approval: result.needs_superadmin_approval || false,
+      preview_status: result.preview_status || '',
       batch_code: batch.batch_code,
+      claim_batch_id: result.claim_batch_id || batch.batch_code,
       batch_file: batchFile,
       summary: batch.summary,
       batch,
       skipped: result.skipped || batch.skipped || [],
       manual_review: result.manual_review || []
-    });
-  } catch (error) {
-    console.error('generate-json parser error:', error);
-    return json(res, error.statusCode || 500, {
+    }
+  };
+}
+
+export default async function handler(req, res) {
+  const ctx = createRequestContext();
+  let timeoutId = null;
+  let responded = false;
+
+  const send = (status, body) => {
+    responded = json(res, status, body) || responded;
+    return responded;
+  };
+
+  timeoutId = setTimeout(() => {
+    send(504, {
       ok: false,
-      error: error.code || (error.statusCode === 413 ? 'PAYLOAD_TOO_LARGE' : 'PARSER_FAILED'),
-      message: error.message || 'Parser gagal memproses file.'
+      error: 'PARSER_TIMEOUT',
+      message: 'Generate preview melebihi batas waktu.',
+      last_step: ctx.last_step,
+      request_id: ctx.request_id
     });
+  }, GENERATE_TIMEOUT_MS);
+
+  try {
+    const result = await processGenerateJson(req, ctx);
+    clearTimeout(timeoutId);
+    if (responded) return;
+    const response = buildSuccessResponse(result, result.source || FIXED_SOURCE, ctx);
+    return send(response.status, response.body);
+  } catch (error) {
+    clearTimeout(timeoutId);
+    console.error('generate-json parser error:', {
+      request_id: ctx.request_id,
+      last_step: ctx.last_step,
+      error: error?.code || 'PARSER_FAILED',
+      message: error?.message || '',
+      supabase_error: error?.supabase_error || null
+    });
+    if (responded) return;
+    const response = responseFromError(error, ctx);
+    return send(response.status, response.body);
   }
 }
