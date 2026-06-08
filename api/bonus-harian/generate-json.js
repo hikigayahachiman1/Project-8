@@ -1,0 +1,789 @@
+export const config = {
+  api: {
+    bodyParser: false
+  }
+};
+
+const FIXED_SOURCE = 'hermes-telegram';
+
+function json(res, status, body) {
+  res.status(status).json(body);
+}
+
+function bearerToken(req) {
+  const header = req.headers.authorization || req.headers.Authorization || '';
+  const match = String(header).match(/^Bearer\s+(.+)$/i);
+  return match ? match[1] : '';
+}
+
+function assertAuth(req) {
+  const expected = process.env.HERMES_PARSER_API_TOKEN || '';
+  const token = bearerToken(req);
+  return Boolean(expected && token && token === expected);
+}
+
+function cleanCell(value) {
+  return String(value ?? '')
+    .replace(/^\uFEFF/, '')
+    .replace(/^="([\s\S]*)"$/, '$1')
+    .replace(/^=([\s\S]*)$/, '$1')
+    .replace(/^"(.*)"$/, '$1')
+    .trim();
+}
+
+function normalizeLoginId(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function normalizeBonusText(text) {
+  return String(text || '')
+    .toUpperCase()
+    .trim()
+    .replace(/[^\w\s/@.-]/g, ' ')
+    .replace(/[\s.-]+$/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function isValidDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+function dateInputFromParts(year, month, day) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return '';
+  if (y < 2000 || m < 1 || m > 12 || d < 1 || d > 31) return '';
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function getTodayJakartaInput() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const map = {};
+  parts.forEach(part => {
+    if (part.type !== 'literal') map[part.type] = part.value;
+  });
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
+function displayLongDate(value) {
+  const [year, month, day] = String(value || '').split('-');
+  const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  const monthIndex = Number(month) - 1;
+  if (!year || !month || !day || !months[monthIndex]) return String(value || '').trim();
+  return `${Number(day)} ${months[monthIndex]} ${year}`;
+}
+
+function compactDate(value) {
+  return String(value || '').replace(/-/g, '');
+}
+
+function bonusMonthMap() {
+  return {
+    JANUARI: 1, JANUARY: 1, JAN: 1,
+    FEBRUARI: 2, FEBRUARY: 2, FEB: 2,
+    MARET: 3, MARCH: 3, MAR: 3,
+    APRIL: 4, APR: 4,
+    MEI: 5, MAY: 5,
+    JUNI: 6, JUNE: 6, JUN: 6,
+    JULI: 7, JULY: 7, JUL: 7,
+    AGUSTUS: 8, AUGUST: 8, AGU: 8, AUG: 8,
+    SEPTEMBER: 9, SEP: 9,
+    OKTOBER: 10, OCTOBER: 10, OKT: 10, OCT: 10,
+    NOVEMBER: 11, NOV: 11,
+    DESEMBER: 12, DECEMBER: 12, DES: 12, DEC: 12
+  };
+}
+
+function parseBonusDateFromRemark(text, fallbackDate) {
+  const normalized = normalizeBonusText(text);
+  if (!normalized) return '';
+  const fallback = fallbackDate instanceof Date && !Number.isNaN(fallbackDate.getTime()) ? fallbackDate : null;
+  const fallbackYear = fallback ? fallback.getUTCFullYear() : '';
+
+  const bhCode = normalized.match(/\bBH[-\s]?(\d{4})(\d{2})(\d{2})\b/);
+  if (bhCode) return dateInputFromParts(bhCode[1], bhCode[2], bhCode[3]);
+
+  const compact = normalized.match(/\b(20\d{2})(\d{2})(\d{2})\b/);
+  if (compact) return dateInputFromParts(compact[1], compact[2], compact[3]);
+
+  const slash = normalized.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/);
+  if (slash) {
+    const first = Number(slash[1]);
+    const second = Number(slash[2]);
+    const month = first > 12 ? second : first;
+    const day = first > 12 ? first : second;
+    return dateInputFromParts(slash[3], month, day);
+  }
+
+  const named = normalized.match(/\b(?:BONUS\s+HARIAN\s+)?(?:TGL\s+)?(\d{1,2})\s+([A-Z]+)(?:\s+(20\d{2}))?\b/);
+  if (!named) return '';
+  const month = bonusMonthMap()[named[2]];
+  const year = named[3] || fallbackYear;
+  if (!month || !year) return '';
+  return dateInputFromParts(year, month, named[1]);
+}
+
+function isBonusHarianText(text) {
+  const value = normalizeBonusText(text);
+  if (/LUCKY\s*SPIN|LUCKYSPIN|KLAIM\s*FREESPIN|FREE\s*SPIN|FREESPIN|KLAIM\s*\d*\s*SCATTER|SCATTER|BUY\s*SPIN|BUYSPIN|SUPER\s*SCATTER|PRAGMATIC|MAHJONG|JP|JACKPOT/.test(value)) {
+    return false;
+  }
+  return /\bBONUS\s*HARIAN\b|\bBH[-\s]/.test(value);
+}
+
+function parseBoDate(value) {
+  const match = String(value || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  return new Date(Date.UTC(+match[3], +match[1] - 1, +match[2], +match[4], +match[5], +match[6]));
+}
+
+function gmt7DateInput(dateText) {
+  const date = parseBoDate(dateText);
+  if (!date) return '';
+  const shifted = new Date(date.getTime() - 60 * 60 * 1000);
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
+}
+
+function parseNumber(value) {
+  const raw = cleanCell(value).replace(/[^\d.,-]/g, '');
+  if (!raw) return 0;
+  if (raw.includes(',') && raw.includes('.')) return Number(raw.replace(/,/g, '')) || 0;
+  if (raw.includes(',') && !raw.includes('.')) return Number(raw.replace(/\./g, '').replace(',', '.')) || 0;
+  return Number(raw) || 0;
+}
+
+function detectDelimiter(text) {
+  const firstLine = String(text || '').split(/\r?\n/).find(line => line.trim()) || '';
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semicolonCount = (firstLine.match(/;/g) || []).length;
+  if (tabCount > commaCount && tabCount >= semicolonCount) return '\t';
+  if (semicolonCount > commaCount && semicolonCount >= tabCount) return ';';
+  return ',';
+}
+
+function parseCsvRows(text) {
+  const delimiter = detectDelimiter(text);
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      cell += '"';
+      i++;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === delimiter && !inQuotes) {
+      row.push(cleanCell(cell));
+      cell = '';
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && next === '\n') i++;
+      row.push(cleanCell(cell));
+      if (row.some(value => value !== '')) rows.push(row);
+      row = [];
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cleanCell(cell));
+  if (row.some(value => value !== '')) rows.push(row);
+  return rows;
+}
+
+function csvRecords(text) {
+  const rows = parseCsvRows(text);
+  if (rows.length === 0) return [];
+  const headers = rows[0].map(cleanCell);
+  return rows.slice(1).map(row => {
+    const record = {};
+    headers.forEach((header, index) => {
+      record[header] = cleanCell(row[index] || '');
+    });
+    return record;
+  });
+}
+
+function firstValue(row, fields) {
+  for (const field of fields) {
+    if (row[field] !== undefined && row[field] !== '') return row[field];
+  }
+  const normalized = Object.fromEntries(Object.entries(row).map(([key, value]) => [key.toLowerCase().replace(/\s+/g, ''), value]));
+  for (const field of fields) {
+    const key = field.toLowerCase().replace(/\s+/g, '');
+    if (normalized[key] !== undefined && normalized[key] !== '') return normalized[key];
+  }
+  return '';
+}
+
+function looksLikeCsv(text) {
+  const rows = parseCsvRows(text);
+  if (rows.length < 2) return false;
+  const header = rows[0].join(' ').toLowerCase();
+  return /login\s*id|application\s*time|amount|member\s*id|status/.test(header);
+}
+
+function parseDepositRows(rawText) {
+  const text = String(rawText || '');
+  const records = [];
+  let skipped = 0;
+
+  if (looksLikeCsv(text)) {
+    csvRecords(text).forEach(row => {
+      const loginId = cleanCell(firstValue(row, ['Login ID', 'LoginID', 'User ID', 'USER ID']));
+      const memberId = cleanCell(firstValue(row, ['Member ID', 'MemberID', 'Member Id']));
+      const memberName = cleanCell(firstValue(row, ['Member Name', 'Member Acct Name', 'Nama Rekening', 'Account Name']));
+      const applicationTime = cleanCell(firstValue(row, ['Application Time (GMT+8)', 'Application Time', 'Apply Time', 'Date Created']));
+      const payment = cleanCell(firstValue(row, ['Payment', 'Channel']));
+      const method = cleanCell(firstValue(row, ['Payment Method', 'Payment Method ', 'Method']));
+      const currency = cleanCell(firstValue(row, ['Currency']));
+      const amount = cleanCell(firstValue(row, ['Amount', 'Nominal', 'Deposit Amount']));
+      const fee = cleanCell(firstValue(row, ['Fee', 'QRIS Fee', 'Potongan QRIS']));
+      const status = cleanCell(firstValue(row, ['Status']));
+
+      if (!applicationTime || !loginId || !amount) return;
+      if (payment && payment.toUpperCase() !== 'QRIS IM') return;
+      if (method && !/^QRIS$/i.test(method)) return;
+      if (currency && currency.toUpperCase() !== 'IDR') return;
+      if (/^MAGNUM188/i.test(loginId) || /@\d+$/.test(loginId)) {
+        skipped++;
+        return;
+      }
+
+      records.push({
+        loginId,
+        loginKey: normalizeLoginId(loginId),
+        memberId,
+        memberName,
+        applicationTime,
+        amount,
+        fee: fee || '0.00',
+        status: status || ''
+      });
+    });
+    return { records, skipped };
+  }
+
+  const lines = text.split(/\r?\n/).map(line => cleanCell(line)).filter(Boolean);
+  const datePattern = /^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}$/;
+  const numPattern = /^[\d,]+\.\d{1,2}$/;
+
+  for (let i = 6; i < lines.length - 6; i++) {
+    if (!datePattern.test(lines[i])) continue;
+    if (String(lines[i + 1] || '').toUpperCase() !== 'QRIS IM') continue;
+    if (String(lines[i + 3] || '').toUpperCase() !== 'IDR') continue;
+    if (!numPattern.test(lines[i + 4] || '')) continue;
+    if (!numPattern.test(lines[i + 5] || '')) continue;
+
+    const loginId = lines[i - 5] || '';
+    if (/^MAGNUM188/i.test(loginId) || /@\d+$/.test(loginId)) {
+      skipped++;
+      continue;
+    }
+
+    records.push({
+      loginId,
+      loginKey: normalizeLoginId(loginId),
+      memberId: /^\d+@?\d*$/i.test(lines[i - 6] || '') ? lines[i - 6] : '',
+      memberName: lines[i - 4] || '',
+      applicationTime: lines[i],
+      amount: lines[i + 4],
+      fee: lines[i + 5],
+      status: lines[i + 6] || ''
+    });
+  }
+
+  return { records, skipped };
+}
+
+function isAdjustmentStatusDone(status) {
+  return /^(APPROVED|SUCCESS|COMPLETED)$/i.test(cleanCell(status));
+}
+
+function isAdjustmentStatusPending(status) {
+  return /^PENDING$/i.test(cleanCell(status));
+}
+
+function isAdjustmentStatusRejected(status) {
+  return /^(REJECT|REJECTED|CANCELLED|CANCELED)$/i.test(cleanCell(status));
+}
+
+function isBoStatusLine(value) {
+  return /^(APPROVED|SUCCESS|COMPLETED|REJECT|REJECTED|PENDING|CANCELLED|CANCELED)$/i.test(cleanCell(value));
+}
+
+function parseAdjustmentRows(rawText) {
+  const text = String(rawText || '');
+  if (!text.trim()) return [];
+
+  if (looksLikeCsv(text)) {
+    return csvRecords(text).map(row => {
+      const loginId = cleanCell(firstValue(row, ['Login ID', 'LoginID', 'User ID']));
+      const memberId = cleanCell(firstValue(row, ['Member ID', 'MemberID']));
+      const status = cleanCell(firstValue(row, ['Status']));
+      const transactionNumber = cleanCell(firstValue(row, ['Transaction Number', 'Trans. Number', 'Trans Number']));
+      const remark = cleanCell(firstValue(row, ['Remark', 'Remarks']));
+      const approvedTime = cleanCell(firstValue(row, ['Approved Time', 'Approve Time']));
+      const dateCreated = cleanCell(firstValue(row, ['Date Created', 'Created Time']));
+      const bonusDate = parseBonusDateFromRemark(`${transactionNumber} ${remark}`, null);
+      return {
+        loginId,
+        loginKey: normalizeLoginId(loginId),
+        memberId,
+        amount: parseNumber(firstValue(row, ['Adjustment Amt', 'Adjustment Amount', 'Adj Amount', 'Amount'])),
+        status,
+        transactionNumber,
+        remark,
+        approvedTime,
+        dateCreated,
+        bonusDate
+      };
+    }).filter(row => row.loginKey);
+  }
+
+  const lines = text.split(/\r?\n/).map(line => cleanCell(line)).filter(Boolean);
+  const records = [];
+
+  for (let i = 0; i < lines.length - 10; i++) {
+    if (!/^\d+@\d+$/i.test(lines[i + 1] || '')) continue;
+    if (!/^\d{4,}$/.test(lines[i + 2] || '')) continue;
+    if (String(lines[i + 3] || '').toUpperCase() !== 'IDR') continue;
+
+    const loginId = lines[i];
+    const memberId = lines[i + 1];
+    const adjustmentId = lines[i + 2];
+    const amount = parseNumber(lines[i + 7]);
+    let statusIndex = -1;
+
+    for (let cursor = i + 8; cursor < Math.min(lines.length, i + 24); cursor++) {
+      if (isBoStatusLine(lines[cursor])) {
+        statusIndex = cursor;
+        break;
+      }
+    }
+    if (statusIndex === -1) continue;
+
+    let dateCreatedIndex = -1;
+    for (let cursor = statusIndex + 1; cursor < Math.min(lines.length, statusIndex + 8); cursor++) {
+      if (parseBoDate(lines[cursor])) {
+        dateCreatedIndex = cursor;
+        break;
+      }
+    }
+
+    let approvedTimeIndex = -1;
+    if (dateCreatedIndex !== -1) {
+      for (let cursor = dateCreatedIndex + 1; cursor < Math.min(lines.length, dateCreatedIndex + 8); cursor++) {
+        if (parseBoDate(lines[cursor])) {
+          approvedTimeIndex = cursor;
+          break;
+        }
+      }
+    }
+
+    const transactionNumber = lines.slice(i + 8, statusIndex).join(' ').trim();
+    const remarkEnd = dateCreatedIndex === -1 ? Math.min(lines.length, statusIndex + 4) : dateCreatedIndex;
+    const remark = lines.slice(statusIndex + 1, remarkEnd).join(' ').trim() || transactionNumber;
+    const bonusDate = parseBonusDateFromRemark(`${transactionNumber} ${remark}`, null);
+
+    records.push({
+      loginId,
+      loginKey: normalizeLoginId(loginId),
+      memberId,
+      adjustmentId,
+      amount,
+      status: lines[statusIndex],
+      transactionNumber,
+      remark,
+      dateCreated: dateCreatedIndex !== -1 ? lines[dateCreatedIndex] : '',
+      approvedTime: approvedTimeIndex !== -1 ? lines[approvedTimeIndex] : '',
+      bonusDate
+    });
+  }
+
+  return records;
+}
+
+function validateBatchItems(rows, dateValue) {
+  const items = [];
+  const skipped = [];
+  const warnings = [];
+  const note = `Bonus Harian ${displayLongDate(dateValue)}`;
+  const summary = {
+    total_items: 0,
+    missing_login_id: 0,
+    missing_member_id: 0,
+    missing_amount: 0,
+    duplicate_login_id_same_date: 0,
+    duplicate_member_id_same_date: 0,
+    total_amount_raw: 0,
+    total_amount_bo: 0,
+    skipped_items: 0,
+    missing_member_name: 0,
+    short_login_id_warning: 0,
+    similar_login_id_warning: 0
+  };
+
+  rows.forEach((row, index) => {
+    const loginId = cleanCell(row.loginId || row.login_id);
+    const memberId = cleanCell(row.memberId || row.member_id);
+    const memberName = cleanCell(row.memberName || row.member_name);
+    const amountBo = Number(row.bonus || row.bonus_amount || 0);
+    const amountRaw = Math.round(amountBo * 1000);
+    const baseSkipped = { index: index + 1, login_id: loginId, reason: '' };
+
+    if (!loginId) {
+      summary.missing_login_id += 1;
+      skipped.push({ ...baseSkipped, reason: 'LOGIN_ID_EMPTY' });
+      return;
+    }
+    if (!Number.isFinite(amountBo) || amountBo <= 0 || !Number.isFinite(amountRaw) || amountRaw <= 0) {
+      summary.missing_amount += 1;
+      skipped.push({ ...baseSkipped, reason: 'AMOUNT_INVALID' });
+      return;
+    }
+
+    const itemWarnings = [];
+    if (!memberId) {
+      summary.missing_member_id += 1;
+      itemWarnings.push('Member ID kosong');
+      warnings.push({ type: 'MISSING_MEMBER_ID', login_id: loginId, message: `Member ID kosong untuk ${loginId}.` });
+    }
+    if (!memberName) {
+      summary.missing_member_name += 1;
+      warnings.push({ type: 'MISSING_MEMBER_NAME', login_id: loginId, message: `Member Name kosong untuk ${loginId}.` });
+    }
+    if (loginId.length <= 5) {
+      summary.short_login_id_warning += 1;
+      warnings.push({ type: 'SHORT_LOGIN_ID', login_id: loginId, message: `Login ID pendek: ${loginId}.` });
+    }
+
+    items.push({
+      login_id: loginId,
+      member_id: memberId,
+      member_name: memberName,
+      amount_raw: amountRaw,
+      amount_bo: amountBo,
+      bonus_date: dateValue,
+      bonus_type: 'BONUS_HARIAN',
+      trans_no: note,
+      note,
+      warning: itemWarnings.join(' | ')
+    });
+  });
+
+  const loginDateCounts = new Map();
+  const memberDateCounts = new Map();
+  items.forEach(item => {
+    const loginKey = `${item.bonus_date}|${normalizeLoginId(item.login_id)}`;
+    loginDateCounts.set(loginKey, (loginDateCounts.get(loginKey) || 0) + 1);
+    if (item.member_id) {
+      const memberKey = `${item.bonus_date}|${item.member_id.toUpperCase()}`;
+      memberDateCounts.set(memberKey, (memberDateCounts.get(memberKey) || 0) + 1);
+    }
+  });
+
+  items.forEach(item => {
+    const itemWarnings = item.warning ? item.warning.split(' | ').filter(Boolean) : [];
+    const loginKey = `${item.bonus_date}|${normalizeLoginId(item.login_id)}`;
+    const memberKey = `${item.bonus_date}|${item.member_id.toUpperCase()}`;
+    if (loginDateCounts.get(loginKey) > 1) itemWarnings.push('Duplicate Login ID tanggal sama');
+    if (item.member_id && memberDateCounts.get(memberKey) > 1) itemWarnings.push('Duplicate Member ID tanggal sama');
+    item.warning = [...new Set(itemWarnings)].join(' | ');
+  });
+
+  summary.duplicate_login_id_same_date = [...loginDateCounts.values()].filter(count => count > 1).length;
+  summary.duplicate_member_id_same_date = [...memberDateCounts.values()].filter(count => count > 1).length;
+  summary.total_items = items.length;
+  summary.total_amount_raw = items.reduce((sum, item) => sum + item.amount_raw, 0);
+  summary.total_amount_bo = items.reduce((sum, item) => sum + item.amount_bo, 0);
+  summary.skipped_items = skipped.length;
+
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const left = items[i].login_id.toLowerCase();
+      const right = items[j].login_id.toLowerCase();
+      if (!left || !right || left === right) continue;
+      if (left.includes(right) || right.includes(left)) {
+        summary.similar_login_id_warning += 1;
+        warnings.push({
+          type: 'SIMILAR_LOGIN_ID',
+          login_id: items[i].login_id,
+          similar_to: items[j].login_id,
+          message: `Login ID ${items[i].login_id} mirip dengan ${items[j].login_id}.`
+        });
+      }
+    }
+  }
+
+  return { items, skipped, warnings, summary };
+}
+
+function applyAdjustmentDuplicateCheck(batchRows, adjustmentRaw, dateValue) {
+  const warnings = [];
+  const skipped = [];
+  if (!adjustmentRaw || !adjustmentRaw.trim()) {
+    warnings.push({
+      type: 'ADJUSTMENT_FILE_MISSING',
+      message: 'Adjustment file tidak diberikan, duplicate check awal dilewati.'
+    });
+    return { rows: batchRows, skipped, warnings };
+  }
+
+  const adjustmentRows = parseAdjustmentRows(adjustmentRaw);
+  const approved = adjustmentRows.filter(row => {
+    if (!isAdjustmentStatusDone(row.status)) return false;
+    if (!isBonusHarianText(`${row.transactionNumber} ${row.remark}`)) return false;
+    return row.bonusDate === dateValue;
+  });
+  const pending = adjustmentRows.filter(row => {
+    if (!isAdjustmentStatusPending(row.status)) return false;
+    if (!isBonusHarianText(`${row.transactionNumber} ${row.remark}`)) return false;
+    return row.bonusDate === dateValue;
+  });
+  const approvedLoginKeys = new Set(approved.map(row => row.loginKey).filter(Boolean));
+  const approvedMemberIds = new Set(approved.map(row => cleanCell(row.memberId).toUpperCase()).filter(Boolean));
+  const pendingLoginKeys = new Set(pending.map(row => row.loginKey).filter(Boolean));
+  const pendingMemberIds = new Set(pending.map(row => cleanCell(row.memberId).toUpperCase()).filter(Boolean));
+
+  const rows = [];
+  batchRows.forEach(row => {
+    const loginKey = normalizeLoginId(row.loginId);
+    const memberKey = cleanCell(row.memberId).toUpperCase();
+    if (approvedLoginKeys.has(loginKey) || (memberKey && approvedMemberIds.has(memberKey))) {
+      skipped.push({
+        login_id: row.loginId,
+        member_id: row.memberId || '',
+        reason: 'ALREADY_APPROVED_BONUS_HARIAN'
+      });
+      return;
+    }
+    if (pendingLoginKeys.has(loginKey) || (memberKey && pendingMemberIds.has(memberKey))) {
+      row.warning = [row.warning, 'Adjustment pending/manual review'].filter(Boolean).join(' | ');
+      warnings.push({
+        type: 'ADJUSTMENT_PENDING',
+        login_id: row.loginId,
+        member_id: row.memberId || '',
+        message: `Adjustment pending ditemukan untuk ${row.loginId}. Review manual.`
+      });
+    }
+    rows.push(row);
+  });
+
+  adjustmentRows
+    .filter(row => !row.bonusDate && !isAdjustmentStatusRejected(row.status) && isBonusHarianText(`${row.transactionNumber} ${row.remark}`))
+    .slice(0, 20)
+    .forEach(row => warnings.push({
+      type: 'ADJUSTMENT_DATE_UNPARSED',
+      login_id: row.loginId,
+      member_id: row.memberId || '',
+      message: `Tanggal Bonus Harian tidak terbaca untuk Adjustment ${row.loginId}.`
+    }));
+
+  return { rows, skipped, warnings };
+}
+
+function buildBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source }) {
+  const targetDate = isValidDate(bonusDate) ? bonusDate : getTodayJakartaInput();
+  const parsed = parseDepositRows(depositRaw);
+  const deposits = parsed.records
+    .filter(row => (!row.status || /^APPROVED$/i.test(row.status)) && gmt7DateInput(row.applicationTime) === targetDate)
+    .map(row => ({
+      ...row,
+      total: (parseNumber(row.amount) + parseNumber(row.fee)) * 1000,
+      timestamp: parseBoDate(row.applicationTime)?.getTime() || 0
+    }));
+
+  const byLogin = new Map();
+  deposits.forEach(row => {
+    if (!row.loginKey) return;
+    const current = byLogin.get(row.loginKey);
+    if (!current || row.total > current.maxDeposit || (row.total === current.maxDeposit && row.timestamp > current.timestamp)) {
+      byLogin.set(row.loginKey, {
+        loginId: row.loginId,
+        memberId: row.memberId,
+        memberName: row.memberName,
+        maxDeposit: row.total,
+        timestamp: row.timestamp
+      });
+    }
+  });
+
+  const candidateRows = [...byLogin.values()]
+    .map(row => ({
+      ...row,
+      bonus: row.maxDeposit >= 100000 ? 10 : row.maxDeposit >= 50000 ? 5 : 0,
+      warning: ''
+    }))
+    .filter(row => row.bonus > 0);
+
+  const duplicateCheck = applyAdjustmentDuplicateCheck(candidateRows, adjustmentRaw, targetDate);
+  const validation = validateBatchItems(duplicateCheck.rows, targetDate);
+  validation.skipped.push(...duplicateCheck.skipped);
+  validation.warnings.push(...duplicateCheck.warnings);
+  validation.summary.skipped_items = validation.skipped.length;
+
+  return {
+    batch_code: `BH-${compactDate(targetDate)}-001`,
+    mode: 'BONUS_HARIAN',
+    created_at: new Date().toISOString(),
+    source: source || FIXED_SOURCE,
+    summary: validation.summary,
+    items: validation.items,
+    skipped: validation.skipped,
+    warnings: validation.warnings
+  };
+}
+
+async function readRequestBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+function splitBuffer(buffer, separator) {
+  const parts = [];
+  let start = 0;
+  let index = buffer.indexOf(separator, start);
+  while (index !== -1) {
+    parts.push(buffer.slice(start, index));
+    start = index + separator.length;
+    index = buffer.indexOf(separator, start);
+  }
+  parts.push(buffer.slice(start));
+  return parts;
+}
+
+function parseMultipart(buffer, contentType) {
+  const boundaryMatch = String(contentType || '').match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  if (!boundaryMatch) throw new Error('Boundary multipart tidak ditemukan.');
+  const boundary = Buffer.from(`--${boundaryMatch[1] || boundaryMatch[2]}`);
+  const parts = splitBuffer(buffer, boundary);
+  const fields = {};
+  const files = {};
+
+  parts.forEach(part => {
+    let chunk = part;
+    if (chunk.length === 0) return;
+    if (chunk.slice(0, 2).toString() === '\r\n') chunk = chunk.slice(2);
+    if (chunk.slice(-2).toString() === '\r\n') chunk = chunk.slice(0, -2);
+    if (chunk.toString() === '--') return;
+    if (chunk.slice(-2).toString() === '--') chunk = chunk.slice(0, -2);
+
+    const headerEnd = chunk.indexOf(Buffer.from('\r\n\r\n'));
+    if (headerEnd === -1) return;
+    const headerText = chunk.slice(0, headerEnd).toString('utf8');
+    let content = chunk.slice(headerEnd + 4);
+    if (content.slice(-2).toString() === '\r\n') content = content.slice(0, -2);
+
+    const nameMatch = headerText.match(/name="([^"]+)"/i);
+    if (!nameMatch) return;
+    const filenameMatch = headerText.match(/filename="([^"]*)"/i);
+    const name = nameMatch[1];
+    if (filenameMatch && filenameMatch[1]) {
+      files[name] = {
+        filename: filenameMatch[1],
+        buffer: content
+      };
+    } else {
+      fields[name] = content.toString('utf8').trim();
+    }
+  });
+
+  return { fields, files };
+}
+
+function fileBufferToText(file, fieldName) {
+  if (!file || !file.buffer || file.buffer.length === 0) {
+    if (fieldName === 'deposit_file') throw new Error('deposit_file wajib diisi.');
+    return '';
+  }
+  if (/\.xlsx$/i.test(file.filename || '')) {
+    throw new Error('XLSX belum didukung di endpoint ini karena dependency Excel belum tersedia. Kirim CSV/raw text.');
+  }
+  return file.buffer.toString('utf8').replace(/^\uFEFF/, '');
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return json(res, 405, { ok: false, error: 'METHOD_NOT_ALLOWED' });
+  }
+
+  if (!assertAuth(req)) {
+    return json(res, 401, { ok: false, error: 'UNAUTHORIZED' });
+  }
+
+  try {
+    const contentType = req.headers['content-type'] || req.headers['Content-Type'] || '';
+    if (!/multipart\/form-data/i.test(String(contentType))) {
+      return json(res, 400, { ok: false, error: 'INVALID_CONTENT_TYPE', message: 'Gunakan multipart/form-data.' });
+    }
+
+    const bodyBuffer = await readRequestBody(req);
+    const { fields, files } = parseMultipart(bodyBuffer, contentType);
+    const mode = String(fields.mode || '').trim();
+    const source = String(fields.source || FIXED_SOURCE).trim();
+
+    if (mode && mode !== 'BONUS_HARIAN') {
+      return json(res, 400, { ok: false, error: 'INVALID_MODE', message: 'mode harus BONUS_HARIAN.' });
+    }
+    if (source && source !== FIXED_SOURCE) {
+      return json(res, 400, { ok: false, error: 'INVALID_SOURCE', message: 'source harus hermes-telegram.' });
+    }
+
+    const depositRaw = fileBufferToText(files.deposit_file, 'deposit_file');
+    const adjustmentRaw = files.adjustment_file ? fileBufferToText(files.adjustment_file, 'adjustment_file') : '';
+    const bonusDate = String(fields.bonus_date || '').trim();
+
+    if (bonusDate && !isValidDate(bonusDate)) {
+      return json(res, 400, { ok: false, error: 'INVALID_BONUS_DATE', message: 'bonus_date harus YYYY-MM-DD.' });
+    }
+
+    const batch = buildBonusBatch({
+      depositRaw,
+      adjustmentRaw,
+      bonusDate,
+      source
+    });
+
+    if (!batch.items.length) {
+      return json(res, 400, {
+        ok: false,
+        error: 'EMPTY_BATCH',
+        message: 'Tidak ada item bonus yang bisa diproses.',
+        summary: batch.summary,
+        batch
+      });
+    }
+
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const batchFile = `batch-adjustment-${batch.batch_code}-${stamp}.json`;
+
+    return json(res, 200, {
+      ok: true,
+      batch_code: batch.batch_code,
+      batch_file: batchFile,
+      summary: batch.summary,
+      batch
+    });
+  } catch (error) {
+    console.error('generate-json parser error:', error);
+    return json(res, 500, {
+      ok: false,
+      error: 'PARSER_FAILED',
+      message: error.message || 'Parser gagal memproses file.'
+    });
+  }
+}
