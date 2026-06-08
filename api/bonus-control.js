@@ -342,27 +342,89 @@ async function pendingExpired(body) {
   };
 }
 
-async function assertBatchPermission(claimBatchId, authContext) {
+function authDebug(authContext, body, claimBatchId) {
+  return {
+    body_role: body?.role || '',
+    session_role: authContext?.role || '',
+    current_role: authContext?.role || body?.role || '',
+    current_operator_name: authContext?.operator?.display_name || authContext?.operator?.username || body?.operator_name || '',
+    current_claim_owner: authContext?.claim_owner || '',
+    claim_batch_id: claimBatchId
+  };
+}
+
+function logBatchDebug(action, debug) {
+  console.info(`bonus-control ${action} debug`, debug);
+}
+
+async function assertBatchPermission(action, claimBatchId, authContext, body) {
+  const baseDebug = authDebug(authContext, body, claimBatchId);
   const { data: lock, error } = await supabase
     .from('bonus_process_locks')
-    .select('id, claim_batch_id, claim_owner, lock_status')
+    .select('id, claim_batch_id, claim_owner, operator_name, lock_status, pending_expires_at, bonus_date')
     .eq('claim_batch_id', claimBatchId)
-    .eq('lock_status', 'PENDING')
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error) throw error;
+  const debug = {
+    ...baseDebug,
+    batch_claim_owner: lock?.claim_owner || '',
+    batch_operator_name: lock?.operator_name || '',
+    batch_lock_status: lock?.lock_status || '',
+    pending_expires_at: lock?.pending_expires_at || '',
+    reject_reason: ''
+  };
   if (!lock) {
-    const missing = new Error('Batch PENDING tidak ditemukan.');
+    debug.reject_reason = 'BATCH_NOT_FOUND';
+    logBatchDebug(action, debug);
+    const missing = new Error('claim_batch_id tidak ditemukan.');
     missing.statusCode = 404;
-    missing.code = 'PENDING_BATCH_NOT_FOUND';
+    missing.code = 'BATCH_NOT_FOUND';
+    missing.debug = debug;
     throw missing;
   }
-  if (authContext?.role === 'superadmin') return lock;
-  if (authContext?.type === 'operator' && lock.claim_owner === authContext.claim_owner) return lock;
+
+  const lockStatus = String(lock.lock_status || '').toUpperCase();
+  if (action === 'mark_done' && lockStatus === 'EXPIRED') {
+    debug.reject_reason = 'BATCH_ALREADY_EXPIRED';
+    logBatchDebug(action, debug);
+    const expired = new Error('Batch sudah expired, tidak bisa ditandai DONE. Silakan generate ulang / release ulang.');
+    expired.statusCode = 409;
+    expired.code = 'BATCH_ALREADY_EXPIRED';
+    expired.debug = debug;
+    throw expired;
+  }
+  if (lockStatus !== 'PENDING') {
+    debug.reject_reason = `BATCH_NOT_PENDING_${lockStatus || 'EMPTY'}`;
+    logBatchDebug(action, debug);
+    const notPending = new Error(`Batch sudah ${lockStatus || 'tidak PENDING'}, tidak ada PENDING aktif untuk diproses.`);
+    notPending.statusCode = 409;
+    notPending.code = 'BATCH_NOT_PENDING';
+    notPending.debug = debug;
+    throw notPending;
+  }
+
+  if (authContext?.role === 'superadmin') {
+    debug.reject_reason = '';
+    logBatchDebug(action, { ...debug, permission: 'SUPERADMIN_BYPASS' });
+    return lock;
+  }
+  const bodyOperatorName = String(body?.operator_name || '').trim().toLowerCase();
+  const lockOperatorName = String(lock.operator_name || '').trim().toLowerCase();
+  const ownerMatches = authContext?.type === 'operator' && lock.claim_owner === authContext.claim_owner;
+  const operatorNameMatches = Boolean(bodyOperatorName && lockOperatorName && bodyOperatorName === lockOperatorName);
+  if (ownerMatches || operatorNameMatches) {
+    logBatchDebug(action, { ...debug, permission: ownerMatches ? 'OWNER_MATCH' : 'OPERATOR_NAME_MATCH' });
+    return lock;
+  }
+
+  debug.reject_reason = 'BATCH_PERMISSION_DENIED';
+  logBatchDebug(action, debug);
   const denied = new Error('Hanya pemilik batch atau superadmin yang boleh mengubah batch ini.');
   denied.statusCode = 403;
   denied.code = 'BATCH_PERMISSION_DENIED';
+  denied.debug = debug;
   throw denied;
 }
 
@@ -375,7 +437,7 @@ async function markDone(body, authContext) {
     error.code = 'CLAIM_BATCH_ID_REQUIRED';
     throw error;
   }
-  await assertBatchPermission(claimBatchId, authContext);
+  await assertBatchPermission('mark_done', claimBatchId, authContext, body);
 
   const now = new Date().toISOString();
   const { data: rows, error } = await supabase
@@ -417,13 +479,14 @@ async function markDone(body, authContext) {
 
 async function expireBatch(body, authContext) {
   const claimBatchId = String(body.claim_batch_id || '').trim();
+  const operatorName = String(body.operator_name || '').trim() || 'Operator';
   if (!claimBatchId) {
     const error = new Error('claim_batch_id wajib diisi.');
     error.statusCode = 400;
     error.code = 'CLAIM_BATCH_ID_REQUIRED';
     throw error;
   }
-  await assertBatchPermission(claimBatchId, authContext);
+  await assertBatchPermission('expire_batch', claimBatchId, authContext, body);
 
   const now = new Date().toISOString();
   const { data: rows, error } = await supabase
@@ -452,6 +515,7 @@ async function expireBatch(body, authContext) {
     ok: true,
     action: 'expire_batch',
     claim_batch_id: claimBatchId,
+    operator_name: operatorName,
     expired_count: rows?.length || 0,
     lock_expired_count: locks?.length || 0,
     rows: rows || [],
@@ -607,7 +671,8 @@ export default async function handler(req, res) {
     return json(res, error.statusCode || 500, {
       ok: false,
       error: error.code || 'BONUS_CONTROL_FAILED',
-      message: error.message || 'Bonus control gagal.'
+      message: error.message || 'Bonus control gagal.',
+      debug: error.debug || null
     });
   }
 }

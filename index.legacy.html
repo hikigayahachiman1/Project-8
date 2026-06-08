@@ -3396,6 +3396,7 @@
   let bonusRemoteStatus = 'idle';
   let bonusPendingTimerInterval = null;
   let bonusPendingServerOffsetMs = 0;
+  let bonusActiveLock = null;
   let currentOperator = null;
   let adminOperatorRows = [];
   let currentLoadingSteps = [];
@@ -5456,7 +5457,10 @@
       throw new Error('Session operator expired, silakan login ulang.');
     }
     if (!response.ok || (result.ok !== true && action !== 'health')) {
-      throw new Error(result.message || result.error || `Gagal menjalankan ${action}.`);
+      const error = new Error(result.message || result.error || `Gagal menjalankan ${action}.`);
+      error.debug = result.debug || null;
+      error.code = result.error || '';
+      throw error;
     }
     return result;
   }
@@ -5468,6 +5472,7 @@
     setButtonLoading(btn, true, 'Membersihkan...');
     try {
       const result = await bonusControlApi('expire_pending');
+      clearBonusActiveLock('expire_pending_clicked');
       if (dateValue) {
         delete bonusRemoteDoneCache[dateValue];
         delete bonusRemotePendingCache[dateValue];
@@ -5495,6 +5500,7 @@
       delete bonusRemoteDoneCache[dateValue];
       delete bonusRemotePendingCache[dateValue];
       const result = await bonusControlApi('status', { bonus_date: dateValue });
+      syncBonusActiveLockFromStatus(result);
       renderBonusStatusRefreshInfo(result);
       renderBonusDoneInfo();
       showToast('Status bonus berhasil diperbarui.', 'success');
@@ -5565,28 +5571,86 @@
     return currentOperator ? (currentOperator.display_name || currentOperator.username || 'Operator') : 'Operator';
   }
 
+  function bonusDebugContext(claimBatchId, extra = {}) {
+    return {
+      role: currentOperator?.role || '',
+      operator_name: currentOperatorName(),
+      claim_batch_id: claimBatchId || '',
+      active_claim_batch_id: bonusActiveLock?.claim_batch_id || '',
+      active_lock_status: bonusActiveLock?.lock_status || '',
+      active_claim_owner: bonusActiveLock?.claim_owner || '',
+      active_pending_expires_at: bonusActiveLock?.pending_expires_at || '',
+      ...extra
+    };
+  }
+
+  function setBonusActiveLock(lock) {
+    if (lock && String(lock.lock_status || '').toUpperCase() === 'PENDING' && lock.claim_batch_id) {
+      bonusActiveLock = lock;
+      return;
+    }
+    bonusActiveLock = null;
+  }
+
+  function clearBonusActiveLock(reason = '') {
+    if (bonusActiveLock) {
+      console.info('bonus active batch cleared', bonusDebugContext(bonusActiveLock.claim_batch_id, { reason }));
+    }
+    bonusActiveLock = null;
+  }
+
+  function syncBonusActiveLockFromStatus(result) {
+    const locks = Array.isArray(result?.locks) ? result.locks : [];
+    const activeLock = locks.find(lock => String(lock.lock_status || '').toUpperCase() === 'PENDING' && lock.claim_batch_id);
+    if (activeLock) {
+      setBonusActiveLock(activeLock);
+      return;
+    }
+    clearBonusActiveLock('refresh_status_no_pending_lock');
+  }
+
+  function resolveBonusBatchIdForAction(promptMessage) {
+    if (bonusActiveLock && String(bonusActiveLock.lock_status || '').toUpperCase() === 'PENDING' && bonusActiveLock.claim_batch_id) {
+      return String(bonusActiveLock.claim_batch_id).trim();
+    }
+    if (isSuperAdmin()) {
+      return promptBonusBatchId(promptMessage);
+    }
+    showToast('Tidak ada PENDING aktif untuk batch Anda. Silakan Proses Bonus Harian dulu.', 'error');
+    return '';
+  }
+
+  function handleBonusControlError(action, error) {
+    console.error(`bonus-control ${action} error:`, error);
+    if (error && error.debug) console.error(`bonus-control ${action} debug:`, error.debug);
+    showToast(error.message || `Gagal menjalankan ${action}.`, 'error');
+  }
+
   async function markBatchDoneFromUi() {
     if (!requireOperator()) return;
-    const claimBatchId = promptBonusBatchId('Masukkan Claim Batch ID yang akan ditandai DONE:');
+    const claimBatchId = resolveBonusBatchIdForAction('Masukkan Claim Batch ID yang akan ditandai DONE:');
     if (!claimBatchId) return;
+    if (isSuperAdmin() && !window.confirm(`Superadmin akan menandai batch ${claimBatchId} sebagai DONE. Pastikan batch ini benar. Lanjutkan?`)) return;
     const btn = document.getElementById('bonusBatchDoneBtn');
     setButtonLoading(btn, true, 'Finalisasi...');
     try {
+      console.info('bonus mark_done submit', bonusDebugContext(claimBatchId));
       const result = await bonusControlApi('mark_done', {
         claim_batch_id: claimBatchId,
-        operator_name: currentOperatorName()
+        operator_name: currentOperatorName(),
+        role: currentOperator?.role || ''
       });
       const dateValue = document.getElementById('bonusDate').value;
       if (dateValue) {
         delete bonusRemoteDoneCache[dateValue];
         delete bonusRemotePendingCache[dateValue];
       }
+      clearBonusActiveLock('mark_done_success');
       renderBonusStatusRefreshInfo({ summary: { done: result.done_count, pending_active: 0, expired: 0 } });
       renderBonusDoneInfo();
       showToast(`Batch DONE. Rows: ${result.done_count || 0}, locks: ${result.lock_done_count || 0}.`, 'success');
     } catch (error) {
-      console.error('bonus-control mark_done error:', error);
-      showToast(error.message || 'Gagal tandai batch DONE.', 'error');
+      handleBonusControlError('mark_done', error);
     } finally {
       setButtonLoading(btn, false);
     }
@@ -5594,27 +5658,29 @@
 
   async function expireBatchFromUi() {
     if (!requireOperator()) return;
-    const claimBatchId = promptBonusBatchId('Masukkan Claim Batch ID yang akan di-expire:');
+    const claimBatchId = resolveBonusBatchIdForAction('Masukkan Claim Batch ID yang akan di-expire:');
     if (!claimBatchId) return;
-    if (!window.confirm(`Expire batch ${claimBatchId}? Data PENDING dalam batch ini akan menjadi EXPIRED.`)) return;
+    if (!window.confirm(`${isSuperAdmin() ? 'Superadmin akan expire' : 'Expire'} batch ${claimBatchId}? Data PENDING dalam batch ini akan menjadi EXPIRED.`)) return;
     const btn = document.getElementById('bonusBatchExpireBtn');
     setButtonLoading(btn, true, 'Expire...');
     try {
+      console.info('bonus expire_batch submit', bonusDebugContext(claimBatchId));
       const result = await bonusControlApi('expire_batch', {
         claim_batch_id: claimBatchId,
-        operator_name: currentOperatorName()
+        operator_name: currentOperatorName(),
+        role: currentOperator?.role || ''
       });
       const dateValue = document.getElementById('bonusDate').value;
       if (dateValue) {
         delete bonusRemoteDoneCache[dateValue];
         delete bonusRemotePendingCache[dateValue];
       }
+      clearBonusActiveLock('expire_batch_success');
       renderBonusStatusRefreshInfo({ summary: { done: 0, pending_active: 0, expired: result.expired_count } });
       renderBonusDoneInfo();
       showToast(`Batch di-expire. Rows: ${result.expired_count || 0}, locks: ${result.lock_expired_count || 0}.`, 'success');
     } catch (error) {
-      console.error('bonus-control expire_batch error:', error);
-      showToast(error.message || 'Gagal expire batch.', 'error');
+      handleBonusControlError('expire_batch', error);
     } finally {
       setButtonLoading(btn, false);
     }
@@ -5748,28 +5814,32 @@
   }
 
   async function finalizeRemoteBonusBatch(dateValue) {
-    const response = await fetch('/api/bonus-done', {
-      method: 'POST',
-      headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        action: 'done',
-        date: dateValue,
-        claim_owner: getBonusClaimOwner(),
-        operator_name: currentOperator ? currentOperator.display_name : ''
-      })
-    });
+    if (!bonusActiveLock || !bonusActiveLock.claim_batch_id || String(bonusActiveLock.lock_status || '').toUpperCase() !== 'PENDING') {
+      const statusResult = await bonusControlApi('status', { bonus_date: dateValue });
+      syncBonusActiveLockFromStatus(statusResult);
+    }
 
-    const result = await response.json().catch(() => ({}));
-    if (response.status === 401) {
-      handleOperatorUnauthorized();
+    const claimBatchId = bonusActiveLock && String(bonusActiveLock.lock_status || '').toUpperCase() === 'PENDING'
+      ? bonusActiveLock.claim_batch_id
+      : '';
+    if (!claimBatchId) {
+      throw new Error('Tidak ada PENDING aktif untuk ditandai DONE. Silakan Proses Bonus Harian dulu atau refresh status.');
     }
-    if (!response.ok || result.success !== true) {
-      throw new Error(result.message || result.error || 'Gagal finalisasi batch.');
+    if (isSuperAdmin() && !window.confirm(`Superadmin akan menandai batch ${claimBatchId} sebagai DONE. Pastikan batch ini benar. Lanjutkan?`)) {
+      throw new Error('Finalisasi dibatalkan.');
     }
+
+    console.info('bonus finalize submit', bonusDebugContext(claimBatchId));
+    const result = await bonusControlApi('mark_done', {
+      claim_batch_id: claimBatchId,
+      operator_name: currentOperatorName(),
+      role: currentOperator?.role || ''
+    });
 
     bonusRemoteStatus = 'online';
     delete bonusRemoteDoneCache[dateValue];
     delete bonusRemotePendingCache[dateValue];
+    clearBonusActiveLock('finalize_success');
     return result;
   }
 
@@ -7907,6 +7977,8 @@
 
     if (claimResult && claimResult.success === true) {
       if (claimResult.status === 'locked_by_other') {
+        if (isSuperAdmin()) setBonusActiveLock(claimResult.lock);
+        else clearBonusActiveLock('locked_by_other_not_superadmin');
         bonusRows = [];
         bonusRender();
         const operatorName = claimResult.lock && claimResult.lock.operator_name ? claimResult.lock.operator_name : 'operator lain';
@@ -7925,6 +7997,8 @@
       }
 
       if (claimResult.status === 'pending_expired') {
+        if (isSuperAdmin()) setBonusActiveLock(claimResult.lock);
+        else clearBonusActiveLock('pending_expired_not_superadmin');
         bonusRows = [];
         bonusRender();
         showBonusLockWarning(
@@ -7942,6 +8016,7 @@
       }
 
       if (claimResult.status === 'all_already_done') {
+        clearBonusActiveLock('all_already_done');
         bonusRows = [];
         bonusRender();
         showBonusLockWarning(
@@ -7954,6 +8029,7 @@
       }
 
       if (claimResult.status === 'no_candidates') {
+        clearBonusActiveLock('no_candidates');
         bonusRows = [];
         bonusRender();
         hideBonusLockWarning();
@@ -7963,6 +8039,7 @@
       }
 
       if (claimResult.status === 'already_done') {
+        clearBonusActiveLock('already_done');
         bonusRows = [];
         bonusRender();
         showBonusLockWarning(
@@ -7976,6 +8053,7 @@
 
       bonusRows = rowsFromClaimResponse(claimResult.rows || [], candidateRows);
       if (claimResult.status === 'own_pending' && bonusRows.length > 0) {
+        setBonusActiveLock(claimResult.lock);
         showBonusLockWarning(
           'PENDING MILIK ANDA',
           'Menampilkan ulang pending milik Anda. Silakan copy ulang jika sebelumnya lupa.'
@@ -7987,6 +8065,7 @@
           title: 'MENAMPILKAN ULANG PENDING MILIK ANDA'
         });
       } else if (claimResult.status === 'own_pending') {
+        clearBonusActiveLock('own_pending_empty');
         bonusRows = [];
         bonusRender();
         hideBonusLockWarning();
@@ -7996,6 +8075,7 @@
       } else {
         hideBonusLockWarning();
         if (claimResult.status === 'claimed') {
+          setBonusActiveLock(claimResult.lock);
           startBonusPendingTimer(claimResult.lock, {
             ownerType: 'self',
             serverTime: claimResult.serverTime,
@@ -8003,10 +8083,12 @@
             title: 'PENDING BONUS HARIAN MILIK ANDA'
           });
         } else {
+          clearBonusActiveLock('claim_result_not_pending');
           stopBonusPendingTimer();
         }
       }
     } else {
+      clearBonusActiveLock('remote_claim_failed_or_offline');
       hideBonusLockWarning();
       stopBonusPendingTimer();
       bonusRows = candidateRows;
@@ -8049,6 +8131,7 @@
     document.getElementById('bonusStats').style.display = 'none';
     document.getElementById('bonusCopyActions').style.display = 'flex';
     resetAdjustmentBatchPreview();
+    clearBonusActiveLock('bonus_reset');
     hideBonusLockWarning();
     stopBonusPendingTimer();
     updateBonusSourceNote();
