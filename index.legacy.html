@@ -2694,8 +2694,11 @@
           <div class="source-note" id="bonusSourceNote">Belum ada data dari Parser QRIS.</div>
           <div class="bonus-actions">
             <button id="bonusProcessBtn" class="primary">Proses Bonus Harian</button>
+            <button id="bonusExpirePendingBtn" class="ghost">Bersihkan Pending Expired</button>
+            <button id="bonusRefreshStatusBtn" class="ghost">Refresh Status Bonus</button>
             <button id="bonusResetBtn" class="ghost">Reset Bonus</button>
           </div>
+          <div class="source-note" id="bonusStatusRefreshInfo" style="display:none;"></div>
           <div class="hint">
             <strong>Info:</strong> Deposit valid diambil dari transaksi Approved. Data BO dianggap GMT+8, lalu tanggal bonus dihitung sebagai GMT+7: jam 01:00:00 BO baru mulai masuk tanggal yang dipilih. Bonus 10 untuk deposit terbesar minimal 100.000, bonus 5 untuk minimal 50.000.
           </div>
@@ -5215,6 +5218,7 @@
       const pendingIds = Array.isArray(result.ownPendingLoginIds) ? result.ownPendingLoginIds : [];
       bonusRemoteDoneCache[dateValue] = new Set(loginIds.map(login => String(login).toUpperCase()));
       bonusRemotePendingCache[dateValue] = new Set(pendingIds.map(login => String(login).toUpperCase()));
+      renderBonusStatusRefreshInfo(result);
       bonusRemoteStatus = 'online';
       return bonusRemoteDoneCache[dateValue];
     } catch (error) {
@@ -5222,6 +5226,92 @@
       bonusRemoteStatus = 'offline';
       showToast('Database pusat tidak terhubung, memakai data lokal.', 'error');
       throw error;
+    }
+  }
+
+  function renderBonusStatusRefreshInfo(result, expireResult = null) {
+    const box = document.getElementById('bonusStatusRefreshInfo');
+    if (!box) return;
+    const statusSummary = result && result.statusSummary ? result.statusSummary : {};
+    const lock = result && result.lock ? result.lock : null;
+    const expiredBonusRows = Number(
+      (expireResult && expireResult.expired_bonus_rows) ||
+      (result && result.expireResult && result.expireResult.expired_bonus_rows) ||
+      (result && result.expired_bonus_rows) ||
+      0
+    );
+    const expiredLockRows = Number(
+      (expireResult && expireResult.expired_lock_rows) ||
+      (result && result.expireResult && result.expireResult.expired_lock_rows) ||
+      (result && result.expired_lock_rows) ||
+      0
+    );
+    const parts = [
+      `Expired bonus dibersihkan: ${expiredBonusRows}`,
+      `Expired lock dibersihkan: ${expiredLockRows}`,
+      `DONE: ${Number(statusSummary.done || 0)}`,
+      `Pending aktif: ${Number(statusSummary.pending_active || 0)}`,
+      `EXPIRED: ${Number(statusSummary.expired || 0)}`
+    ];
+    if (lock && lock.lock_status === 'PENDING') {
+      parts.push(`Lock aktif: ${escapeHtml(lock.operator_name || lock.claim_owner || 'operator')}`);
+    }
+    box.innerHTML = parts.map(escapeHtml).join(' &bull; ');
+    box.style.display = 'block';
+  }
+
+  async function expirePendingBonusFromUi() {
+    if (!requireOperator()) return;
+    const dateValue = document.getElementById('bonusDate').value;
+    const btn = document.getElementById('bonusExpirePendingBtn');
+    setButtonLoading(btn, true, 'Membersihkan...');
+    try {
+      const response = await fetch('/api/bonus-expire-pending', {
+        method: 'POST',
+        headers: operatorAuthHeaders()
+      });
+      const result = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        handleOperatorUnauthorized();
+        return;
+      }
+      if (!response.ok || result.ok !== true) {
+        throw new Error(result.message || result.error || 'Gagal membersihkan pending expired.');
+      }
+      if (dateValue) {
+        delete bonusRemoteDoneCache[dateValue];
+        delete bonusRemotePendingCache[dateValue];
+      }
+      renderBonusStatusRefreshInfo(result, result);
+      showToast(`Pending expired dibersihkan. Bonus: ${result.expired_bonus_rows || 0}, lock: ${result.expired_lock_rows || 0}.`, 'success');
+    } catch (error) {
+      showToast(error.message || 'Gagal membersihkan pending expired.', 'error');
+    } finally {
+      setButtonLoading(btn, false);
+    }
+  }
+
+  async function refreshBonusStatusFromUi() {
+    if (!requireOperator()) return;
+    const dateValue = document.getElementById('bonusDate').value;
+    if (!dateValue) {
+      showToast('Pilih tanggal bonus terlebih dahulu.', 'error');
+      return;
+    }
+    const btn = document.getElementById('bonusRefreshStatusBtn');
+    setButtonLoading(btn, true, 'Refresh...');
+    try {
+      delete bonusRemoteDoneCache[dateValue];
+      delete bonusRemotePendingCache[dateValue];
+      await fetchRemoteBonusDone(dateValue);
+      renderBonusDoneInfo();
+      showToast('Status bonus berhasil diperbarui.', 'success');
+    } catch (error) {
+      if (error.message !== 'unauthorized') {
+        showToast(error.message || 'Gagal refresh status bonus.', 'error');
+      }
+    } finally {
+      setButtonLoading(btn, false);
     }
   }
 
@@ -6888,6 +6978,33 @@
     `).join('');
   }
 
+  function renderBonusBlockedReasons(debugRows) {
+    const tbody = document.getElementById('bonusTable');
+    const stats = document.getElementById('bonusStats');
+    const actions = document.getElementById('bonusCopyActions');
+    const desc = document.getElementById('bonusDesc');
+    const blockedRows = (debugRows || []).filter(row => row && row.deposit_candidate && !row.final_output);
+
+    if (blockedRows.length === 0) return;
+
+    stats.style.display = 'none';
+    actions.style.display = 'flex';
+    desc.textContent = `${blockedRows.length} kandidat tidak keluar karena sudah DONE/PENDING atau tidak lolos filter. Cek kolom Remark untuk alasan.`;
+    tbody.innerHTML = blockedRows.map((row, index) => `
+      <tr>
+        <td class="idx">${index + 1}</td>
+        <td class="user-id">${escapeHtml(row.login_id || '-')}</td>
+        <td class="nama">${escapeHtml(row.member_name || '-')}</td>
+        <td class="num">${bonusFormatIDR(row.max_deposit || 0)}</td>
+        <td class="time-cell">-</td>
+        <td class="num">-</td>
+        <td class="num"><span class="badge">${escapeHtml(String(row.bonus || 0))}</span></td>
+        <td class="remark-cell">${escapeHtml(row.reason || 'blocked')}</td>
+        <td>-</td>
+      </tr>
+    `).join('');
+  }
+
   async function ensureParserData() {
     if (transactions.length > 0) return true;
 
@@ -7060,6 +7177,9 @@
       return {
         login_id: row.loginId,
         login_key: row.loginKey,
+        member_name: row.memberName || '',
+        max_deposit: row.maxDeposit || 0,
+        bonus: row.bonus || 0,
         deposit_candidate: hasBonus,
         local_adjustment: inAdjustment,
         remote_done: inRemoteDone,
@@ -7083,6 +7203,16 @@
     if (currentOperator && ['admin', 'superadmin'].includes(currentOperator.role)) {
       console.info('Bonus Harian sync/debug summary', bonusDebugSummary);
       console.table(candidateDebugRows);
+    }
+
+    if (candidateRows.length === 0) {
+      bonusRows = [];
+      bonusRender();
+      renderBonusBlockedReasons(candidateDebugRows);
+      hideBonusLockWarning();
+      stopBonusPendingTimer();
+      showToast('Tidak ada output Bonus Harian. Tabel menampilkan alasan kandidat terblokir.', 'error');
+      return;
     }
 
     updateLoading('Mengecek apakah ada operator lain yang sedang proses...', 4, 3);
@@ -7287,11 +7417,16 @@
     adjustmentBatchWarnings = [];
     const preview = document.getElementById('adjustmentBatchPreview');
     const actions = document.getElementById('adjustmentBatchDownloadActions');
+    const statusInfo = document.getElementById('bonusStatusRefreshInfo');
     if (preview) {
       preview.style.display = 'none';
       preview.innerHTML = '';
     }
     if (actions) actions.style.display = 'none';
+    if (statusInfo) {
+      statusInfo.style.display = 'none';
+      statusInfo.innerHTML = '';
+    }
   }
 
   function validateAdjustmentBatchItems(rows, dateValue) {
@@ -8361,6 +8496,8 @@
     showToast('Data audit dibersihkan.');
   }
   document.getElementById('bonusProcessBtn').addEventListener('click', bonusProcess);
+  document.getElementById('bonusExpirePendingBtn').addEventListener('click', expirePendingBonusFromUi);
+  document.getElementById('bonusRefreshStatusBtn').addEventListener('click', refreshBonusStatusFromUi);
   document.getElementById('bonusResetBtn').addEventListener('click', bonusReset);
   document.getElementById('bonusCopyAllBtn').addEventListener('click', bonusCopyAll);
   document.getElementById('bonusExportAdjustmentJsonBtn').addEventListener('click', previewAdjustmentBatchJson);

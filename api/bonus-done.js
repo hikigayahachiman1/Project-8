@@ -222,12 +222,90 @@ async function deleteExpiredRows() {
   await supabase.from('bonus_process_locks').delete().lt('expires_at', now);
 }
 
+async function expireOldBonusPending() {
+  const { data, error } = await supabase.rpc('expire_old_bonus_pending');
+  if (!error) {
+    return {
+      expired_bonus_rows: Number(data?.expired_bonus_rows || 0),
+      expired_lock_rows: Number(data?.expired_lock_rows || 0)
+    };
+  }
+
+  const now = new Date().toISOString();
+  const { data: bonusRows, error: bonusFetchError } = await supabase
+    .from('bonus_done_daily')
+    .select('id')
+    .eq('bonus_status', 'PENDING')
+    .lt('pending_expires_at', now);
+  if (bonusFetchError) throw bonusFetchError;
+
+  const { error: bonusUpdateError } = await supabase
+    .from('bonus_done_daily')
+    .update({
+      bonus_status: 'EXPIRED',
+      updated_at: now,
+      finalized_note: 'Auto expired karena pending_expires_at sudah lewat'
+    })
+    .eq('bonus_status', 'PENDING')
+    .lt('pending_expires_at', now);
+  if (bonusUpdateError && bonusUpdateError.code === '42703') {
+    const retry = await supabase
+      .from('bonus_done_daily')
+      .update({
+        bonus_status: 'EXPIRED',
+        updated_at: now
+      })
+      .eq('bonus_status', 'PENDING')
+      .lt('pending_expires_at', now);
+    if (retry.error) throw retry.error;
+  } else if (bonusUpdateError) {
+    throw bonusUpdateError;
+  }
+
+  const { data: lockRows, error: lockFetchError } = await supabase
+    .from('bonus_process_locks')
+    .select('id')
+    .eq('lock_status', 'PENDING')
+    .lt('pending_expires_at', now);
+  if (lockFetchError) throw lockFetchError;
+
+  const { error: lockUpdateError } = await supabase
+    .from('bonus_process_locks')
+    .update({
+      lock_status: 'EXPIRED',
+      updated_at: now,
+      finalized_note: 'Auto expired karena pending_expires_at sudah lewat'
+    })
+    .eq('lock_status', 'PENDING')
+    .lt('pending_expires_at', now);
+  if (lockUpdateError && lockUpdateError.code === '42703') {
+    const retry = await supabase
+      .from('bonus_process_locks')
+      .update({
+        lock_status: 'EXPIRED',
+        updated_at: now
+      })
+      .eq('lock_status', 'PENDING')
+      .lt('pending_expires_at', now);
+    if (retry.error) throw retry.error;
+  } else if (lockUpdateError) {
+    throw lockUpdateError;
+  }
+
+  return {
+    expired_bonus_rows: bonusRows?.length || 0,
+    expired_lock_rows: lockRows?.length || 0
+  };
+}
+
 async function fetchPendingLock(date) {
+  const now = new Date().toISOString();
   const { data, error } = await supabase
     .from('bonus_process_locks')
     .select('*')
     .eq('bonus_date', date)
     .eq('lock_status', 'PENDING')
+    .gte('pending_expires_at', now)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -301,7 +379,7 @@ async function filterInsertableRows(payload) {
 
   const { data: existingRows, error: existingError } = await supabase
     .from('bonus_done_daily')
-    .select('login_key, bonus_status')
+    .select('login_key, bonus_status, pending_expires_at')
     .eq('bonus_date', date)
     .eq('bonus_type', 'BONUS_HARIAN')
     .in('bonus_status', ['DONE', 'PENDING'])
@@ -309,7 +387,16 @@ async function filterInsertableRows(payload) {
 
   if (existingError) throw existingError;
 
-  const existingKeys = new Set((existingRows || []).map(row => normalizeLoginId(row.login_key)));
+  const nowMs = Date.now();
+  const existingKeys = new Set((existingRows || [])
+    .filter(row => {
+      const status = String(row.bonus_status || '').toUpperCase();
+      if (status === 'DONE') return true;
+      if (status !== 'PENDING') return false;
+      const pendingMs = row.pending_expires_at ? new Date(row.pending_expires_at).getTime() : 0;
+      return pendingMs >= nowMs;
+    })
+    .map(row => normalizeLoginId(row.login_key)));
   return payload.filter(row => !existingKeys.has(row.login_key));
 }
 
@@ -461,6 +548,7 @@ async function handleClaimBatch(req, body, res) {
     return res.status(400).json({ success: false, error: 'claim_owner dan claim_batch_id wajib diisi.' });
   }
 
+  const expireResult = await expireOldBonusPending();
   const nowDate = new Date();
   const now = nowDate.toISOString();
   const pendingExpiresAt = addMinutes(nowDate, 5);
@@ -478,10 +566,11 @@ async function handleClaimBatch(req, body, res) {
       await extendOwnPending(date, claimOwner, pendingExpiresAt, now);
       const updatedLock = await fetchPendingLock(date);
 
-      return res.status(200).json({
-        success: true,
-        status: 'own_pending',
-        received: rows.length,
+    return res.status(200).json({
+      success: true,
+      status: 'own_pending',
+      expireResult,
+      received: rows.length,
         unique: payload.length,
         claimed: ownRows.length,
         skipped: 0,
@@ -506,6 +595,7 @@ async function handleClaimBatch(req, body, res) {
       return res.status(200).json({
         success: true,
         status: 'locked_by_other',
+        expireResult,
         lockedByOther: true,
         rows: [],
         loginIds: [],
@@ -518,6 +608,7 @@ async function handleClaimBatch(req, body, res) {
     return res.status(200).json({
       success: true,
       status: 'pending_expired',
+      expireResult,
       pendingExpired: true,
       rows: [],
       loginIds: [],
@@ -530,6 +621,7 @@ async function handleClaimBatch(req, body, res) {
   const created = await createPendingBatch(date, rows, payload, claimOwner, claimBatchId, operatorName, now, pendingExpiresAt, expiresAt, emptyPendingCleared, reusableEmptyLockId);
 
   if (created) {
+    created.expireResult = expireResult;
     return res.status(200).json(created);
   }
 
@@ -540,6 +632,7 @@ async function handleClaimBatch(req, body, res) {
   return res.status(200).json({
     success: true,
     status: pendingActive ? 'locked_by_other' : 'pending_expired',
+    expireResult,
     lockedByOther: pendingActive,
     pendingExpired: !pendingActive,
     rows: [],
@@ -967,6 +1060,7 @@ async function handleGet(req, res) {
     });
   }
 
+  await expireOldBonusPending();
   await deleteExpiredRows();
 
   const lock = await fetchPendingLock(date);
@@ -1000,6 +1094,12 @@ async function handleGet(req, res) {
     loginIds: loginIdsFromRows(doneRows),
     isLockedByOther,
     isPendingExpired,
+    statusSummary: {
+      done: doneRows.length,
+      own_pending: ownPendingRows.length,
+      pending_active: (rows || []).filter(row => row.bonus_status === 'PENDING' && row.pending_expires_at && new Date(row.pending_expires_at).getTime() >= now).length,
+      expired: (rows || []).filter(row => row.bonus_status === 'EXPIRED' || (row.bonus_status === 'PENDING' && (!row.pending_expires_at || new Date(row.pending_expires_at).getTime() < now))).length
+    },
     rows: doneRows
   });
 }

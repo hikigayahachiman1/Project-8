@@ -781,7 +781,7 @@ async function fetchActivePendingLock(dateValue) {
     .select('*')
     .eq('bonus_date', dateValue)
     .eq('lock_status', 'PENDING')
-    .gt('pending_expires_at', now)
+    .gte('pending_expires_at', now)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -927,6 +927,8 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
   batch.items = classified.ready;
   batch.summary = {
     ...batch.summary,
+    expired_bonus_rows: expireResult.expired_bonus_rows || 0,
+    expired_lock_rows: expireResult.expired_lock_rows || 0,
     total_eligible_from_deposit: classified.ready.length + classified.skipped.length,
     ready_items: classified.ready.length,
     skipped_already_given: classified.skipped.filter(item => item.reason === 'SKIPPED_ALREADY_GIVEN').length,
