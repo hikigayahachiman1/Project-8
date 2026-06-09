@@ -8,8 +8,9 @@ export const config = {
 
 const FIXED_SOURCE = 'hermes-telegram';
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const GENERATE_TIMEOUT_MS = 20 * 1000;
+const GENERATE_TIMEOUT_MS = 45 * 1000;
 const MAX_PREVIEW_ITEMS = 50;
+const RESERVE_UPDATE_CONCURRENCY = 8;
 const supabaseUrl = process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = supabaseUrl && serviceRoleKey
@@ -26,7 +27,9 @@ function createRequestContext() {
   return {
     request_id: `parser-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     last_step: 'INIT',
-    deadline_ms: Date.now() + GENERATE_TIMEOUT_MS
+    deadline_ms: Date.now() + GENERATE_TIMEOUT_MS,
+    started_ms: Date.now(),
+    timings: {}
   };
 }
 
@@ -64,6 +67,7 @@ function safeErrorMessage(error) {
 
 function responseFromError(error, ctx) {
   const status = Number(error?.statusCode || 500);
+  ctx.timings.TIME_TOTAL_MS = Date.now() - ctx.started_ms;
   return {
     status,
     body: {
@@ -71,7 +75,8 @@ function responseFromError(error, ctx) {
       error: error?.code || (status === 413 ? 'PAYLOAD_TOO_LARGE' : 'PARSER_FAILED'),
       message: safeErrorMessage(error),
       last_step: ctx.last_step,
-      request_id: ctx.request_id
+      request_id: ctx.request_id,
+      timings: ctx.timings
     }
   };
 }
@@ -86,7 +91,21 @@ function detectUploadType(file) {
 
 function ensureWithinDeadline(ctx) {
   if (Date.now() <= ctx.deadline_ms) return;
+  ctx.timings.TIME_TOTAL_MS = Date.now() - ctx.started_ms;
   throw parserError('PARSER_TIMEOUT', 'Generate preview melebihi batas waktu.', 504);
+}
+
+function markTime(ctx, label, startedAt, meta = {}) {
+  const elapsed = Date.now() - startedAt;
+  ctx.timings[label] = elapsed;
+  console.info('generate-json timing', {
+    request_id: ctx.request_id,
+    step: label,
+    elapsed_ms: elapsed,
+    ...meta,
+    at: new Date().toISOString()
+  });
+  return elapsed;
 }
 
 function bearerToken(req) {
@@ -827,21 +846,26 @@ async function expireOldBonusPending() {
   };
 }
 
-async function fetchBonusStatusRows(dateValue) {
+async function fetchBonusStatusRows(dateValue, loginKeys = []) {
   const baseSelect = 'id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at, done_at';
-  let { data, error } = await supabase
+  const uniqueLoginKeys = [...new Set((loginKeys || []).map(normalizeLoginId).filter(Boolean))];
+  let query = supabase
     .from('bonus_done_daily')
     .select(`${baseSelect}, member_id`)
     .eq('bonus_date', dateValue)
     .eq('bonus_type', 'BONUS_HARIAN')
     .order('created_at', { ascending: true });
+  if (uniqueLoginKeys.length) query = query.in('login_key', uniqueLoginKeys);
+  let { data, error } = await query;
   if (error && error.code === '42703') {
-    const fallback = await supabase
+    let fallbackQuery = supabase
       .from('bonus_done_daily')
       .select(baseSelect)
       .eq('bonus_date', dateValue)
       .eq('bonus_type', 'BONUS_HARIAN')
       .order('created_at', { ascending: true });
+    if (uniqueLoginKeys.length) fallbackQuery = fallbackQuery.in('login_key', uniqueLoginKeys);
+    const fallback = await fallbackQuery;
     data = fallback.data;
     error = fallback.error;
   }
@@ -951,6 +975,18 @@ async function writeBonusDoneWithColumnFallback(payload, writeFn) {
   throw supabaseError(null, 'Gagal menulis bonus_done_daily setelah fallback kolom.');
 }
 
+async function writeBonusDoneBulkWithColumnFallback(payloads, writeFn) {
+  let current = payloads.map(payload => ({ ...payload }));
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { data, error } = await writeFn(current);
+    if (!error) return data || [];
+    const column = missingColumnName(error);
+    if (!column || !current.some(payload => column in payload)) throw supabaseError(error);
+    current = current.map(({ [column]: _removed, ...payload }) => payload);
+  }
+  throw supabaseError(null, 'Gagal bulk write bonus_done_daily setelah fallback kolom.');
+}
+
 function pendingRowPayload({ item, dateValue, batchCode, source, claimOwner, operatorName, now, pendingExpiresAt, expiresAt, finalizedNote }) {
   return {
     bonus_date: dateValue,
@@ -978,18 +1014,24 @@ function pendingRowPayload({ item, dateValue, batchCode, source, claimOwner, ope
   };
 }
 
-async function fetchExistingBonusDoneRow(item, dateValue) {
-  const loginKey = normalizeLoginId(item.login_key || item.login_id);
+async function fetchExistingBonusDoneRows(items, dateValue) {
+  const loginKeys = [...new Set((items || [])
+    .map(item => normalizeLoginId(item.login_key || item.login_id))
+    .filter(Boolean))];
+  if (!loginKeys.length) return new Map();
   const { data, error } = await supabase
     .from('bonus_done_daily')
     .select('id, bonus_date, login_key, bonus_type, bonus_status, claim_batch_id, pending_expires_at')
     .eq('bonus_date', dateValue)
-    .eq('login_key', loginKey)
     .eq('bonus_type', 'BONUS_HARIAN')
-    .limit(1)
-    .maybeSingle();
+    .in('login_key', loginKeys);
   if (error) throw supabaseError(error);
-  return data || null;
+  const map = new Map();
+  (data || []).forEach(row => {
+    const key = normalizeLoginId(row.login_key);
+    if (!map.has(key)) map.set(key, row);
+  });
+  return map;
 }
 
 async function expirePendingBonusDoneRow(row, now) {
@@ -1036,7 +1078,32 @@ async function insertNewPendingBonusDoneRow(payload) {
   );
 }
 
-async function reserveReadyItems({ items, dateValue, batchCode, source }) {
+async function insertNewPendingBonusDoneRows(payloads) {
+  if (!payloads.length) return [];
+  return writeBonusDoneBulkWithColumnFallback(
+    payloads,
+    insertPayloads => supabase
+      .from('bonus_done_daily')
+      .insert(insertPayloads)
+      .select('id, login_key, bonus_status, claim_batch_id, pending_expires_at')
+  );
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function reserveReadyItems({ items, dateValue, batchCode, source, ctx, existingRows = [] }) {
   const nowDate = new Date();
   const now = nowDate.toISOString();
   const expiresAt = addDays(nowDate, 2);
@@ -1060,12 +1127,36 @@ async function reserveReadyItems({ items, dateValue, batchCode, source }) {
     .insert(lockPayload);
   if (lockError) throw supabaseError(lockError);
 
-  const rows = [];
-  const readyItems = [];
+  let existingByLoginKey = new Map();
+  (existingRows || []).forEach(row => {
+    const key = normalizeLoginId(row.login_key || row.login_id);
+    if (key && !existingByLoginKey.has(key)) existingByLoginKey.set(key, row);
+  });
+  if (!existingByLoginKey.size && items.length) {
+    const fetchStarted = Date.now();
+    existingByLoginKey = await fetchExistingBonusDoneRows(items, dateValue);
+    markTime(ctx, 'TIME_FETCH_EXISTING_MS', fetchStarted, {
+      candidate_items: items.length,
+      existing_rows: existingByLoginKey.size
+    });
+  }
+
+  const classifyStarted = Date.now();
   const skipped = [];
+  const reusable = [];
+  const insertable = [];
+  const seenReadyLoginKeys = new Set();
   for (const item of items) {
     const loginKey = normalizeLoginId(item.login_key || item.login_id);
-    const existing = await fetchExistingBonusDoneRow(item, dateValue);
+    if (seenReadyLoginKeys.has(loginKey)) {
+      skipped.push({
+        ...item,
+        status: 'FAILED',
+        reason: 'DUPLICATE_LOGIN_IN_PREVIEW'
+      });
+      continue;
+    }
+    seenReadyLoginKeys.add(loginKey);
     const payload = pendingRowPayload({
       item,
       dateValue,
@@ -1078,6 +1169,7 @@ async function reserveReadyItems({ items, dateValue, batchCode, source }) {
       expiresAt,
       finalizedNote: null
     });
+    const existing = existingByLoginKey.get(loginKey);
 
     if (existing) {
       const status = String(existing.bonus_status || '').toUpperCase();
@@ -1102,7 +1194,8 @@ async function reserveReadyItems({ items, dateValue, batchCode, source }) {
         continue;
       }
       if (status === 'PENDING') {
-        await expirePendingBonusDoneRow(existing, now);
+        reusable.push({ item, existing: { ...existing, bonus_status: 'EXPIRED' }, payload, expiredPendingFirst: true });
+        continue;
       } else if (status !== 'EXPIRED') {
         logReserveStep('SKIP_UNKNOWN_EXISTING_STATUS', {
           login_key: loginKey,
@@ -1116,22 +1209,50 @@ async function reserveReadyItems({ items, dateValue, batchCode, source }) {
         });
         continue;
       }
-      logReserveStep('REUSE_EXPIRED_ROW', { login_key: loginKey, existing_id: existing.id, claim_batch_id: batchCode });
-      const row = await reuseExpiredBonusDoneRow({ ...existing, bonus_status: 'EXPIRED' }, payload);
-      if (row) {
-        rows.push(row);
-        readyItems.push(item);
-      }
+      reusable.push({ item, existing, payload, expiredPendingFirst: false });
       continue;
     }
 
-    logReserveStep('INSERT_NEW_PENDING_ROW', { login_key: loginKey, claim_batch_id: batchCode });
-    const row = await insertNewPendingBonusDoneRow(payload);
-    if (row) {
-      rows.push(row);
-      readyItems.push(item);
-    }
+    insertable.push({ item, payload });
   }
+  markTime(ctx, 'TIME_CLASSIFY_MS', classifyStarted, {
+    reusable_rows: reusable.length,
+    insert_rows: insertable.length,
+    skipped_rows: skipped.length
+  });
+
+  const writeStarted = Date.now();
+  const rows = [];
+  const readyItems = [];
+
+  const updatedRows = await mapWithConcurrency(reusable, RESERVE_UPDATE_CONCURRENCY, async entry => {
+    const loginKey = normalizeLoginId(entry.item.login_key || entry.item.login_id);
+    if (entry.expiredPendingFirst) await expirePendingBonusDoneRow(entry.existing, now);
+    logReserveStep('REUSE_EXPIRED_ROW', { login_key: loginKey, existing_id: entry.existing.id, claim_batch_id: batchCode });
+    const row = await reuseExpiredBonusDoneRow({ ...entry.existing, bonus_status: 'EXPIRED' }, entry.payload);
+    return row ? { row, item: entry.item } : null;
+  });
+  updatedRows.filter(Boolean).forEach(entry => {
+    rows.push(entry.row);
+    readyItems.push(entry.item);
+  });
+
+  if (insertable.length) {
+    insertable.forEach(entry => logReserveStep('INSERT_NEW_PENDING_ROW', {
+      login_key: normalizeLoginId(entry.item.login_key || entry.item.login_id),
+      claim_batch_id: batchCode
+    }));
+    const insertedRows = await insertNewPendingBonusDoneRows(insertable.map(entry => entry.payload));
+    insertedRows.forEach((row, index) => {
+      rows.push(row);
+      if (insertable[index]) readyItems.push(insertable[index].item);
+    });
+  }
+  markTime(ctx, 'TIME_RESERVE_UPDATE_MS', writeStarted, {
+    updated_rows: updatedRows.filter(Boolean).length,
+    inserted_rows: insertable.length,
+    reserved_rows: rows.length
+  });
 
   return { rows, readyItems, skipped, lock: lockPayload, pending_expires_at: pendingExpiresAt };
 }
@@ -1256,6 +1377,13 @@ async function saveHermesPreviewSnapshot({ batch, dateValue, batchCode, previewI
 async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source, ctx }) {
   if (!supabase) throw supabaseError(null, 'Konfigurasi Supabase belum lengkap.');
   const batch = buildBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source });
+  if (ctx.parse_started_ms) {
+    markTime(ctx, 'TIME_PARSE_FILE_MS', ctx.parse_started_ms, {
+      parsed_items: batch.items.length,
+      skipped_items: batch.skipped.length
+    });
+    ctx.parse_started_ms = 0;
+  }
   logStep(ctx, 'FILE_PARSED', {
     parsed_items: batch.items.length,
     skipped_items: batch.skipped.length,
@@ -1274,12 +1402,19 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
   });
   ensureWithinDeadline(ctx);
   logStep(ctx, 'SUPABASE_HISTORY_STARTED', { bonus_date: dateValue });
-  const existingRows = await fetchBonusStatusRows(dateValue);
+  const historyStarted = Date.now();
+  const candidateLoginKeys = batch.items.map(item => item.login_key || item.login_id);
+  const existingRows = await fetchBonusStatusRows(dateValue, candidateLoginKeys);
   const activeLock = await fetchActivePendingLock(dateValue);
+  markTime(ctx, 'TIME_FETCH_EXISTING_MS', historyStarted, {
+    candidate_items: batch.items.length,
+    existing_rows: existingRows.length
+  });
   logStep(ctx, 'SUPABASE_HISTORY_DONE', {
     existing_rows: existingRows.length,
     active_lock: activeLock?.claim_batch_id || ''
   });
+  const classifyStarted = Date.now();
   const classified = classifyReadyItems(batch.items, existingRows, activeLock);
   const readyLimited = classified.ready.slice(0, MAX_PREVIEW_ITEMS);
   const limitedItems = classified.ready.slice(MAX_PREVIEW_ITEMS);
@@ -1290,6 +1425,12 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
       reason: `PREVIEW_LIMIT_${MAX_PREVIEW_ITEMS}`
     })));
   }
+  markTime(ctx, 'TIME_CLASSIFY_MS', classifyStarted, {
+    ready_items: readyLimited.length,
+    ready_before_limit: classified.ready.length,
+    skipped_items: classified.skipped.length,
+    manual_review_items: classified.manualReview.length
+  });
   logStep(ctx, 'ELIGIBLE_CALCULATED', {
     ready_items: readyLimited.length,
     ready_before_limit: classified.ready.length,
@@ -1340,12 +1481,16 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
     const emptyPreview = isHermesSource(source)
       ? await reserveEmptyHermesPreview({ dateValue, batchCode })
       : null;
+    const previewSaveStarted = Date.now();
     const snapshot = await saveHermesPreviewSnapshot({
       batch,
       dateValue,
       batchCode,
       previewItems,
       previewStatus: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : 'PREVIEW'
+    });
+    markTime(ctx, 'TIME_PREVIEW_SAVE_MS', previewSaveStarted, {
+      preview_items: previewItems.length
     });
     logStep(ctx, 'PREVIEW_SAVE_DONE', {
       claim_batch_id: emptyPreview?.claim_batch_id || batchCode,
@@ -1369,7 +1514,9 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
     items: readyLimited,
     dateValue,
     batchCode,
-    source: source || 'hermes_telegram'
+    source: source || 'hermes_telegram',
+    ctx,
+    existingRows
   });
   if (reserve.skipped.length) {
     batch.skipped = [...batch.skipped, ...reserve.skipped];
@@ -1398,12 +1545,16 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
       .from('bonus_process_locks')
       .update({ lock_status: 'EMPTY', updated_at: new Date().toISOString() })
       .eq('claim_batch_id', batchCode);
+    const previewSaveStarted = Date.now();
     const snapshot = await saveHermesPreviewSnapshot({
       batch,
       dateValue,
       batchCode,
       previewItems: reservedPreviewItems,
       previewStatus: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : 'PREVIEW'
+    });
+    markTime(ctx, 'TIME_PREVIEW_SAVE_MS', previewSaveStarted, {
+      preview_items: reservedPreviewItems.length
     });
     logStep(ctx, 'PREVIEW_SAVE_DONE', {
       claim_batch_id: batchCode,
@@ -1424,12 +1575,16 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
       reserve
     };
   }
+  const previewSaveStarted = Date.now();
   const snapshot = await saveHermesPreviewSnapshot({
     batch,
     dateValue,
     batchCode,
     previewItems: reservedPreviewItems,
     previewStatus: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : 'PREVIEW'
+  });
+  markTime(ctx, 'TIME_PREVIEW_SAVE_MS', previewSaveStarted, {
+    preview_items: reservedPreviewItems.length
   });
   logStep(ctx, 'PREVIEW_SAVE_DONE', {
     claim_batch_id: batchCode,
@@ -1633,6 +1788,7 @@ async function processGenerateJson(req, ctx) {
     deposit_type: detectUploadType(depositPart),
     adjustment_type: detectUploadType(adjustmentPart)
   });
+  ctx.parse_started_ms = Date.now();
   const depositRaw = await fileBufferToText(depositPart, 'deposit_file');
   const adjustmentRaw = adjustmentPart ? await fileBufferToText(adjustmentPart, 'adjustment_file') : '';
   const bonusDate = String(fields.bonus_date || '').trim();
@@ -1663,6 +1819,7 @@ async function processGenerateJson(req, ctx) {
 
 function buildSuccessResponse(result, source, ctx) {
   const { batch } = result;
+  ctx.timings.TIME_TOTAL_MS = Date.now() - ctx.started_ms;
 
   if (!batch.items.length) {
     logStep(ctx, 'RESPONSE_READY', {
@@ -1684,7 +1841,8 @@ function buildSuccessResponse(result, source, ctx) {
         summary: batch.summary,
         batch,
         skipped: result.skipped || batch.skipped || [],
-        manual_review: result.manual_review || []
+        manual_review: result.manual_review || [],
+        timings: ctx.timings
       }
     };
   }
@@ -1710,7 +1868,8 @@ function buildSuccessResponse(result, source, ctx) {
       summary: batch.summary,
       batch,
       skipped: result.skipped || batch.skipped || [],
-      manual_review: result.manual_review || []
+      manual_review: result.manual_review || [],
+      timings: ctx.timings
     }
   };
 }
@@ -1731,7 +1890,11 @@ export default async function handler(req, res) {
       error: 'PARSER_TIMEOUT',
       message: 'Generate preview melebihi batas waktu.',
       last_step: ctx.last_step,
-      request_id: ctx.request_id
+      request_id: ctx.request_id,
+      timings: {
+        ...ctx.timings,
+        TIME_TOTAL_MS: Date.now() - ctx.started_ms
+      }
     });
   }, GENERATE_TIMEOUT_MS);
 
