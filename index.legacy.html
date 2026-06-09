@@ -3198,27 +3198,58 @@
         </section>
 
         <section class="card">
-          <div class="card-title">Hermes Workflow</div>
-          <div class="card-desc">Preview queue dari Hermes Telegram sebelum release manual ke worker.</div>
+          <div class="card-title">Hermes Upload Preview</div>
+          <div class="card-desc">Preview batch Bonus Harian dari Hermes Telegram sebelum release manual ke worker.</div>
           <div class="bonus-actions">
             <button id="dashboardRefreshHermesBtn" class="primary">Refresh Hermes Preview</button>
             <button id="dashboardCopyHermesExcelBtn" class="ghost">Copy Excel Preview</button>
+            <button id="dashboardReleaseHermesBtn" class="success">Approve / Release to Worker</button>
+            <button id="dashboardCancelHermesBtn" class="danger">Cancel Preview</button>
           </div>
           <div id="dashboardHermesNote" class="source-note">Hermes preview queue belum dimuat.</div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
+                  <th>Batch Code</th>
+                  <th>Source</th>
+                  <th>Bonus Date</th>
+                  <th class="num">Total Eligible</th>
+                  <th class="num">Ready Items</th>
+                  <th class="num">Skipped Already Given</th>
+                  <th class="num">Pending Other Batch</th>
+                  <th class="num">Manual Review</th>
+                  <th class="num">Total Amount BO</th>
                   <th>Status</th>
-                  <th>Batch</th>
-                  <th>Type</th>
-                  <th>Operator</th>
-                  <th>Created</th>
+                  <th>Created At</th>
                   <th>Aksi</th>
                 </tr>
               </thead>
               <tbody id="dashboardHermesTable">
-                <tr><td colspan="6" class="empty">Hermes preview queue belum dibuat.</td></tr>
+                <tr><td colspan="12" class="empty">Hermes preview queue belum dibuat.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-title" style="margin-top:18px;">Detail Preview Table</div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>No</th>
+                  <th>Login ID</th>
+                  <th>Login Key</th>
+                  <th>Member ID</th>
+                  <th class="num">Amount BO</th>
+                  <th>Remark</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th>Warning</th>
+                  <th>Claim Batch ID</th>
+                  <th>Created At</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardHermesDetailTable">
+                <tr><td colspan="11" class="empty">Pilih preview lalu klik Lihat Detail.</td></tr>
               </tbody>
             </table>
           </div>
@@ -6508,31 +6539,83 @@
     URL.revokeObjectURL(url);
   }
 
+  let dashboardHermesSelectedBatch = null;
+  let dashboardHermesPreviewTsv = '';
+
+  function dashboardRenderHermesList(rows) {
+    const table = document.getElementById('dashboardHermesTable');
+    if (!table) return;
+    table.innerHTML = (rows || []).map(row => {
+      const batchCode = row.batch_code || row.claim_batch_id || '';
+      return `
+        <tr>
+          <td>${escapeHtml(batchCode)}</td>
+          <td>${escapeHtml(row.source || 'hermes-telegram')}</td>
+          <td>${escapeHtml(row.bonus_date || '')}</td>
+          <td class="num">${escapeHtml(String(row.total_eligible ?? 0))}</td>
+          <td class="num">${escapeHtml(String(row.ready_items ?? 0))}</td>
+          <td class="num">${escapeHtml(String(row.skipped_already_given ?? 0))}</td>
+          <td class="num">${escapeHtml(String(row.pending_other_batch ?? 0))}</td>
+          <td class="num">${escapeHtml(String(row.manual_review ?? 0))}</td>
+          <td class="num">${escapeHtml(String(row.total_amount_bo ?? 0))}</td>
+          <td>${escapeHtml(row.status || '')}</td>
+          <td>${escapeHtml(row.created_at || '')}</td>
+          <td class="row-actions">
+            <button onclick="dashboardOpenHermesPreview('${escapeHtml(batchCode)}')">Lihat Detail</button>
+          </td>
+        </tr>
+      `;
+    }).join('') || '<tr><td colspan="12" class="empty">Hermes preview queue belum dibuat.</td></tr>';
+  }
+
+  function dashboardRenderHermesDetail(result) {
+    const table = document.getElementById('dashboardHermesDetailTable');
+    if (!table) return;
+    const rows = Array.isArray(result.rows) ? result.rows : [];
+    dashboardHermesSelectedBatch = result.batch || null;
+    table.innerHTML = rows.map(row => `
+      <tr>
+        <td>${escapeHtml(String(row.No ?? ''))}</td>
+        <td>${escapeHtml(row.login_id || '')}</td>
+        <td>${escapeHtml(row.login_key || '')}</td>
+        <td>${escapeHtml(row.member_id || '')}</td>
+        <td class="num">${escapeHtml(String(row.amount_bo ?? ''))}</td>
+        <td>${escapeHtml(row.remark || '')}</td>
+        <td>${escapeHtml(row.status || '')}</td>
+        <td>${escapeHtml(row.reason || '')}</td>
+        <td>${escapeHtml(row.warning || '')}</td>
+        <td>${escapeHtml(row.claim_batch_id || '')}</td>
+        <td>${escapeHtml(row.created_at || '')}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="11" class="empty">Preview ini belum punya item detail.</td></tr>';
+  }
+
+  async function dashboardOpenHermesPreview(claimBatchId) {
+    if (!dashboardRequireSuperadmin() || !claimBatchId) return;
+    try {
+      const result = await bonusControlApi('hermes_preview_detail', { claim_batch_id: claimBatchId });
+      dashboardRenderHermesDetail(result);
+      dashboardHermesPreviewTsv = '';
+      showToast(`Detail preview ${claimBatchId} dimuat.`, 'success');
+    } catch (error) {
+      console.error('dashboard hermes_preview_detail error:', error);
+      showToast(error.message || 'Gagal memuat detail preview Hermes.', 'error');
+    }
+  }
+
   async function dashboardRefreshHermes() {
     if (!dashboardRequireSuperadmin()) return;
     const btn = document.getElementById('dashboardRefreshHermesBtn');
     setButtonLoading(btn, true, 'Refresh...');
     try {
-      const result = await bonusControlApi('hermes_preview_status');
+      const result = await bonusControlApi('hermes_preview_list', { bonus_date: dashboardDateValue() });
       const note = document.getElementById('dashboardHermesNote');
-      const table = document.getElementById('dashboardHermesTable');
       if (note) note.textContent = result.message || 'Hermes preview queue dimuat.';
       const rows = Array.isArray(result.rows) ? result.rows : [];
-      if (table) {
-        table.innerHTML = rows.map(row => `
-          <tr>
-            <td>${escapeHtml(row.status || '')}</td>
-            <td>${escapeHtml(row.batch_code || row.claim_batch_id || '')}</td>
-            <td>${escapeHtml(row.bonus_type || row.type || '')}</td>
-            <td>${escapeHtml(row.operator_name || '')}</td>
-            <td>${escapeHtml(row.created_at || '')}</td>
-            <td class="row-actions"><button disabled>Approve/Release</button></td>
-          </tr>
-        `).join('') || '<tr><td colspan="6" class="empty">Hermes preview queue belum dibuat.</td></tr>';
-      }
+      dashboardRenderHermesList(rows);
       showToast(result.message || 'Hermes preview status dimuat.', rows?.length ? 'success' : '');
     } catch (error) {
-      console.error('dashboard hermes_preview_status error:', error);
+      console.error('dashboard hermes_preview_list error:', error);
       showToast(error.message || 'Gagal refresh Hermes preview.', 'error');
     } finally {
       setButtonLoading(btn, false);
@@ -6542,19 +6625,67 @@
   async function dashboardCopyHermesExcel() {
     if (!dashboardRequireSuperadmin()) return;
     try {
-      const result = await bonusControlApi('hermes_preview_status');
-      const rows = Array.isArray(result.rows) ? result.rows : [];
-      if (!rows.length) {
-        showToast(result.message || 'Hermes preview queue belum dibuat.', 'error');
+      const claimBatchId = dashboardHermesSelectedBatch?.claim_batch_id || dashboardHermesSelectedBatch?.batch_code || '';
+      if (!claimBatchId) {
+        showToast('Pilih preview dulu, lalu klik Lihat Detail.', 'error');
         return;
       }
-      const columns = Object.keys(rows[0]);
-      const tsv = [columns.join('\t'), ...rows.map(row => columns.map(column => String(row[column] ?? '').replace(/\t/g, ' ')).join('\t'))].join('\n');
-      await copyTextToClipboard(tsv);
+      const result = await bonusControlApi('hermes_preview_export', { claim_batch_id: claimBatchId });
+      dashboardHermesPreviewTsv = result.tsv || '';
+      if (!dashboardHermesPreviewTsv) {
+        showToast('Preview ini belum punya output Excel.', 'error');
+        return;
+      }
+      await copyTextToClipboard(dashboardHermesPreviewTsv);
       showToast('Preview Hermes dicopy ke Excel.', 'success');
     } catch (error) {
       console.error('dashboard copy hermes error:', error);
       showToast(error.message || 'Gagal copy Hermes preview.', 'error');
+    }
+  }
+
+  async function dashboardReleaseHermesPreview() {
+    if (!dashboardRequireSuperadmin()) return;
+    const claimBatchId = dashboardHermesSelectedBatch?.claim_batch_id || dashboardHermesSelectedBatch?.batch_code || '';
+    if (!claimBatchId) return showToast('Pilih preview dulu, lalu klik Lihat Detail.', 'error');
+    if (!window.confirm(`Approve dan kirim preview ${claimBatchId} ke Hermes task queue? BOT tetap berjalan di Hermes VPS, bukan dari Vercel.`)) return;
+    try {
+      const result = await bonusControlApi('hermes_preview_release', {
+        claim_batch_id: claimBatchId,
+        operator_name: currentOperatorName(),
+        role: currentOperator?.role || ''
+      });
+      showToast(result.message || 'Task berhasil dikirim ke Hermes. Local Worker akan memproses saat aktif.', 'success');
+      await dashboardRefreshHermes();
+      await dashboardOpenHermesPreview(claimBatchId);
+      console.info('Hermes release task response', {
+        task_id: result.task_id || '',
+        task_response: result.task_response || null,
+        task_payload: result.task_payload || null
+      });
+    } catch (error) {
+      console.error('dashboard hermes_preview_release error:', error);
+      showToast(error.message || 'Gagal release preview Hermes.', 'error');
+    }
+  }
+
+  async function dashboardCancelHermesPreview() {
+    if (!dashboardRequireSuperadmin()) return;
+    const claimBatchId = dashboardHermesSelectedBatch?.claim_batch_id || dashboardHermesSelectedBatch?.batch_code || '';
+    if (!claimBatchId) return showToast('Pilih preview dulu, lalu klik Lihat Detail.', 'error');
+    if (!window.confirm(`Cancel preview ${claimBatchId}? Data tidak dihapus, item PENDING akan dijadikan EXPIRED.`)) return;
+    try {
+      const result = await bonusControlApi('hermes_preview_cancel', {
+        claim_batch_id: claimBatchId,
+        operator_name: currentOperatorName(),
+        role: currentOperator?.role || ''
+      });
+      showToast(`Preview ${claimBatchId} dibatalkan. Rows: ${result.cancelled_rows || 0}.`, 'success');
+      await dashboardRefreshHermes();
+      await dashboardOpenHermesPreview(claimBatchId);
+    } catch (error) {
+      console.error('dashboard hermes_preview_cancel error:', error);
+      showToast(error.message || 'Gagal cancel preview Hermes.', 'error');
     }
   }
 
@@ -9291,14 +9422,20 @@
   document.getElementById('dashboardDownloadCsvBtn').addEventListener('click', dashboardDownloadCsv);
   document.getElementById('dashboardRefreshHermesBtn').addEventListener('click', dashboardRefreshHermes);
   document.getElementById('dashboardCopyHermesExcelBtn').addEventListener('click', dashboardCopyHermesExcel);
+  document.getElementById('dashboardReleaseHermesBtn').addEventListener('click', dashboardReleaseHermesPreview);
+  document.getElementById('dashboardCancelHermesBtn').addEventListener('click', dashboardCancelHermesPreview);
   document.getElementById('dashboardBonusDate').addEventListener('change', () => {
     dashboardBonusOutputTsv = '';
+    dashboardHermesSelectedBatch = null;
+    dashboardHermesPreviewTsv = '';
     const preview = document.getElementById('dashboardExcelPreview');
     const table = document.getElementById('dashboardOutputBonusTable');
     const note = document.getElementById('dashboardOutputBonusNote');
+    const hermesDetail = document.getElementById('dashboardHermesDetailTable');
     if (preview) preview.value = '';
     if (table) table.innerHTML = '<tr><td colspan="13" class="empty">Klik Refresh Output Bonus untuk memuat data.</td></tr>';
     if (note) note.style.display = 'none';
+    if (hermesDetail) hermesDetail.innerHTML = '<tr><td colspan="11" class="empty">Pilih preview lalu klik Lihat Detail.</td></tr>';
     dashboardRefreshStatus();
     dashboardRefreshPending();
   });

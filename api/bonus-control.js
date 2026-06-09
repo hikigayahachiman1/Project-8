@@ -153,6 +153,124 @@ function requireSuperadmin(authContext) {
   throw error;
 }
 
+function errorWithCode(code, message, statusCode = 400, extra = {}) {
+  const error = new Error(message);
+  error.code = code;
+  error.statusCode = statusCode;
+  Object.assign(error, extra);
+  return error;
+}
+
+function hermesTaskConfig() {
+  const baseUrl = String(process.env.HERMES_TASK_BASE_URL || '').trim().replace(/\/+$/, '');
+  const token = String(process.env.HERMES_TASK_API_TOKEN || '').trim();
+  if (!baseUrl || !token) {
+    throw errorWithCode(
+      'HERMES_TASK_NOT_CONFIGURED',
+      'ENV HERMES_TASK_BASE_URL dan HERMES_TASK_API_TOKEN wajib diisi.',
+      500
+    );
+  }
+  return { baseUrl, token };
+}
+
+function rowToHermesTaskItem(row) {
+  return {
+    login_id: row.login_id || row.login_key || '',
+    member_id: row.member_id || '',
+    member_name: row.member_name || '',
+    amount_bo: Number(row.bonus_amount || 0),
+    remark: row.remark || ''
+  };
+}
+
+function extractHermesTaskId(responseBody) {
+  return responseBody?.task_id
+    || responseBody?.id
+    || responseBody?.task?.id
+    || responseBody?.data?.task_id
+    || responseBody?.data?.id
+    || '';
+}
+
+async function createHermesTaskQueue(payload) {
+  const { baseUrl, token } = hermesTaskConfig();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`${baseUrl}/api/task-queue/tasks/create`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    const text = await response.text();
+    let body = null;
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch (error) {
+      body = { message: text };
+    }
+    if (!response.ok) {
+      throw errorWithCode(
+        'HERMES_TASK_CREATE_FAILED',
+        body?.message || `Hermes task queue gagal membuat task. HTTP ${response.status}.`,
+        502,
+        { hermes_response: body }
+      );
+    }
+    return {
+      task_id: extractHermesTaskId(body),
+      response: body
+    };
+  } catch (error) {
+    if (error?.code) throw error;
+    const isAbort = error?.name === 'AbortError';
+    throw errorWithCode(
+      isAbort ? 'HERMES_TASK_TIMEOUT' : 'HERMES_TASK_UNREACHABLE',
+      isAbort ? 'Hermes VPS task queue timeout.' : 'Hermes VPS task queue tidak bisa dihubungi.',
+      502
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function updateHermesReleasedLock(claimBatchId, operatorName, taskResult, now) {
+  const payload = {
+    lock_status: 'RELEASED_TO_WORKER',
+    updated_at: now,
+    done_by_name: operatorName,
+    task_id: taskResult.task_id || '',
+    task_response: taskResult.response || null
+  };
+  let { data, error } = await supabase
+    .from('bonus_process_locks')
+    .update(payload)
+    .eq('claim_batch_id', claimBatchId)
+    .select('id, bonus_date, lock_status, claim_batch_id, claim_owner, operator_name, pending_expires_at, updated_at, done_by_name')
+    .maybeSingle();
+  if (error && error.code === '42703') {
+    const fallback = await supabase
+      .from('bonus_process_locks')
+      .update({
+        lock_status: 'RELEASED_TO_WORKER',
+        updated_at: now,
+        done_by_name: operatorName
+      })
+      .eq('claim_batch_id', claimBatchId)
+      .select('id, bonus_date, lock_status, claim_batch_id, claim_owner, operator_name, pending_expires_at, updated_at, done_by_name')
+      .maybeSingle();
+    data = fallback.data;
+    error = fallback.error;
+  }
+  if (error) throw error;
+  return data;
+}
+
 async function fetchHermesLocks(bonusDate = '') {
   let query = supabase
     .from('bonus_process_locks')
@@ -170,9 +288,18 @@ async function fetchRowsByBatch(claimBatchId) {
   const baseSelect = 'id, bonus_date, login_id, login_key, bonus_type, bonus_amount, remark, source, operator_name, bonus_status, claim_owner, claim_batch_id, claimed_at, pending_expires_at, created_at, done_at';
   let { data, error } = await supabase
     .from('bonus_done_daily')
-    .select(`${baseSelect}, member_id`)
+    .select(`${baseSelect}, member_id, member_name`)
     .eq('claim_batch_id', claimBatchId)
     .order('created_at', { ascending: true });
+  if (error && error.code === '42703') {
+    const fallback = await supabase
+      .from('bonus_done_daily')
+      .select(`${baseSelect}, member_id`)
+      .eq('claim_batch_id', claimBatchId)
+      .order('created_at', { ascending: true });
+    data = fallback.data;
+    error = fallback.error;
+  }
   if (error && error.code === '42703') {
     const fallback = await supabase
       .from('bonus_done_daily')
@@ -866,34 +993,56 @@ async function hermesPreviewRelease(body, authContext) {
     error.code = 'PREVIEW_NOT_RELEASABLE';
     throw error;
   }
+
+  const rawRows = await fetchRowsByBatch(claimBatchId);
+  const readyRows = rawRows.filter(row => String(row.bonus_status || '').toUpperCase() === 'PENDING');
+  if (!readyRows.length) {
+    throw errorWithCode('NO_READY_ITEMS', 'Tidak ada item READY untuk dikirim ke worker.', 400, {
+      debug: {
+        claim_batch_id: claimBatchId,
+        preview_status: previewStatus,
+        row_status_counts: countBy(rawRows, 'bonus_status')
+      }
+    });
+  }
+
   const now = new Date().toISOString();
-  const { data: updatedLock, error } = await supabase
-    .from('bonus_process_locks')
-    .update({
-      lock_status: 'RELEASED_TO_WORKER',
-      updated_at: now,
-      done_by_name: operatorName
-    })
-    .eq('claim_batch_id', claimBatchId)
-    .select('id, bonus_date, lock_status, claim_batch_id, claim_owner, operator_name, pending_expires_at, updated_at')
-    .maybeSingle();
-  if (error) throw error;
-  const detail = await hermesPreviewDetail({ claim_batch_id: claimBatchId });
+  const taskPayload = {
+    type: 'RUN_AUTO_REVIEW',
+    source: 'parser-superadmin-release',
+    batch_code: claimBatchId,
+    claim_batch_id: claimBatchId,
+    bonus_date: lock.bonus_date,
+    mode: 'BONUS_HARIAN',
+    items: readyRows.map(rowToHermesTaskItem),
+    meta: {
+      released_by: operatorName,
+      released_role: authContext?.role || body.role || '',
+      released_at: now
+    }
+  };
+  const taskResult = await createHermesTaskQueue(taskPayload);
+  const updatedLock = await updateHermesReleasedLock(claimBatchId, operatorName, taskResult, now);
   return {
     ok: true,
     action: 'hermes_preview_release',
     status: 'RELEASED_TO_WORKER',
     batch_code: claimBatchId,
     claim_batch_id: claimBatchId,
+    task_id: taskResult.task_id,
+    task_response: taskResult.response,
     lock: updatedLock,
     task_payload: {
-      source: 'hermes-telegram',
+      type: 'RUN_AUTO_REVIEW',
+      source: 'parser-superadmin-release',
       mode: 'BONUS_HARIAN',
       batch_code: claimBatchId,
       claim_batch_id: claimBatchId,
       bonus_date: lock.bonus_date,
-      rows: detail.rows
-    }
+      items: taskPayload.items,
+      meta: taskPayload.meta
+    },
+    message: 'Task berhasil dikirim ke Hermes. Local Worker akan memproses saat aktif.'
   };
 }
 
