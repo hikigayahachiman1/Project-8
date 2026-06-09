@@ -925,6 +925,117 @@ function classifyReadyItems(items, existingRows, activeLock) {
   return { ready, skipped, manualReview, expiredReleased };
 }
 
+function logReserveStep(step, meta = {}) {
+  console.info('generate-json reserve', {
+    step,
+    ...meta,
+    at: new Date().toISOString()
+  });
+}
+
+function missingColumnName(error) {
+  if (error?.code !== '42703') return '';
+  const message = String(error.message || error.details || '');
+  return message.match(/column "([^"]+)"/i)?.[1] || '';
+}
+
+async function writeBonusDoneWithColumnFallback(payload, writeFn) {
+  const current = { ...payload };
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const { data, error } = await writeFn(current);
+    if (!error) return data;
+    const column = missingColumnName(error);
+    if (!column || !(column in current)) throw supabaseError(error);
+    delete current[column];
+  }
+  throw supabaseError(null, 'Gagal menulis bonus_done_daily setelah fallback kolom.');
+}
+
+function pendingRowPayload({ item, dateValue, batchCode, source, claimOwner, operatorName, now, pendingExpiresAt, expiresAt, finalizedNote }) {
+  return {
+    bonus_date: dateValue,
+    login_id: item.login_id,
+    login_key: normalizeLoginId(item.login_key || item.login_id),
+    member_id: item.member_id || '',
+    member_name: item.member_name || '',
+    bonus_type: 'BONUS_HARIAN',
+    bonus_amount: item.amount_bo,
+    remark: item.note || item.remark || '',
+    source: source || 'hermes_telegram',
+    operator_name: operatorName,
+    bonus_status: 'PENDING',
+    claim_owner: claimOwner,
+    claim_batch_id: batchCode,
+    claimed_at: now,
+    updated_at: now,
+    pending_expires_at: pendingExpiresAt,
+    expires_at: expiresAt,
+    done_at: null,
+    done_by_name: null,
+    finalized_note: finalizedNote || null,
+    reason: null,
+    warning: item.warning || null
+  };
+}
+
+async function fetchExistingBonusDoneRow(item, dateValue) {
+  const loginKey = normalizeLoginId(item.login_key || item.login_id);
+  const { data, error } = await supabase
+    .from('bonus_done_daily')
+    .select('id, bonus_date, login_key, bonus_type, bonus_status, claim_batch_id, pending_expires_at')
+    .eq('bonus_date', dateValue)
+    .eq('login_key', loginKey)
+    .eq('bonus_type', 'BONUS_HARIAN')
+    .limit(1)
+    .maybeSingle();
+  if (error) throw supabaseError(error);
+  return data || null;
+}
+
+async function expirePendingBonusDoneRow(row, now) {
+  await writeBonusDoneWithColumnFallback(
+    {
+      bonus_status: 'EXPIRED',
+      updated_at: now,
+      finalized_note: 'Auto expired sebelum reuse Hermes preview'
+    },
+    payload => supabase
+      .from('bonus_done_daily')
+      .update(payload)
+      .eq('id', row.id)
+      .eq('bonus_status', 'PENDING')
+      .select('id')
+      .maybeSingle()
+  );
+}
+
+async function reuseExpiredBonusDoneRow(row, payload) {
+  return writeBonusDoneWithColumnFallback(
+    {
+      ...payload,
+      finalized_note: 'Reused expired row for new Hermes preview'
+    },
+    updatePayload => supabase
+      .from('bonus_done_daily')
+      .update(updatePayload)
+      .eq('id', row.id)
+      .eq('bonus_status', 'EXPIRED')
+      .select('id, login_key, bonus_status, claim_batch_id, pending_expires_at')
+      .maybeSingle()
+  );
+}
+
+async function insertNewPendingBonusDoneRow(payload) {
+  return writeBonusDoneWithColumnFallback(
+    payload,
+    insertPayload => supabase
+      .from('bonus_done_daily')
+      .insert(insertPayload)
+      .select('id, login_key, bonus_status, claim_batch_id, pending_expires_at')
+      .maybeSingle()
+  );
+}
+
 async function reserveReadyItems({ items, dateValue, batchCode, source }) {
   const nowDate = new Date();
   const now = nowDate.toISOString();
@@ -949,40 +1060,80 @@ async function reserveReadyItems({ items, dateValue, batchCode, source }) {
     .insert(lockPayload);
   if (lockError) throw supabaseError(lockError);
 
-  const rows = items.map(item => ({
-    bonus_date: dateValue,
-    login_id: item.login_id,
-    login_key: normalizeLoginId(item.login_id),
-    member_id: item.member_id || '',
-    bonus_type: 'BONUS_HARIAN',
-    bonus_amount: item.amount_bo,
-    remark: item.note,
-    source: source || 'hermes_telegram',
-    operator_name: operatorName,
-    bonus_status: 'PENDING',
-    claim_owner: claimOwner,
-    claim_batch_id: batchCode,
-    claimed_at: now,
-    updated_at: now,
-    pending_expires_at: pendingExpiresAt,
-    expires_at: expiresAt
-  }));
+  const rows = [];
+  const readyItems = [];
+  const skipped = [];
+  for (const item of items) {
+    const loginKey = normalizeLoginId(item.login_key || item.login_id);
+    const existing = await fetchExistingBonusDoneRow(item, dateValue);
+    const payload = pendingRowPayload({
+      item,
+      dateValue,
+      batchCode,
+      source,
+      claimOwner,
+      operatorName,
+      now,
+      pendingExpiresAt,
+      expiresAt,
+      finalizedNote: null
+    });
 
-  let { data, error } = await supabase
-    .from('bonus_done_daily')
-    .insert(rows)
-    .select('id, login_key, bonus_status, claim_batch_id, pending_expires_at');
-  if (error && error.code === '42703') {
-    const fallbackRows = rows.map(({ member_id, ...row }) => row);
-    const fallback = await supabase
-      .from('bonus_done_daily')
-      .insert(fallbackRows)
-      .select('id, login_key, bonus_status, claim_batch_id, pending_expires_at');
-    data = fallback.data;
-    error = fallback.error;
+    if (existing) {
+      const status = String(existing.bonus_status || '').toUpperCase();
+      const pendingMs = existing.pending_expires_at ? new Date(existing.pending_expires_at).getTime() : 0;
+      if (status === 'DONE') {
+        logReserveStep('SKIP_DONE', { login_key: loginKey, existing_id: existing.id });
+        skipped.push({ ...item, status: 'SKIPPED_ALREADY_GIVEN', reason: 'SKIPPED_ALREADY_GIVEN' });
+        continue;
+      }
+      if (status === 'PENDING' && pendingMs >= Date.now()) {
+        logReserveStep('SKIP_PENDING_ACTIVE', {
+          login_key: loginKey,
+          existing_id: existing.id,
+          source_claim_batch_id: existing.claim_batch_id || ''
+        });
+        skipped.push({
+          ...item,
+          status: 'PENDING_OTHER_BATCH',
+          reason: 'PENDING_OTHER_BATCH',
+          claim_batch_id: existing.claim_batch_id || ''
+        });
+        continue;
+      }
+      if (status === 'PENDING') {
+        await expirePendingBonusDoneRow(existing, now);
+      } else if (status !== 'EXPIRED') {
+        logReserveStep('SKIP_UNKNOWN_EXISTING_STATUS', {
+          login_key: loginKey,
+          existing_id: existing.id,
+          existing_status: status
+        });
+        skipped.push({
+          ...item,
+          status: 'FAILED',
+          reason: `EXISTING_STATUS_${status || 'EMPTY'}`
+        });
+        continue;
+      }
+      logReserveStep('REUSE_EXPIRED_ROW', { login_key: loginKey, existing_id: existing.id, claim_batch_id: batchCode });
+      const row = await reuseExpiredBonusDoneRow({ ...existing, bonus_status: 'EXPIRED' }, payload);
+      if (row) {
+        rows.push(row);
+        readyItems.push(item);
+      }
+      continue;
+    }
+
+    logReserveStep('INSERT_NEW_PENDING_ROW', { login_key: loginKey, claim_batch_id: batchCode });
+    const row = await insertNewPendingBonusDoneRow(payload);
+    if (row) {
+      rows.push(row);
+      readyItems.push(item);
+    }
   }
-  if (error) throw supabaseError(error);
-  return { rows: data || [], lock: lockPayload, pending_expires_at: pendingExpiresAt };
+
+  return { rows, readyItems, skipped, lock: lockPayload, pending_expires_at: pendingExpiresAt };
 }
 
 async function reserveEmptyHermesPreview({ dateValue, batchCode }) {
@@ -1220,21 +1371,74 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
     batchCode,
     source: source || 'hermes_telegram'
   });
+  if (reserve.skipped.length) {
+    batch.skipped = [...batch.skipped, ...reserve.skipped];
+  }
+  const reservedReadyItems = reserve.readyItems || [];
+  batch.summary = {
+    ...batch.summary,
+    ready_items: reservedReadyItems.length,
+    total_amount_bo_ready: reservedReadyItems.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
+    total_items: reservedReadyItems.length,
+    total_amount_raw: reservedReadyItems.reduce((sum, item) => sum + Number(item.amount_raw || 0), 0),
+    total_amount_bo: reservedReadyItems.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
+    skipped_already_given: batch.skipped.filter(item => item.reason === 'SKIPPED_ALREADY_GIVEN').length,
+    pending_other_batch: batch.skipped.filter(item => item.reason === 'PENDING_OTHER_BATCH').length,
+    skipped_items: batch.skipped.length
+  };
+  const reservedPreviewItems = buildHermesPreviewItems({
+    readyItems: reservedReadyItems,
+    skippedItems: batch.skipped,
+    manualReviewItems: classified.manualReview,
+    batchCode,
+    dateValue
+  });
+  if (reservedReadyItems.length === 0) {
+    await supabase
+      .from('bonus_process_locks')
+      .update({ lock_status: 'EMPTY', updated_at: new Date().toISOString() })
+      .eq('claim_batch_id', batchCode);
+    const snapshot = await saveHermesPreviewSnapshot({
+      batch,
+      dateValue,
+      batchCode,
+      previewItems: reservedPreviewItems,
+      previewStatus: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : 'PREVIEW'
+    });
+    logStep(ctx, 'PREVIEW_SAVE_DONE', {
+      claim_batch_id: batchCode,
+      saved_rows: 0,
+      preview_items: reservedPreviewItems.length,
+      lock_status: 'EMPTY'
+    });
+    batch.items = [];
+    return {
+      batch,
+      should_create_task: false,
+      needs_superadmin_approval: isHermesSource(source),
+      preview_status: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : '',
+      claim_batch_id: batchCode,
+      skipped: batch.skipped,
+      manual_review: classified.manualReview,
+      preview_snapshot: snapshot,
+      reserve
+    };
+  }
   const snapshot = await saveHermesPreviewSnapshot({
     batch,
     dateValue,
     batchCode,
-    previewItems,
+    previewItems: reservedPreviewItems,
     previewStatus: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : 'PREVIEW'
   });
   logStep(ctx, 'PREVIEW_SAVE_DONE', {
     claim_batch_id: batchCode,
     saved_rows: reserve.rows.length,
-    preview_items: previewItems.length,
+    preview_items: reservedPreviewItems.length,
     lock_status: 'PENDING'
   });
 
-  batch.items = batch.items.map(item => ({
+  batch.items = reservedReadyItems.map(item => ({
     ...item,
     status: 'READY',
     claim_batch_id: batchCode,
