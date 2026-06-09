@@ -1424,6 +1424,11 @@
     font-size: 0.62rem;
   }
 
+  .superadmin-only,
+  .superadmin-only-tab {
+    display: none;
+  }
+
   .locked-access-note {
     margin-top: 12px;
     padding: 12px 14px;
@@ -2500,7 +2505,7 @@
       <button class="tool-tab active" data-panel="parser">Parser QRIS</button>
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" data-panel="claim-mahjong">Klaim Mahjong</button>
-      <button class="tool-tab" id="dashboardTab" data-panel="dashboard" style="display:none;">Dashboard</button>
+      <button class="tool-tab superadmin-only-tab" id="dashboardTab" data-panel="dashboard" style="display:none;">Dashboard</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
       <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
@@ -2697,12 +2702,12 @@
           <div class="source-note" id="bonusSourceNote">Belum ada data dari Parser QRIS.</div>
           <div class="bonus-actions">
             <button id="bonusProcessBtn" class="primary">Proses Bonus Harian</button>
-            <button id="bonusExpirePendingBtn" class="ghost">Bersihkan Pending Expired</button>
-            <button id="bonusRefreshStatusBtn" class="ghost">Refresh Status Bonus</button>
-            <button id="bonusPendingActiveBtn" class="ghost">Lihat Pending Aktif</button>
-            <button id="bonusBatchDoneBtn" class="success">Tandai Batch DONE</button>
-            <button id="bonusBatchExpireBtn" class="danger">Batalkan / Expire Batch Saya</button>
-            <button id="bonusCopyExcelBtn" class="primary">Copy Output Bonus Harian ke Excel</button>
+            <button id="bonusExpirePendingBtn" class="ghost superadmin-only">Bersihkan Pending Expired</button>
+            <button id="bonusRefreshStatusBtn" class="ghost superadmin-only">Refresh Status Bonus</button>
+            <button id="bonusPendingActiveBtn" class="ghost superadmin-only">Lihat Pending Aktif</button>
+            <button id="bonusBatchDoneBtn" class="success superadmin-only">Tandai Batch DONE</button>
+            <button id="bonusBatchExpireBtn" class="danger superadmin-only">Batalkan / Expire Batch Saya</button>
+            <button id="bonusCopyExcelBtn" class="primary superadmin-only">Copy Output Bonus Harian ke Excel</button>
             <button id="bonusResetBtn" class="ghost">Reset Bonus</button>
           </div>
           <div class="source-note" id="bonusStatusRefreshInfo" style="display:none;"></div>
@@ -3665,7 +3670,26 @@
   }
 
   function isSuperAdmin() {
-    return currentOperator && currentOperator.role === 'superadmin';
+    return String(currentOperator?.role || '').toLowerCase() === 'superadmin';
+  }
+
+  function isSuperadmin() {
+    return isSuperAdmin();
+  }
+
+  function applySuperadminVisibility() {
+    const allowed = isSuperadmin();
+    document.querySelectorAll('.superadmin-only').forEach(el => {
+      el.style.display = allowed ? '' : 'none';
+    });
+    document.querySelectorAll('.superadmin-only-tab').forEach(el => {
+      el.style.display = allowed ? '' : 'none';
+    });
+    if (!allowed && document.getElementById('panel-dashboard')?.classList.contains('active')) {
+      const fallback = document.querySelector('.tool-tab[data-panel="parser"]')
+        || document.querySelector('.tool-tab[data-panel="bonus"]');
+      if (fallback) fallback.click();
+    }
   }
 
   function requireOperator() {
@@ -4060,6 +4084,7 @@
         if (currentOperator) showToast('Akses monitoring dibatasi.', 'error');
       }
     }
+    applySuperadminVisibility();
     renderFeatureLocks();
     renderFeatureLockTable();
   }
@@ -4151,6 +4176,11 @@
       }
       if (target === 'bonus-monitoring' && !isAdmin()) {
         showToast('Akses monitoring dibatasi.', 'error');
+        return;
+      }
+      if (target === 'dashboard' && !isSuperadmin()) {
+        showToast('Dashboard hanya untuk Superadmin.', 'error');
+        applySuperadminVisibility();
         return;
       }
       const featureKey = featureKeyForPanel(target);
