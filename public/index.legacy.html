@@ -624,6 +624,8 @@
   .role-badge.protected { color: #ffb3c1; border-color: rgba(255,79,139,0.46); background: rgba(255,79,139,0.14); margin-left: 6px; }
   .status-badge.active { color: var(--accent-3); border-color: rgba(0,255,168,0.38); background: rgba(0,255,168,0.10); }
   .status-badge.inactive { color: #ffb3c1; border-color: rgba(255,79,139,0.42); background: rgba(255,79,139,0.12); }
+  .status-badge.pending { color: #ffd166; border-color: rgba(255,209,102,0.42); background: rgba(255,209,102,0.12); }
+  .status-badge.warning { color: #c7b7ff; border-color: rgba(199,183,255,0.42); background: rgba(199,183,255,0.12); }
 
   .row-actions {
     display: flex;
@@ -6573,6 +6575,16 @@
     if (!table) return;
     const rows = Array.isArray(result.rows) ? result.rows : [];
     dashboardHermesSelectedBatch = result.batch || null;
+    const summary = result.summary || {};
+    const note = document.getElementById('dashboardHermesNote');
+    if (note) {
+      note.innerHTML = `
+        <span class="status-badge active">READY: ${escapeHtml(String(summary.READY || 0))}</span>
+        <span class="status-badge inactive">Already Given: ${escapeHtml(String(summary.SKIPPED_ALREADY_GIVEN || 0))}</span>
+        <span class="status-badge pending">Pending Other Batch: ${escapeHtml(String(summary.PENDING_OTHER_BATCH || 0))}</span>
+        <span class="status-badge warning">Manual Review: ${escapeHtml(String(summary.MANUAL_REVIEW || 0))}</span>
+      `;
+    }
     table.innerHTML = rows.map(row => `
       <tr>
         <td>${escapeHtml(String(row.No ?? ''))}</td>
@@ -6587,7 +6599,7 @@
         <td>${escapeHtml(row.claim_batch_id || '')}</td>
         <td>${escapeHtml(row.created_at || '')}</td>
       </tr>
-    `).join('') || '<tr><td colspan="11" class="empty">Preview ini belum punya item detail.</td></tr>';
+    `).join('') || `<tr><td colspan="11" class="empty">${escapeHtml(result.message || 'Detail preview belum tersimpan. Generate ulang preview setelah migration.')}</td></tr>`;
   }
 
   async function dashboardOpenHermesPreview(claimBatchId) {

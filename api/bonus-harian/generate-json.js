@@ -1009,6 +1009,99 @@ async function reserveEmptyHermesPreview({ dateValue, batchCode }) {
   };
 }
 
+function previewStatusCounts(items) {
+  return (items || []).reduce((acc, item) => {
+    const key = String(item.status || 'EMPTY').toUpperCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function normalizePreviewItem(item, status, reason, { batchCode, dateValue }) {
+  const warning = item.warning || (status === 'MANUAL_REVIEW' ? reason : '');
+  return {
+    batch_code: batchCode,
+    claim_batch_id: batchCode,
+    bonus_date: item.bonus_date || dateValue,
+    login_id: item.login_id || '',
+    login_key: normalizeLoginId(item.login_key || item.login_id || ''),
+    member_id: item.member_id || '',
+    member_name: item.member_name || '',
+    bonus_type: item.bonus_type || 'BONUS_HARIAN',
+    amount_raw: Number(item.amount_raw || 0),
+    amount_bo: Number(item.amount_bo || 0),
+    remark: item.remark || item.note || '',
+    note: item.note || item.remark || '',
+    status,
+    reason: reason || '',
+    warning: warning || '',
+    source_claim_batch_id: status === 'PENDING_OTHER_BATCH' ? (item.claim_batch_id || '') : '',
+    raw_item: item
+  };
+}
+
+function buildHermesPreviewItems({ readyItems, skippedItems, manualReviewItems, batchCode, dateValue }) {
+  const manualKeys = new Set((manualReviewItems || []).map(item => normalizeLoginId(item.login_id)));
+  const readyRows = (readyItems || [])
+    .filter(item => !manualKeys.has(normalizeLoginId(item.login_id)))
+    .map(item => normalizePreviewItem(item, 'READY', '', { batchCode, dateValue }));
+  const skippedRows = (skippedItems || []).map(item => {
+    const status = String(item.status || item.reason || 'SKIPPED').toUpperCase();
+    return normalizePreviewItem(item, status, item.reason || status, { batchCode, dateValue });
+  });
+  const manualRows = (manualReviewItems || []).map(item => normalizePreviewItem(
+    item,
+    'MANUAL_REVIEW',
+    item.reason || item.warning || 'MANUAL_REVIEW',
+    { batchCode, dateValue }
+  ));
+  return [...readyRows, ...skippedRows, ...manualRows];
+}
+
+async function saveHermesPreviewSnapshot({ batch, dateValue, batchCode, previewItems, previewStatus }) {
+  if (!isHermesSource(batch.source)) return null;
+  const now = new Date().toISOString();
+  const counts = previewStatusCounts(previewItems);
+  const batchPayload = {
+    batch_code: batchCode,
+    claim_batch_id: batchCode,
+    bonus_date: dateValue,
+    source: FIXED_SOURCE,
+    preview_status: previewStatus || 'WAITING_SUPERADMIN_APPROVAL',
+    total_items: previewItems.length,
+    ready_items: counts.READY || 0,
+    skipped_already_given: counts.SKIPPED_ALREADY_GIVEN || 0,
+    pending_other_batch: counts.PENDING_OTHER_BATCH || 0,
+    manual_review_items: counts.MANUAL_REVIEW || 0,
+    failed_items: counts.FAILED || 0,
+    total_amount_bo: previewItems
+      .filter(item => String(item.status || '').toUpperCase() === 'READY')
+      .reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
+    summary: batch.summary || {},
+    updated_at: now
+  };
+
+  const { error: batchError } = await supabase
+    .from('hermes_preview_batches')
+    .upsert(batchPayload, { onConflict: 'claim_batch_id' });
+  if (batchError) throw supabaseError(batchError, 'Gagal menyimpan header preview Hermes.');
+
+  const { error: deleteError } = await supabase
+    .from('hermes_preview_items')
+    .delete()
+    .eq('claim_batch_id', batchCode);
+  if (deleteError) throw supabaseError(deleteError, 'Gagal membersihkan item preview Hermes lama.');
+
+  if (previewItems.length) {
+    const { error: itemError } = await supabase
+      .from('hermes_preview_items')
+      .insert(previewItems.map(item => ({ ...item, updated_at: now })));
+    if (itemError) throw supabaseError(itemError, 'Gagal menyimpan item preview Hermes.');
+  }
+
+  return batchPayload;
+}
+
 async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source, ctx }) {
   if (!supabase) throw supabaseError(null, 'Konfigurasi Supabase belum lengkap.');
   const batch = buildBonusBatch({ depositRaw, adjustmentRaw, bonusDate, source });
@@ -1076,11 +1169,19 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
     total_amount_bo: readyLimited.reduce((sum, item) => sum + Number(item.amount_bo || 0), 0),
     skipped_items: batch.skipped.length
   };
+  const previewItems = buildHermesPreviewItems({
+    readyItems: readyLimited,
+    skippedItems: batch.skipped,
+    manualReviewItems: classified.manualReview,
+    batchCode,
+    dateValue
+  });
 
   logStep(ctx, 'PREVIEW_SAVE_STARTED', {
     bonus_date: dateValue,
     claim_batch_id: batchCode,
-    ready_items: readyLimited.length
+    ready_items: readyLimited.length,
+    preview_items: previewItems.length
   });
 
   ensureWithinDeadline(ctx);
@@ -1088,9 +1189,17 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
     const emptyPreview = isHermesSource(source)
       ? await reserveEmptyHermesPreview({ dateValue, batchCode })
       : null;
+    const snapshot = await saveHermesPreviewSnapshot({
+      batch,
+      dateValue,
+      batchCode,
+      previewItems,
+      previewStatus: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : 'PREVIEW'
+    });
     logStep(ctx, 'PREVIEW_SAVE_DONE', {
       claim_batch_id: emptyPreview?.claim_batch_id || batchCode,
       saved_rows: 0,
+      preview_items: previewItems.length,
       lock_status: isHermesSource(source) ? 'EMPTY' : ''
     });
     return {
@@ -1100,7 +1209,8 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
       preview_status: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : '',
       claim_batch_id: emptyPreview?.claim_batch_id || batchCode,
       skipped: batch.skipped,
-      manual_review: classified.manualReview
+      manual_review: classified.manualReview,
+      preview_snapshot: snapshot
     };
   }
 
@@ -1110,9 +1220,17 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
     batchCode,
     source: source || 'hermes_telegram'
   });
+  const snapshot = await saveHermesPreviewSnapshot({
+    batch,
+    dateValue,
+    batchCode,
+    previewItems,
+    previewStatus: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : 'PREVIEW'
+  });
   logStep(ctx, 'PREVIEW_SAVE_DONE', {
     claim_batch_id: batchCode,
     saved_rows: reserve.rows.length,
+    preview_items: previewItems.length,
     lock_status: 'PENDING'
   });
 
@@ -1131,7 +1249,8 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
     claim_batch_id: batchCode,
     skipped: batch.skipped,
     manual_review: classified.manualReview,
-    reserve
+    reserve,
+    preview_snapshot: snapshot
   };
 }
 
