@@ -193,10 +193,23 @@ function extractHermesTaskId(responseBody) {
     || '';
 }
 
+function consoleReleaseStep(step, meta = {}) {
+  console.info('bonus-control hermes release', {
+    step,
+    ...meta,
+    at: new Date().toISOString()
+  });
+}
+
 async function createHermesTaskQueue(payload) {
   const { baseUrl, token } = hermesTaskConfig();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
+  consoleReleaseStep('HERMES_TASK_CREATE_STARTED', {
+    batch_code: payload.batch_code || '',
+    claim_batch_id: payload.claim_batch_id || '',
+    item_count: payload.items?.length || 0
+  });
   try {
     const response = await fetch(`${baseUrl}/api/task-queue/tasks/create`, {
       method: 'POST',
@@ -215,28 +228,83 @@ async function createHermesTaskQueue(payload) {
       body = { message: text };
     }
     if (!response.ok) {
+      consoleReleaseStep('HERMES_TASK_CREATE_FAILED', {
+        status: response.status,
+        response: body
+      });
       throw errorWithCode(
         'HERMES_TASK_CREATE_FAILED',
         body?.message || `Hermes task queue gagal membuat task. HTTP ${response.status}.`,
         502,
-        { hermes_response: body }
+        { detail: body?.detail || body?.error || body?.message || '', hermes_response: body }
       );
     }
+    const taskId = extractHermesTaskId(body);
+    if (!taskId) {
+      consoleReleaseStep('HERMES_TASK_CREATE_FAILED', {
+        reason: 'TASK_ID_MISSING',
+        response: body
+      });
+      throw errorWithCode(
+        'HERMES_TASK_CREATE_FAILED',
+        'Hermes berhasil dihubungi tetapi response tidak berisi task_id.',
+        502,
+        { detail: 'TASK_ID_MISSING', hermes_response: body }
+      );
+    }
+    consoleReleaseStep('HERMES_TASK_CREATE_DONE', {
+      task_id: taskId
+    });
     return {
-      task_id: extractHermesTaskId(body),
+      task_id: taskId,
       response: body
     };
   } catch (error) {
     if (error?.code) throw error;
     const isAbort = error?.name === 'AbortError';
+    consoleReleaseStep('HERMES_TASK_CREATE_FAILED', {
+      reason: isAbort ? 'TIMEOUT' : 'UNREACHABLE',
+      message: error?.message || ''
+    });
     throw errorWithCode(
-      isAbort ? 'HERMES_TASK_TIMEOUT' : 'HERMES_TASK_UNREACHABLE',
+      'HERMES_TASK_CREATE_FAILED',
       isAbort ? 'Hermes VPS task queue timeout.' : 'Hermes VPS task queue tidak bisa dihubungi.',
-      502
+      502,
+      { detail: isAbort ? 'HERMES_TASK_TIMEOUT' : 'HERMES_TASK_UNREACHABLE' }
     );
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function updateWithColumnFallback(tableName, matchColumn, matchValue, payload, selectColumns = '*') {
+  const current = { ...payload };
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .update(current)
+      .eq(matchColumn, matchValue)
+      .select(selectColumns)
+      .maybeSingle();
+    if (!error) return data;
+    const column = String(error.message || '').match(/column "([^"]+)"/i)?.[1] || '';
+    if (error.code !== '42703' || !column || !(column in current)) throw error;
+    delete current[column];
+  }
+  throw new Error(`Gagal update ${tableName}.`);
+}
+
+async function updateManyWithColumnFallback(tableName, queryBuilder, payload) {
+  const current = { ...payload };
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const query = queryBuilder(supabase.from(tableName).update(current));
+    const { data, error } = await query.select('id');
+    if (!error) return data || [];
+    const column = String(error.message || '').match(/column "([^"]+)"/i)?.[1] || '';
+    if (error.code !== '42703' || !column || !(column in current)) throw error;
+    delete current[column];
+  }
+  throw new Error(`Gagal update ${tableName}.`);
 }
 
 async function updateHermesReleasedLock(claimBatchId, operatorName, taskResult, now) {
@@ -272,33 +340,42 @@ async function updateHermesReleasedLock(claimBatchId, operatorName, taskResult, 
 }
 
 async function updateHermesReleasedPreviewBatch(claimBatchId, taskResult, now) {
-  const payload = {
+  return updateWithColumnFallback('hermes_preview_batches', 'claim_batch_id', claimBatchId, {
     preview_status: 'RELEASED_TO_WORKER',
     task_id: taskResult.task_id || '',
     task_response: taskResult.response || null,
+    hermes_response: taskResult.response || null,
+    released_by: taskResult.released_by || '',
+    released_at: now,
+    last_error: null,
     updated_at: now
-  };
-  let { data, error } = await supabase
-    .from('hermes_preview_batches')
-    .update(payload)
-    .eq('claim_batch_id', claimBatchId)
-    .select('*')
-    .maybeSingle();
-  if (error && error.code === '42703') {
-    const fallback = await supabase
-      .from('hermes_preview_batches')
-      .update({
-        preview_status: 'RELEASED_TO_WORKER',
-        updated_at: now
-      })
-      .eq('claim_batch_id', claimBatchId)
-      .select('*')
-      .maybeSingle();
-    data = fallback.data;
-    error = fallback.error;
+  });
+}
+
+async function saveHermesReleaseError(claimBatchId, error) {
+  const message = error?.message || error?.code || 'Hermes task create gagal.';
+  try {
+    await updateWithColumnFallback('hermes_preview_batches', 'claim_batch_id', claimBatchId, {
+      last_error: message,
+      updated_at: new Date().toISOString()
+    });
+  } catch (saveError) {
+    console.error('bonus-control save hermes release error failed:', saveError);
   }
-  if (error) throw error;
-  return data;
+}
+
+async function markHermesPreviewItemsReleased(claimBatchId, taskId, now) {
+  return updateManyWithColumnFallback(
+    'hermes_preview_items',
+    query => query
+      .eq('claim_batch_id', claimBatchId)
+      .eq('status', 'READY'),
+    {
+      status: 'RELEASED_TO_WORKER',
+      task_id: taskId,
+      updated_at: now
+    }
+  );
 }
 
 function previewBatchFromRow(row) {
@@ -1043,6 +1120,11 @@ async function hermesPreviewRelease(body, authContext) {
   requireSuperadmin(authContext);
   const claimBatchId = String(body.claim_batch_id || body.batch_code || '').trim();
   const operatorName = String(body.operator_name || authContext?.operator?.display_name || authContext?.operator?.username || 'Superadmin').trim();
+  consoleReleaseStep('HERMES_RELEASE_STARTED', {
+    claim_batch_id: claimBatchId,
+    operator_name: operatorName,
+    role: authContext?.role || body.role || ''
+  });
   if (!claimBatchId) {
     const error = new Error('claim_batch_id atau batch_code wajib diisi.');
     error.statusCode = 400;
@@ -1064,58 +1146,92 @@ async function hermesPreviewRelease(body, authContext) {
     throw error;
   }
 
-  const rawRows = await fetchHermesPreviewItems(claimBatchId);
-  const readyRows = rawRows.filter(row => String(row.status || '').toUpperCase() === 'READY');
+  const { data: readyRowsRaw, error: readyError } = await supabase
+    .from('hermes_preview_items')
+    .select('*')
+    .eq('claim_batch_id', batchRow.claim_batch_id || claimBatchId)
+    .eq('status', 'READY')
+    .order('id', { ascending: true });
+  if (readyError) throw readyError;
+  const readyRows = readyRowsRaw || [];
+  consoleReleaseStep('HERMES_RELEASE_READY_ITEMS', {
+    claim_batch_id: batchRow.claim_batch_id || claimBatchId,
+    ready_items: readyRows.length
+  });
   if (!readyRows.length) {
-    throw errorWithCode('NO_READY_ITEMS', 'Tidak ada item READY untuk dikirim ke worker.', 400, {
-      debug: {
-        claim_batch_id: claimBatchId,
-        preview_status: previewStatus,
-        row_status_counts: countBy(rawRows, 'status')
-      }
-    });
+    return {
+      ok: false,
+      action: 'hermes_preview_release',
+      error: 'NO_READY_ITEMS',
+      message: 'Tidak ada item READY untuk dikirim ke worker.',
+      claim_batch_id: batchRow.claim_batch_id || claimBatchId,
+      batch_code: batchRow.batch_code || claimBatchId,
+      preview_status: previewStatus
+    };
   }
 
-  const now = new Date().toISOString();
-  const taskPayload = {
-    type: 'RUN_AUTO_REVIEW',
-    source: 'parser-superadmin-release',
-    batch_code: batchRow.batch_code || claimBatchId,
-    claim_batch_id: batchRow.claim_batch_id || claimBatchId,
-    bonus_date: batchRow.bonus_date,
-    mode: 'BONUS_HARIAN',
-    items: readyRows.map(rowToHermesTaskItem),
-    meta: {
-      released_by: operatorName,
-      released_role: authContext?.role || body.role || '',
-      released_at: now
-    }
-  };
-  const taskResult = await createHermesTaskQueue(taskPayload);
-  const updatedLock = await updateHermesReleasedLock(claimBatchId, operatorName, taskResult, now);
-  const updatedPreviewBatch = await updateHermesReleasedPreviewBatch(claimBatchId, taskResult, now);
-  return {
-    ok: true,
-    action: 'hermes_preview_release',
-    status: 'RELEASED_TO_WORKER',
-    batch_code: batchRow.batch_code || claimBatchId,
-    claim_batch_id: batchRow.claim_batch_id || claimBatchId,
-    task_id: taskResult.task_id,
-    task_response: taskResult.response,
-    lock: updatedLock,
-    batch: updatedPreviewBatch,
-    task_payload: {
+  try {
+    const now = new Date().toISOString();
+    const taskPayload = {
       type: 'RUN_AUTO_REVIEW',
       source: 'parser-superadmin-release',
-      mode: 'BONUS_HARIAN',
       batch_code: batchRow.batch_code || claimBatchId,
       claim_batch_id: batchRow.claim_batch_id || claimBatchId,
       bonus_date: batchRow.bonus_date,
-      items: taskPayload.items,
-      meta: taskPayload.meta
-    },
-    message: 'Task berhasil dikirim ke Hermes. Local Worker akan memproses saat aktif.'
-  };
+      mode: 'BONUS_HARIAN',
+      items: readyRows.map(rowToHermesTaskItem),
+      meta: {
+        released_by: operatorName,
+        released_role: authContext?.role || body.role || '',
+        released_at: now
+      }
+    };
+    const taskResult = await createHermesTaskQueue(taskPayload);
+    taskResult.released_by = operatorName;
+    const updatedLock = await updateHermesReleasedLock(batchRow.claim_batch_id || claimBatchId, operatorName, taskResult, now);
+    const updatedPreviewBatch = await updateHermesReleasedPreviewBatch(batchRow.claim_batch_id || claimBatchId, taskResult, now);
+    const releasedItemRows = await markHermesPreviewItemsReleased(batchRow.claim_batch_id || claimBatchId, taskResult.task_id, now);
+    return {
+      ok: true,
+      action: 'hermes_preview_release',
+      status: 'RELEASED_TO_WORKER',
+      batch_code: batchRow.batch_code || claimBatchId,
+      claim_batch_id: batchRow.claim_batch_id || claimBatchId,
+      task_id: taskResult.task_id,
+      released_items: readyRows.length,
+      updated_preview_items: releasedItemRows.length,
+      task_response: taskResult.response,
+      lock: updatedLock,
+      batch: updatedPreviewBatch,
+      task_payload: {
+        type: 'RUN_AUTO_REVIEW',
+        source: 'parser-superadmin-release',
+        mode: 'BONUS_HARIAN',
+        batch_code: batchRow.batch_code || claimBatchId,
+        claim_batch_id: batchRow.claim_batch_id || claimBatchId,
+        bonus_date: batchRow.bonus_date,
+        items: taskPayload.items,
+        meta: taskPayload.meta
+      },
+      message: 'Task berhasil dikirim ke Hermes. Local Worker akan memproses saat aktif.'
+    };
+  } catch (error) {
+    await saveHermesReleaseError(batchRow.claim_batch_id || claimBatchId, error);
+    consoleReleaseStep('HERMES_TASK_CREATE_FAILED', {
+      claim_batch_id: batchRow.claim_batch_id || claimBatchId,
+      error: error?.code || 'HERMES_TASK_CREATE_FAILED',
+      message: error?.message || ''
+    });
+    throw errorWithCode(
+      'HERMES_TASK_CREATE_FAILED',
+      error?.message || 'Hermes task queue gagal membuat task.',
+      error?.statusCode || 502,
+      {
+        detail: error?.detail || error?.code || '',
+        hermes_response: error?.hermes_response || null
+      }
+    );
+  }
 }
 
 async function hermesPreviewCancel(body, authContext) {
@@ -1207,6 +1323,8 @@ export default async function handler(req, res) {
       ok: false,
       error: error.code || 'BONUS_CONTROL_FAILED',
       message: error.message || 'Bonus control gagal.',
+      detail: error.detail || '',
+      hermes_response: error.hermes_response || null,
       debug: error.debug || null
     });
   }

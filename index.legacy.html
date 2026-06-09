@@ -6667,7 +6667,7 @@
         operator_name: currentOperatorName(),
         role: currentOperator?.role || ''
       });
-      showToast(result.message || 'Task berhasil dikirim ke Hermes. Local Worker akan memproses saat aktif.', 'success');
+      showToast(`Task berhasil dikirim ke Hermes. Task ID: ${result.task_id || '-'}`, 'success');
       await dashboardRefreshHermes();
       await dashboardOpenHermesPreview(claimBatchId);
       console.info('Hermes release task response', {
@@ -6677,7 +6677,7 @@
       });
     } catch (error) {
       console.error('dashboard hermes_preview_release error:', error);
-      showToast(error.message || 'Gagal release preview Hermes.', 'error');
+      showToast(error.code === 'NO_READY_ITEMS' ? 'Tidak ada item READY untuk dikirim ke worker.' : (error.message || 'Gagal release preview Hermes.'), 'error');
     }
   }
 
