@@ -1477,36 +1477,50 @@ async function buildAndReserveBonusBatch({ depositRaw, adjustmentRaw, bonusDate,
   });
 
   ensureWithinDeadline(ctx);
-  if (readyLimited.length === 0) {
-    const emptyPreview = isHermesSource(source)
-      ? await reserveEmptyHermesPreview({ dateValue, batchCode })
-      : null;
+  if (isHermesSource(source)) {
     const previewSaveStarted = Date.now();
     const snapshot = await saveHermesPreviewSnapshot({
       batch,
       dateValue,
       batchCode,
       previewItems,
-      previewStatus: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : 'PREVIEW'
+      previewStatus: 'WAITING_SUPERADMIN_APPROVAL'
     });
     markTime(ctx, 'TIME_PREVIEW_SAVE_MS', previewSaveStarted, {
       preview_items: previewItems.length
     });
     logStep(ctx, 'PREVIEW_SAVE_DONE', {
-      claim_batch_id: emptyPreview?.claim_batch_id || batchCode,
+      claim_batch_id: batchCode,
       saved_rows: 0,
       preview_items: previewItems.length,
-      lock_status: isHermesSource(source) ? 'EMPTY' : ''
+      lock_status: 'PREVIEW_ONLY'
     });
+    batch.items = readyLimited.map(item => ({
+      ...item,
+      status: 'READY',
+      claim_batch_id: batchCode
+    }));
     return {
       batch,
       should_create_task: false,
-      needs_superadmin_approval: isHermesSource(source),
-      preview_status: isHermesSource(source) ? 'WAITING_SUPERADMIN_APPROVAL' : '',
-      claim_batch_id: emptyPreview?.claim_batch_id || batchCode,
+      needs_superadmin_approval: true,
+      preview_status: 'WAITING_SUPERADMIN_APPROVAL',
+      claim_batch_id: batchCode,
       skipped: batch.skipped,
       manual_review: classified.manualReview,
       preview_snapshot: snapshot
+    };
+  }
+
+  if (readyLimited.length === 0) {
+    return {
+      batch,
+      should_create_task: false,
+      needs_superadmin_approval: false,
+      preview_status: '',
+      claim_batch_id: batchCode,
+      skipped: batch.skipped,
+      manual_review: classified.manualReview
     };
   }
 

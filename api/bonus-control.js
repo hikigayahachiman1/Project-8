@@ -8,6 +8,7 @@ const sessionSecret = process.env.OPERATOR_SESSION_SECRET;
 const supabase = supabaseUrl && serviceRoleKey
   ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
   : null;
+const hermesReleaseEnabled = String(process.env.HERMES_RELEASE_ENABLED || 'false').toLowerCase() === 'true';
 
 function json(res, status, body) {
   return res.status(status).json(body);
@@ -1118,6 +1119,14 @@ async function hermesPreviewExport(body) {
 
 async function hermesPreviewRelease(body, authContext) {
   requireSuperadmin(authContext);
+  if (!hermesReleaseEnabled) {
+    return {
+      ok: false,
+      action: 'hermes_preview_release',
+      error: 'HERMES_RELEASE_DISABLED',
+      message: 'Hermes release sementara dinonaktifkan.'
+    };
+  }
   const claimBatchId = String(body.claim_batch_id || body.batch_code || '').trim();
   const operatorName = String(body.operator_name || authContext?.operator?.display_name || authContext?.operator?.username || 'Superadmin').trim();
   consoleReleaseStep('HERMES_RELEASE_STARTED', {
