@@ -321,6 +321,203 @@ async function createHermesTaskQueue(payload) {
   }
 }
 
+async function fetchHermesTaskApi(path, unavailableCode = 'HERMES_WORKER_UNAVAILABLE') {
+  const { baseUrl, token } = hermesTaskConfig();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`${baseUrl}${path}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json'
+      },
+      signal: controller.signal
+    });
+    const text = await response.text();
+    let body = {};
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch (error) {
+      body = { message: text };
+    }
+    if (!response.ok) {
+      throw errorWithCode(
+        response.status === 404 ? unavailableCode : 'HERMES_WORKER_REQUEST_FAILED',
+        body?.message || `Hermes worker API gagal. HTTP ${response.status}.`,
+        response.status === 404 ? 404 : 502,
+        { detail: body?.detail || body?.error || '', hermes_response: body }
+      );
+    }
+    return body;
+  } catch (error) {
+    if (error?.code) throw error;
+    const timeoutError = error?.name === 'AbortError';
+    throw errorWithCode(
+      'HERMES_WORKER_UNAVAILABLE',
+      timeoutError ? 'Hermes worker status timeout.' : 'Hermes tidak dapat dihubungi.',
+      502,
+      { detail: timeoutError ? 'TIMEOUT' : (error?.message || 'UNREACHABLE') }
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function taskListFromHermesResponse(body) {
+  if (Array.isArray(body)) return body;
+  if (Array.isArray(body?.tasks)) return body.tasks;
+  if (Array.isArray(body?.data)) return body.data;
+  if (Array.isArray(body?.data?.tasks)) return body.data.tasks;
+  if (Array.isArray(body?.results)) return body.results;
+  return [];
+}
+
+function normalizeHermesTask(task) {
+  const payload = task?.payload || task?.request || task?.input || {};
+  const result = task?.result || task?.output || {};
+  const summary = task?.summary || result?.summary || {};
+  return {
+    ...task,
+    task_id: task?.task_id || task?.id || '',
+    batch_code: task?.batch_code || payload?.batch_code || '',
+    claim_batch_id: task?.claim_batch_id || payload?.claim_batch_id || '',
+    bonus_date: task?.bonus_date || payload?.bonus_date || '',
+    status: String(task?.status || task?.task_status || 'PENDING').toUpperCase(),
+    item_count: Number(task?.item_count ?? payload?.items?.length ?? summary?.total_items ?? 0),
+    created_at: task?.created_at || task?.queued_at || '',
+    started_at: task?.started_at || '',
+    completed_at: task?.completed_at || '',
+    failed_at: task?.failed_at || '',
+    message: task?.message || task?.error || result?.message || '',
+    result_file: task?.result_file || result?.result_file || '',
+    batch_file: task?.batch_file || payload?.batch_file || '',
+    summary: {
+      approved_success: Number(summary?.approved_success ?? summary?.approved ?? 0),
+      manual_review: Number(summary?.manual_review ?? 0),
+      auto_rejected: Number(summary?.auto_rejected ?? summary?.rejected ?? 0),
+      failed: Number(summary?.failed ?? 0),
+      total_items: Number(summary?.total_items ?? task?.item_count ?? payload?.items?.length ?? 0),
+      member_id_mismatch: Number(summary?.member_id_mismatch ?? 0),
+      missing_member_id: Number(summary?.missing_member_id ?? 0)
+    }
+  };
+}
+
+function workerResultRows(body) {
+  if (Array.isArray(body)) return body;
+  if (Array.isArray(body?.items)) return body.items;
+  if (Array.isArray(body?.rows)) return body.rows;
+  if (Array.isArray(body?.results)) return body.results;
+  if (Array.isArray(body?.data)) return body.data;
+  if (Array.isArray(body?.data?.items)) return body.data.items;
+  if (Array.isArray(body?.result?.items)) return body.result.items;
+  return [];
+}
+
+function normalizeWorkerResultRow(row, index) {
+  return {
+    ...row,
+    No: index + 1,
+    login_id: row?.login_id || row?.login_key || '',
+    member_id: row?.member_id || '',
+    member_name: row?.member_name || row?.name || '',
+    amount_bo: Number(row?.amount_bo ?? row?.bonus_amount ?? row?.amount ?? 0),
+    remark: row?.remark || row?.note || '',
+    status: String(row?.status || row?.result_status || 'UNKNOWN').toUpperCase(),
+    reason: row?.reason || row?.message || row?.error || '',
+    ticket: row?.ticket || row?.trans_no || row?.transaction_number || ''
+  };
+}
+
+async function hermesWorkerTasks(authContext) {
+  requireSuperadmin(authContext);
+  const body = await fetchHermesTaskApi('/api/task-queue/tasks');
+  const tasks = taskListFromHermesResponse(body)
+    .map(normalizeHermesTask)
+    .sort((left, right) => new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime());
+  return {
+    ok: true,
+    action: 'hermes_worker_tasks',
+    connected: true,
+    count: tasks.length,
+    tasks,
+    message: tasks.length ? 'Status Hermes Worker dimuat.' : 'Belum ada task Hermes Worker.'
+  };
+}
+
+async function hermesWorkerResult(body, authContext) {
+  requireSuperadmin(authContext);
+  const taskId = String(body.task_id || '').trim();
+  const resultFile = String(body.result_file || '').trim();
+  if (!taskId && !resultFile) {
+    throw errorWithCode('TASK_RESULT_REQUIRED', 'task_id atau result_file wajib diisi.', 400);
+  }
+  const attempts = [];
+  if (taskId) {
+    attempts.push(`/api/task-queue/tasks/${encodeURIComponent(taskId)}/result`);
+    attempts.push(`/api/task-queue/tasks/${encodeURIComponent(taskId)}`);
+  }
+  if (resultFile) {
+    attempts.push(`/api/task-queue/results?result_file=${encodeURIComponent(resultFile)}`);
+  }
+  let lastError = null;
+  for (let index = 0; index < attempts.length; index++) {
+    const path = attempts[index];
+    try {
+      const result = await fetchHermesTaskApi(path, 'RESULT_ENDPOINT_NOT_AVAILABLE');
+      const rows = workerResultRows(result).map(normalizeWorkerResultRow);
+      const hasResultShape = rows.length > 0
+        || Boolean(result?.summary || result?.result?.summary || result?.items || result?.rows);
+      if (!hasResultShape && index < attempts.length - 1) continue;
+      return {
+        ok: true,
+        action: 'hermes_worker_result',
+        task_id: taskId || result?.task_id || '',
+        result_file: resultFile || result?.result_file || '',
+        summary: result?.summary || result?.result?.summary || {},
+        count: rows.length,
+        rows,
+        raw: result
+      };
+    } catch (error) {
+      lastError = error;
+      if (error?.code !== 'RESULT_ENDPOINT_NOT_AVAILABLE') throw error;
+    }
+  }
+  throw errorWithCode(
+    'RESULT_ENDPOINT_NOT_AVAILABLE',
+    'Endpoint detail result Hermes belum tersedia.',
+    404,
+    { detail: lastError?.message || '' }
+  );
+}
+
+async function hermesWorkerBatch(body, authContext) {
+  requireSuperadmin(authContext);
+  const batchFile = String(body.batch_file || '').trim();
+  if (!batchFile) throw errorWithCode('BATCH_FILE_REQUIRED', 'batch_file wajib diisi.', 400);
+  try {
+    const result = await fetchHermesTaskApi(
+      `/api/task-queue/batches?batch_file=${encodeURIComponent(batchFile)}`,
+      'BATCH_ENDPOINT_NOT_AVAILABLE'
+    );
+    const rows = workerResultRows(result).map(normalizeWorkerResultRow);
+    return {
+      ok: true,
+      action: 'hermes_worker_batch',
+      batch_file: batchFile,
+      count: rows.length,
+      rows,
+      raw: result
+    };
+  } catch (error) {
+    if (error?.code === 'BATCH_ENDPOINT_NOT_AVAILABLE') {
+      throw errorWithCode('BATCH_ENDPOINT_NOT_AVAILABLE', 'Endpoint batch file Hermes belum tersedia.', 404);
+    }
+    throw error;
+  }
+}
+
 async function updateWithColumnFallback(tableName, matchColumn, matchValue, payload, selectColumns = '*') {
   const current = { ...payload };
   for (let attempt = 0; attempt < 10; attempt++) {
@@ -1627,6 +1824,9 @@ export default async function handler(req, res) {
     if (action === 'hermes_preview_export') return json(res, 200, await hermesPreviewExport(body));
     if (action === 'hermes_preview_release') return json(res, 200, await hermesPreviewRelease(body, authContext));
     if (action === 'hermes_preview_cancel') return json(res, 200, await hermesPreviewCancel(body, authContext));
+    if (action === 'hermes_worker_tasks') return json(res, 200, await hermesWorkerTasks(authContext));
+    if (action === 'hermes_worker_result') return json(res, 200, await hermesWorkerResult(body, authContext));
+    if (action === 'hermes_worker_batch') return json(res, 200, await hermesWorkerBatch(body, authContext));
 
     return json(res, 400, { ok: false, error: 'UNKNOWN_ACTION', message: 'Action tidak dikenal.' });
   } catch (error) {
