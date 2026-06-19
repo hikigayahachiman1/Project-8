@@ -3645,13 +3645,18 @@
   function saveOperatorSession(token, operator) {
     localStorage.setItem(OPERATOR_TOKEN_KEY, token);
     localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(operator || {}));
+    localStorage.setItem('operator_role', String(operator?.role || ''));
     currentOperator = operator || null;
+    window.currentOperator = currentOperator;
   }
 
   function clearOperatorSession() {
     localStorage.removeItem(OPERATOR_TOKEN_KEY);
     localStorage.removeItem(OPERATOR_PROFILE_KEY);
+    localStorage.removeItem('operator_role');
+    sessionStorage.removeItem('operator_role');
     currentOperator = null;
+    window.currentOperator = null;
     stopOperatorActivityTracking();
     resetHermesWidget();
     const info = document.getElementById('operatorInfo');
@@ -3662,28 +3667,64 @@
   }
 
   function hasAuditAccess() {
-    return currentOperator && ['audit', 'admin', 'superadmin'].includes(currentOperator.role);
+    return ['audit', 'admin', 'superadmin'].includes(normalizeRole(activeRole()));
   }
 
   function isAdmin() {
-    return currentOperator && ['admin', 'superadmin'].includes(currentOperator.role);
+    return ['admin', 'superadmin'].includes(normalizeRole(activeRole()));
+  }
+
+  function normalizeRole(role) {
+    return String(role || '')
+      .toLowerCase()
+      .replace(/[\s_-]+/g, '');
+  }
+
+  function storedOperatorRole() {
+    try {
+      const profile = JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY) || '{}');
+      return profile?.role || '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function activeRole() {
+    return currentOperator?.role
+      || window.currentOperator?.role
+      || window.activeOperator?.role
+      || window.currentUser?.role
+      || window.operator?.role
+      || localStorage.getItem('operator_role')
+      || sessionStorage.getItem('operator_role')
+      || storedOperatorRole()
+      || '';
   }
 
   function isSuperAdmin() {
-    return String(currentOperator?.role || '').toLowerCase() === 'superadmin';
+    return normalizeRole(activeRole()) === 'superadmin';
   }
 
   function isSuperadmin() {
     return isSuperAdmin();
   }
 
+  function logRoleDebug() {
+    const role = activeRole();
+    console.log('[ROLE_DEBUG]', {
+      role,
+      normalizedRole: normalizeRole(role),
+      isSuperadmin: isSuperadmin()
+    });
+  }
+
   function applySuperadminVisibility() {
     const allowed = isSuperadmin();
     document.querySelectorAll('.superadmin-only').forEach(el => {
-      el.style.display = allowed ? '' : 'none';
+      el.style.display = allowed ? 'inline-flex' : 'none';
     });
     document.querySelectorAll('.superadmin-only-tab').forEach(el => {
-      el.style.display = allowed ? '' : 'none';
+      el.style.display = allowed ? 'inline-flex' : 'none';
     });
     if (!allowed && document.getElementById('panel-dashboard')?.classList.contains('active')) {
       const fallback = document.querySelector('.tool-tab[data-panel="parser"]')
@@ -4049,7 +4090,7 @@
     const dashboardTab = document.getElementById('dashboardTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
-    if (dashboardTab) dashboardTab.style.display = isSuperAdmin() ? '' : 'none';
+    if (dashboardTab) dashboardTab.style.display = isSuperAdmin() ? 'inline-flex' : 'none';
     if (!isSuperAdmin() && document.getElementById('panel-dashboard')?.classList.contains('active')) {
       document.querySelector('[data-panel="parser"]').click();
       if (currentOperator) showToast('Dashboard hanya untuk Superadmin.', 'error');
@@ -4107,12 +4148,15 @@
         throw new Error('invalid');
       }
       currentOperator = result.operator;
+      window.currentOperator = currentOperator;
       localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(result.operator));
+      localStorage.setItem('operator_role', String(result.operator?.role || ''));
       featureAccessLocks = {};
       featureLocksLoadedAt = 0;
       hideOperatorLogin();
       renderOperatorInfo();
       applyRoleAccess();
+      logRoleDebug();
       activateDefaultToolPanel();
       fetchFeatureLocksInBackground();
       startOperatorActivityTracking();
@@ -4151,6 +4195,7 @@
       hideOperatorLogin();
       renderOperatorInfo();
       applyRoleAccess();
+      logRoleDebug();
       activateDefaultToolPanel();
       fetchFeatureLocksInBackground(true);
       startOperatorActivityTracking();
