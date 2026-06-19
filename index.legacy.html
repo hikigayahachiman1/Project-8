@@ -3210,10 +3210,10 @@
           <div class="bonus-actions">
             <button id="dashboardRefreshHermesBtn" class="primary">Refresh Hermes Preview</button>
             <button id="dashboardCopyHermesExcelBtn" class="ghost">Copy Excel Preview</button>
-            <button id="dashboardReleaseHermesBtn" class="success" disabled title="Hermes release sementara dinonaktifkan.">Approve / Release to Worker</button>
+            <button id="dashboardReleaseHermesBtn" class="success">Approve / Release to Worker</button>
             <button id="dashboardCancelHermesBtn" class="danger" disabled title="Hermes cancel sementara dinonaktifkan.">Cancel Preview</button>
           </div>
-          <div id="dashboardHermesNote" class="source-note">Hermes release sementara dinonaktifkan.</div>
+          <div id="dashboardHermesNote" class="source-note">Hermes preview queue belum dimuat.</div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -6652,7 +6652,7 @@
     try {
       const result = await bonusControlApi('hermes_preview_list', { bonus_date: dashboardDateValue() });
       const note = document.getElementById('dashboardHermesNote');
-      if (note) note.textContent = `${result.message || 'Hermes preview queue dimuat.'} Hermes release sementara dinonaktifkan.`;
+      if (note) note.textContent = result.message || 'Hermes preview queue dimuat.';
       const rows = Array.isArray(result.rows) ? result.rows : [];
       dashboardRenderHermesList(rows);
       showToast(result.message || 'Hermes preview status dimuat.', rows?.length ? 'success' : '');
@@ -6688,8 +6688,6 @@
 
   async function dashboardReleaseHermesPreview() {
     if (!dashboardRequireSuperadmin()) return;
-    showToast('Hermes release sementara dinonaktifkan.', 'error');
-    return;
     const claimBatchId = dashboardHermesSelectedBatch?.claim_batch_id || dashboardHermesSelectedBatch?.batch_code || '';
     if (!claimBatchId) return showToast('Pilih preview dulu, lalu klik Lihat Detail.', 'error');
     if (!window.confirm(`Approve dan kirim preview ${claimBatchId} ke Hermes task queue? BOT tetap berjalan di Hermes VPS, bukan dari Vercel.`)) return;

@@ -8,7 +8,7 @@ const sessionSecret = process.env.OPERATOR_SESSION_SECRET;
 const supabase = supabaseUrl && serviceRoleKey
   ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
   : null;
-const hermesReleaseEnabled = String(process.env.HERMES_RELEASE_ENABLED || 'false').toLowerCase() === 'true';
+const hermesReleaseEnabled = String(process.env.HERMES_RELEASE_ENABLED || 'true').toLowerCase() === 'true';
 
 function json(res, status, body) {
   return res.status(status).json(body);
@@ -160,6 +160,49 @@ function errorWithCode(code, message, statusCode = 400, extra = {}) {
   error.statusCode = statusCode;
   Object.assign(error, extra);
   return error;
+}
+
+function normalizeHermesLoginKey(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function addDaysIso(date, days) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function missingColumnFromError(error) {
+  if (error?.code !== '42703') return '';
+  return String(error.message || error.details || '').match(/column "([^"]+)"/i)?.[1] || '';
+}
+
+async function insertWithColumnFallback(tableName, payloads, selectColumns = 'id') {
+  let current = Array.isArray(payloads)
+    ? payloads.map(payload => ({ ...payload }))
+    : [{ ...payloads }];
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .insert(current)
+      .select(selectColumns);
+    if (!error) return data || [];
+    const column = missingColumnFromError(error);
+    if (!column || !current.some(payload => column in payload)) throw error;
+    current = current.map(({ [column]: _removed, ...payload }) => payload);
+  }
+  throw new Error(`Gagal insert ${tableName}.`);
+}
+
+async function mapConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 function hermesTaskConfig() {
@@ -428,6 +471,228 @@ async function fetchHermesPreviewItems(claimBatchId) {
     .order('id', { ascending: true });
   if (error) throw error;
   return data || [];
+}
+
+async function fetchExistingBonusRowsForHermes(bonusDate, items) {
+  const loginKeys = [...new Set((items || [])
+    .map(item => normalizeHermesLoginKey(item.login_key || item.login_id))
+    .filter(Boolean))];
+  if (!loginKeys.length) return new Map();
+  const { data, error } = await supabase
+    .from('bonus_done_daily')
+    .select('id, bonus_date, login_id, login_key, bonus_type, bonus_status, claim_batch_id, claim_owner, operator_name, pending_expires_at')
+    .eq('bonus_date', bonusDate)
+    .eq('bonus_type', 'BONUS_HARIAN')
+    .in('login_key', loginKeys);
+  if (error) throw error;
+  const map = new Map();
+  (data || []).forEach(row => {
+    const key = normalizeHermesLoginKey(row.login_key || row.login_id);
+    if (key && !map.has(key)) map.set(key, row);
+  });
+  return map;
+}
+
+async function fetchActiveProcessLockForHermes(bonusDate) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('bonus_process_locks')
+    .select('id, bonus_date, lock_status, claim_batch_id, claim_owner, operator_name, pending_expires_at')
+    .eq('bonus_date', bonusDate)
+    .eq('lock_status', 'PENDING')
+    .gte('pending_expires_at', now)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function classifyHermesReleaseItems(items, existingByLoginKey, activeLock) {
+  const nowMs = Date.now();
+  const safe = [];
+  const skipped = [];
+  const seen = new Set();
+  (items || []).forEach(item => {
+    const loginKey = normalizeHermesLoginKey(item.login_key || item.login_id);
+    if (!loginKey || seen.has(loginKey)) {
+      skipped.push({ ...item, release_status: 'FAILED', release_reason: 'DUPLICATE_OR_EMPTY_LOGIN_KEY' });
+      return;
+    }
+    seen.add(loginKey);
+    if (activeLock) {
+      skipped.push({
+        ...item,
+        release_status: 'PENDING_OTHER_BATCH',
+        release_reason: 'PENDING_OTHER_BATCH',
+        source_claim_batch_id: activeLock.claim_batch_id || ''
+      });
+      return;
+    }
+    const existing = existingByLoginKey.get(loginKey);
+    if (!existing) {
+      safe.push({ item, existing: null, mode: 'INSERT' });
+      return;
+    }
+    const status = String(existing.bonus_status || '').toUpperCase();
+    const pendingMs = existing.pending_expires_at ? new Date(existing.pending_expires_at).getTime() : 0;
+    if (status === 'DONE') {
+      skipped.push({ ...item, release_status: 'SKIPPED_ALREADY_GIVEN', release_reason: 'SKIPPED_ALREADY_GIVEN' });
+      return;
+    }
+    if (status === 'PENDING' && pendingMs >= nowMs) {
+      skipped.push({
+        ...item,
+        release_status: 'PENDING_OTHER_BATCH',
+        release_reason: 'PENDING_OTHER_BATCH',
+        source_claim_batch_id: existing.claim_batch_id || ''
+      });
+      return;
+    }
+    if (status === 'EXPIRED' || status === 'PENDING') {
+      safe.push({ item, existing, mode: 'REUSE' });
+      return;
+    }
+    skipped.push({ ...item, release_status: 'FAILED', release_reason: `EXISTING_STATUS_${status || 'EMPTY'}` });
+  });
+  return { safe, skipped };
+}
+
+function hermesPendingPayload(entry, batchRow, operatorName, now, pendingExpiresAt) {
+  const item = entry.item;
+  return {
+    bonus_date: batchRow.bonus_date,
+    login_id: item.login_id || item.login_key || '',
+    login_key: normalizeHermesLoginKey(item.login_key || item.login_id),
+    member_id: item.member_id || '',
+    member_name: item.member_name || '',
+    bonus_type: 'BONUS_HARIAN',
+    bonus_amount: Number(item.amount_bo || 0),
+    remark: item.remark || item.note || '',
+    source: 'hermes-superadmin-release',
+    operator_name: operatorName,
+    bonus_status: 'PENDING',
+    claim_owner: 'HERMES-WORKER',
+    claim_batch_id: batchRow.claim_batch_id,
+    claimed_at: now,
+    pending_expires_at: pendingExpiresAt,
+    expires_at: pendingExpiresAt,
+    done_at: null,
+    done_by_name: null,
+    finalized_note: entry.mode === 'REUSE' ? 'Reused expired row for Hermes release' : null,
+    updated_at: now
+  };
+}
+
+async function updateReusableHermesRow(entry, payload) {
+  const current = { ...payload };
+  const releaseStartedAt = payload.claimed_at;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const { data, error } = await supabase
+      .from('bonus_done_daily')
+      .update(current)
+      .eq('id', entry.existing.id)
+      .or(`bonus_status.eq.EXPIRED,and(bonus_status.eq.PENDING,pending_expires_at.lt.${releaseStartedAt}),and(bonus_status.eq.PENDING,pending_expires_at.is.null)`)
+      .select('id, login_key, bonus_status, claim_batch_id')
+      .maybeSingle();
+    if (!error) return data;
+    const column = missingColumnFromError(error);
+    if (!column || !(column in current)) throw error;
+    delete current[column];
+  }
+  throw new Error('Gagal reuse row expired Hermes.');
+}
+
+async function reserveHermesReleaseBatch(batchRow, safeEntries, operatorName) {
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
+  const pendingExpiresAt = addDaysIso(nowDate, 2);
+  const claimBatchId = batchRow.claim_batch_id;
+  const lockRows = await insertWithColumnFallback('bonus_process_locks', [{
+    bonus_date: batchRow.bonus_date,
+    lock_status: 'PENDING',
+    claim_owner: 'HERMES-WORKER',
+    claim_batch_id: claimBatchId,
+    operator_name: operatorName,
+    started_at: now,
+    updated_at: now,
+    pending_expires_at: pendingExpiresAt,
+    expires_at: pendingExpiresAt
+  }], 'id, bonus_date, lock_status, claim_batch_id');
+
+  const reusable = safeEntries.filter(entry => entry.mode === 'REUSE');
+  const insertable = safeEntries.filter(entry => entry.mode === 'INSERT');
+  const reservedIds = [];
+  const updated = await mapConcurrency(reusable, 8, async entry => {
+    const row = await updateReusableHermesRow(
+      entry,
+      hermesPendingPayload(entry, batchRow, operatorName, now, pendingExpiresAt)
+    );
+    if (!row) throw errorWithCode('HERMES_RESERVE_RACE', 'Status item berubah saat proses reserve.', 409);
+    return { row, item: entry.item };
+  });
+  updated.forEach(result => reservedIds.push(result.row.id));
+
+  if (insertable.length) {
+    const inserted = await insertWithColumnFallback(
+      'bonus_done_daily',
+      insertable.map(entry => hermesPendingPayload(entry, batchRow, operatorName, now, pendingExpiresAt)),
+      'id, login_key, bonus_status, claim_batch_id'
+    );
+    if (inserted.length !== insertable.length) {
+      throw errorWithCode('HERMES_RESERVE_INCOMPLETE', 'Sebagian item baru gagal di-reserve.', 409);
+    }
+    inserted.forEach(row => reservedIds.push(row.id));
+  }
+
+  return {
+    now,
+    pending_expires_at: pendingExpiresAt,
+    lock_id: lockRows[0]?.id || null,
+    reserved_ids: reservedIds,
+    reserved_items: [...updated.map(result => result.item), ...insertable.map(entry => entry.item)]
+  };
+}
+
+async function rollbackHermesReserve(claimBatchId, reason) {
+  const now = new Date().toISOString();
+  const { error: rowError } = await supabase
+    .from('bonus_done_daily')
+    .update({
+      bonus_status: 'EXPIRED',
+      finalized_note: reason || 'Hermes task create gagal setelah reserve',
+      updated_at: now
+    })
+    .eq('claim_batch_id', claimBatchId)
+    .eq('claim_owner', 'HERMES-WORKER')
+    .eq('bonus_status', 'PENDING');
+  if (rowError && rowError.code === '42703') {
+    await supabase
+      .from('bonus_done_daily')
+      .update({ bonus_status: 'EXPIRED', updated_at: now })
+      .eq('claim_batch_id', claimBatchId)
+      .eq('claim_owner', 'HERMES-WORKER')
+      .eq('bonus_status', 'PENDING');
+  }
+  await supabase
+    .from('bonus_process_locks')
+    .update({ lock_status: 'EXPIRED', updated_at: now })
+    .eq('claim_batch_id', claimBatchId)
+    .eq('claim_owner', 'HERMES-WORKER')
+    .eq('lock_status', 'PENDING');
+}
+
+async function updateHermesSkippedPreviewItems(skipped) {
+  if (!skipped.length) return;
+  await mapConcurrency(skipped, 8, entry => supabase
+    .from('hermes_preview_items')
+    .update({
+      status: entry.release_status,
+      reason: entry.release_reason,
+      source_claim_batch_id: entry.source_claim_batch_id || '',
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', entry.id));
 }
 
 async function fetchHermesLocks(bonusDate = '') {
@@ -1179,52 +1444,59 @@ async function hermesPreviewRelease(body, authContext) {
     };
   }
 
-  try {
-    const now = new Date().toISOString();
-    const taskPayload = {
-      type: 'RUN_AUTO_REVIEW',
-      source: 'parser-superadmin-release',
-      batch_code: batchRow.batch_code || claimBatchId,
-      claim_batch_id: batchRow.claim_batch_id || claimBatchId,
-      bonus_date: batchRow.bonus_date,
-      mode: 'BONUS_HARIAN',
-      items: readyRows.map(rowToHermesTaskItem),
-      meta: {
-        released_by: operatorName,
-        released_role: authContext?.role || body.role || '',
-        released_at: now
-      }
-    };
-    const taskResult = await createHermesTaskQueue(taskPayload);
-    taskResult.released_by = operatorName;
-    const updatedLock = await updateHermesReleasedLock(batchRow.claim_batch_id || claimBatchId, operatorName, taskResult, now);
-    const updatedPreviewBatch = await updateHermesReleasedPreviewBatch(batchRow.claim_batch_id || claimBatchId, taskResult, now);
-    const releasedItemRows = await markHermesPreviewItemsReleased(batchRow.claim_batch_id || claimBatchId, taskResult.task_id, now);
+  const activeLock = await fetchActiveProcessLockForHermes(batchRow.bonus_date);
+  const existingByLoginKey = await fetchExistingBonusRowsForHermes(batchRow.bonus_date, readyRows);
+  const validation = classifyHermesReleaseItems(readyRows, existingByLoginKey, activeLock);
+  await updateHermesSkippedPreviewItems(validation.skipped);
+  consoleReleaseStep('HERMES_RELEASE_REVALIDATED', {
+    claim_batch_id: batchRow.claim_batch_id || claimBatchId,
+    safe_items: validation.safe.length,
+    skipped_done: validation.skipped.filter(item => item.release_status === 'SKIPPED_ALREADY_GIVEN').length,
+    skipped_pending: validation.skipped.filter(item => item.release_status === 'PENDING_OTHER_BATCH').length,
+    active_lock: activeLock?.claim_batch_id || ''
+  });
+  if (!validation.safe.length) {
     return {
-      ok: true,
+      ok: false,
       action: 'hermes_preview_release',
-      status: 'RELEASED_TO_WORKER',
-      batch_code: batchRow.batch_code || claimBatchId,
+      error: 'NO_READY_ITEMS',
+      message: 'Tidak ada item READY untuk dikirim ke worker.',
       claim_batch_id: batchRow.claim_batch_id || claimBatchId,
-      task_id: taskResult.task_id,
-      released_items: readyRows.length,
-      updated_preview_items: releasedItemRows.length,
-      task_response: taskResult.response,
-      lock: updatedLock,
-      batch: updatedPreviewBatch,
-      task_payload: {
-        type: 'RUN_AUTO_REVIEW',
-        source: 'parser-superadmin-release',
-        mode: 'BONUS_HARIAN',
-        batch_code: batchRow.batch_code || claimBatchId,
-        claim_batch_id: batchRow.claim_batch_id || claimBatchId,
-        bonus_date: batchRow.bonus_date,
-        items: taskPayload.items,
-        meta: taskPayload.meta
-      },
-      message: 'Task berhasil dikirim ke Hermes. Local Worker akan memproses saat aktif.'
+      batch_code: batchRow.batch_code || claimBatchId,
+      preview_status: previewStatus,
+      skipped_already_given: validation.skipped.filter(item => item.release_status === 'SKIPPED_ALREADY_GIVEN').length,
+      pending_other_batch: validation.skipped.filter(item => item.release_status === 'PENDING_OTHER_BATCH').length
     };
+  }
+
+  let reserve;
+  try {
+    reserve = await reserveHermesReleaseBatch(batchRow, validation.safe, operatorName);
   } catch (error) {
+    await rollbackHermesReserve(batchRow.claim_batch_id || claimBatchId, 'Hermes reserve gagal sebelum task dibuat');
+    throw errorWithCode('HERMES_RESERVE_FAILED', error.message || 'Gagal reserve item Hermes.', 409);
+  }
+
+  const taskPayload = {
+    type: 'RUN_AUTO_REVIEW',
+    source: 'parser-superadmin-release',
+    batch_code: batchRow.batch_code || claimBatchId,
+    claim_batch_id: batchRow.claim_batch_id || claimBatchId,
+    bonus_date: batchRow.bonus_date,
+    mode: 'BONUS_HARIAN',
+    items: reserve.reserved_items.map(rowToHermesTaskItem),
+    meta: {
+      released_by: operatorName,
+      released_role: authContext?.role || body.role || '',
+      released_at: reserve.now
+    }
+  };
+
+  let taskResult;
+  try {
+    taskResult = await createHermesTaskQueue(taskPayload);
+  } catch (error) {
+    await rollbackHermesReserve(batchRow.claim_batch_id || claimBatchId, 'Hermes task create gagal setelah reserve');
     await saveHermesReleaseError(batchRow.claim_batch_id || claimBatchId, error);
     consoleReleaseStep('HERMES_TASK_CREATE_FAILED', {
       claim_batch_id: batchRow.claim_batch_id || claimBatchId,
@@ -1241,6 +1513,37 @@ async function hermesPreviewRelease(body, authContext) {
       }
     );
   }
+
+  taskResult.released_by = operatorName;
+  let updatedPreviewBatch = null;
+  let updatedLock = null;
+  let releasedItemRows = [];
+  let finalizeWarning = '';
+  try {
+    updatedPreviewBatch = await updateHermesReleasedPreviewBatch(batchRow.claim_batch_id || claimBatchId, taskResult, reserve.now);
+    updatedLock = await updateHermesReleasedLock(batchRow.claim_batch_id || claimBatchId, operatorName, taskResult, reserve.now);
+    releasedItemRows = await markHermesPreviewItemsReleased(batchRow.claim_batch_id || claimBatchId, taskResult.task_id, reserve.now);
+  } catch (error) {
+    finalizeWarning = error.message || 'Task sudah dibuat, tetapi sebagian metadata release gagal diperbarui.';
+    console.error('bonus-control Hermes post-task finalize warning:', error);
+  }
+  return {
+    ok: true,
+    action: 'hermes_preview_release',
+    status: 'RELEASED_TO_WORKER',
+    batch_code: batchRow.batch_code || claimBatchId,
+    claim_batch_id: batchRow.claim_batch_id || claimBatchId,
+    task_id: taskResult.task_id,
+    released_items: reserve.reserved_items.length,
+    skipped_items: validation.skipped.length,
+    updated_preview_items: releasedItemRows.length,
+    task_response: taskResult.response,
+    lock: updatedLock,
+    batch: updatedPreviewBatch,
+    warning: finalizeWarning,
+    task_payload: taskPayload,
+    message: 'Task berhasil dikirim ke Hermes. Local Worker akan memproses saat aktif.'
+  };
 }
 
 async function hermesPreviewCancel(body, authContext) {
