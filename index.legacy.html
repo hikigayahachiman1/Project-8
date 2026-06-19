@@ -190,6 +190,11 @@
 
   .hermes-widget.show { display: flex; }
 
+  /* Chat bubble web dinonaktifkan; Hermes Telegram dan Dashboard tetap aktif. */
+  #hermesWidget {
+    display: none !important;
+  }
+
   .hermes-fab {
     min-width: 0;
     width: 58px;
@@ -3428,6 +3433,7 @@
   const OPERATOR_PROFILE_KEY = 'qris_operator_profile_v1';
   const OPERATOR_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
   const OPERATOR_SESSION_TOUCH_THROTTLE_MS = 60 * 1000;
+  const HERMES_WEB_CHAT_ENABLED = false;
   const bonusRemoteDoneCache = {};
   const bonusRemotePendingCache = {};
   const bonusAdjustmentDoneCache = {};
@@ -3891,6 +3897,11 @@
     const subtitle = document.getElementById('hermesSubtitle');
     const messages = document.getElementById('hermesMessages');
     if (!widget) return;
+    if (!HERMES_WEB_CHAT_ENABLED) {
+      resetHermesWidget();
+      widget.setAttribute('aria-hidden', 'true');
+      return;
+    }
     if (!currentOperator || !isSuperAdmin()) {
       resetHermesWidget();
       return;
