@@ -178,121 +178,6 @@
     font-weight: 800;
   }
 
-  .hermes-widget {
-    position: fixed;
-    right: 22px;
-    bottom: 22px;
-    z-index: 900;
-    display: none;
-    align-items: flex-end;
-    gap: 12px;
-  }
-
-  .hermes-widget.show { display: flex; }
-
-  .hermes-fab {
-    min-width: 0;
-    width: 58px;
-    height: 58px;
-    border-radius: 20px;
-    padding: 0;
-    box-shadow: 0 18px 42px rgba(39,245,255,0.22), 0 0 24px rgba(155,92,255,0.18);
-  }
-
-  .hermes-panel {
-    display: none;
-    width: min(380px, calc(100vw - 32px));
-    max-height: min(620px, calc(100vh - 100px));
-    border: 1px solid rgba(143,178,255,0.26);
-    border-radius: 24px;
-    background:
-      linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04)),
-      rgba(9, 15, 33, 0.94);
-    box-shadow: 0 24px 80px rgba(0,0,0,0.48), 0 0 28px rgba(39,245,255,0.12);
-    overflow: hidden;
-  }
-
-  .hermes-widget.open .hermes-panel {
-    display: grid;
-    grid-template-rows: auto minmax(180px, 1fr) auto;
-  }
-
-  .hermes-head {
-    padding: 16px 17px;
-    border-bottom: 1px solid rgba(143,178,255,0.16);
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: center;
-  }
-
-  .hermes-title {
-    font-family: 'Fraunces', serif;
-    font-size: 1.08rem;
-    font-weight: 800;
-  }
-
-  .hermes-subtitle {
-    margin-top: 3px;
-    color: var(--ink-soft);
-    font-size: 0.78rem;
-  }
-
-  .hermes-close {
-    min-width: 0;
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    border-radius: 999px;
-  }
-
-  .hermes-messages {
-    padding: 16px;
-    overflow: auto;
-    display: grid;
-    gap: 10px;
-  }
-
-  .hermes-message {
-    padding: 10px 12px;
-    border-radius: 16px;
-    border: 1px solid rgba(143,178,255,0.14);
-    background: rgba(255,255,255,0.055);
-    color: var(--ink-soft);
-    line-height: 1.55;
-    white-space: pre-wrap;
-  }
-
-  .hermes-message.user {
-    background: rgba(39,245,255,0.12);
-    color: var(--ink);
-    border-color: rgba(39,245,255,0.22);
-  }
-
-  .hermes-message.error {
-    background: rgba(255,79,139,0.12);
-    color: #ffcad8;
-    border-color: rgba(255,79,139,0.30);
-  }
-
-  .hermes-form {
-    padding: 14px;
-    border-top: 1px solid rgba(143,178,255,0.16);
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-  }
-
-  .hermes-form input {
-    min-height: 44px;
-    border-radius: 16px;
-    border: 1px solid rgba(143,178,255,0.24);
-    background: rgba(3,7,18,0.58);
-    color: var(--ink);
-    padding: 10px 12px;
-    outline: none;
-  }
-
   .login-orb {
     position: absolute;
     border-radius: 999px;
@@ -624,6 +509,8 @@
   .role-badge.protected { color: #ffb3c1; border-color: rgba(255,79,139,0.46); background: rgba(255,79,139,0.14); margin-left: 6px; }
   .status-badge.active { color: var(--accent-3); border-color: rgba(0,255,168,0.38); background: rgba(0,255,168,0.10); }
   .status-badge.inactive { color: #ffb3c1; border-color: rgba(255,79,139,0.42); background: rgba(255,79,139,0.12); }
+  .status-badge.pending { color: #ffd166; border-color: rgba(255,209,102,0.42); background: rgba(255,209,102,0.12); }
+  .status-badge.warning { color: #c7b7ff; border-color: rgba(199,183,255,0.42); background: rgba(199,183,255,0.12); }
 
   .row-actions {
     display: flex;
@@ -1420,6 +1307,215 @@
     color: #ffe0a3;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.62rem;
+  }
+
+  .superadmin-only,
+  .superadmin-only-tab {
+    display: none;
+  }
+
+  .admin-only {
+    display: none;
+  }
+
+  .reset-bonus-dialog {
+    position: fixed;
+    inset: 0;
+    width: min(520px, calc(100vw - 32px));
+    max-height: min(720px, calc(100vh - 32px));
+    margin: auto;
+    padding: 0;
+    overflow: auto;
+    border: 1px solid rgba(39, 245, 255, 0.42);
+    border-radius: 8px;
+    background: #11152a;
+    color: var(--ink);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.64), 0 0 32px rgba(39, 245, 255, 0.12);
+  }
+
+  .reset-bonus-dialog::backdrop {
+    background: rgba(4, 7, 18, 0.82);
+  }
+
+  .reset-dialog-body {
+    position: relative;
+    padding: 28px;
+  }
+
+  .reset-dialog-body::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 28px;
+    right: 28px;
+    height: 3px;
+    background: #27f5ff;
+    box-shadow: 0 0 16px rgba(39, 245, 255, 0.5);
+  }
+
+  .reset-dialog-kicker {
+    margin: 2px 0 7px;
+    color: #27f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .reset-dialog-body h3 {
+    margin: 0;
+    font-size: 1.2rem;
+  }
+
+  .reset-dialog-subtitle {
+    margin: 8px 0 0;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    line-height: 1.55;
+  }
+
+  .reset-warning {
+    padding: 14px 16px;
+    margin: 18px 0;
+    border: 1px solid rgba(255, 77, 109, 0.34);
+    border-left: 3px solid #ff4d6d;
+    border-radius: 6px;
+    background: #231628;
+    color: #ffe4e9;
+    font-size: 0.79rem;
+    line-height: 1.55;
+  }
+
+  .reset-impact-title {
+    margin-bottom: 10px;
+    color: #ff9bab;
+    font-weight: 800;
+  }
+
+  .reset-impact-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .reset-impact-stat {
+    padding: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 5px;
+    background: #15192c;
+  }
+
+  .reset-impact-stat span {
+    display: block;
+    color: #9da9c8;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+  }
+
+  .reset-impact-stat strong {
+    display: block;
+    margin-top: 4px;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+  }
+
+  .reset-challenge-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .reset-challenge-grid label {
+    display: grid;
+    gap: 7px;
+    padding: 13px 14px;
+    border: 1px solid rgba(39, 245, 255, 0.14);
+    border-radius: 6px;
+    background: #0c1122;
+    color: #c8d1e8;
+    font-size: 0.78rem;
+  }
+
+  .reset-challenge-grid input[type="text"],
+  .reset-challenge-grid input[type="number"] {
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 12px;
+    border: 1px solid rgba(142, 158, 199, 0.34);
+    border-radius: 6px;
+    outline: none;
+    background: #080d1b;
+    color: #f2f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+  }
+
+  .reset-challenge-grid input[type="text"]:focus,
+  .reset-challenge-grid input[type="number"]:focus {
+    border-color: #27f5ff;
+    box-shadow: 0 0 0 3px rgba(39, 245, 255, 0.1);
+  }
+
+  .reset-step-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #f2f5ff;
+    font-weight: 800;
+  }
+
+  .reset-step-number {
+    display: inline-grid;
+    width: 23px;
+    height: 23px;
+    place-items: center;
+    flex: 0 0 23px;
+    border: 1px solid rgba(39, 245, 255, 0.46);
+    border-radius: 50%;
+    color: #27f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.66rem;
+  }
+
+  .reset-confirm-check {
+    display: flex !important;
+    grid-template-columns: none;
+    align-items: flex-start;
+    gap: 9px !important;
+  }
+
+  .reset-confirm-check input {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    margin-top: 2px;
+    accent-color: #27f5ff;
+  }
+
+  .reset-dialog-error {
+    min-height: 18px;
+    margin-top: 10px;
+    color: #ff9bab;
+    font-size: 0.76rem;
+  }
+
+  .reset-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .reset-dialog-actions button {
+    min-height: 42px;
+  }
+
+  @media (max-width: 560px) {
+    .reset-dialog-body { padding: 24px 18px 20px; }
+    .reset-dialog-body::before { left: 18px; right: 18px; }
+    .reset-impact-stats { grid-template-columns: 1fr; }
+    .reset-dialog-actions { flex-direction: column-reverse; }
+    .reset-dialog-actions button { width: 100%; }
   }
 
   .locked-access-note {
@@ -2422,10 +2518,6 @@
     .qris-parser-mode { display: grid; grid-template-columns: 1fr; width: 100%; }
     .controls { align-items: stretch; }
     button, select { width: 100%; }
-    .hermes-widget { right: 14px; bottom: 14px; }
-    .hermes-fab { width: 58px; flex: 0 0 58px; }
-    .hermes-close { width: 34px; }
-    .hermes-form button { width: auto; }
     th, td { padding: 11px 12px; }
   }
 </style>
@@ -2458,23 +2550,35 @@
       </div>
     </div>
   </div>
-  <div id="hermesWidget" class="hermes-widget" aria-live="polite">
-    <div class="hermes-panel">
-      <div class="hermes-head">
-        <div>
-          <div id="hermesTitle" class="hermes-title">Hermes Superadmin Debug</div>
-          <div id="hermesSubtitle" class="hermes-subtitle">Tanya panduan kerja Parser QRIS.</div>
-        </div>
-        <button id="hermesCloseBtn" class="hermes-close ghost" type="button" title="Tutup Hermes">×</button>
+  <dialog id="bonusResetDialog" class="reset-bonus-dialog">
+    <div class="reset-dialog-body">
+      <div class="reset-dialog-kicker">Admin Security Check</div>
+      <h3>Konfirmasi Reset Bonus Supabase</h3>
+      <p class="reset-dialog-subtitle">Verifikasi tiga langkah diperlukan sebelum data Bonus Harian dihapus.</p>
+      <div id="bonusResetImpact" class="reset-warning"></div>
+      <div class="reset-challenge-grid">
+        <label class="reset-confirm-check">
+          <input id="bonusResetAcknowledge" type="checkbox">
+          <span><span class="reset-step-title"><span class="reset-step-number">1</span>Periksa dampak reset</span><br>Saya memahami data Bonus Harian pada tanggal ini akan dihapus dari Supabase dan tidak dapat dipulihkan dari tombol ini.</span>
+        </label>
+        <label>
+          <span class="reset-step-title"><span class="reset-step-number">2</span>Verifikasi angka</span>
+          <span>Jawab challenge: <strong id="bonusResetChallengeLabel">-</strong></span>
+          <input id="bonusResetChallengeAnswer" type="number" inputmode="numeric" autocomplete="off" placeholder="Masukkan jawaban">
+        </label>
+        <label>
+          <span class="reset-step-title"><span class="reset-step-number">3</span>Konfirmasi perintah</span>
+          <span>Ketik <strong>RESET BONUS</strong> untuk melanjutkan.</span>
+          <input id="bonusResetPhrase" type="text" autocomplete="off" placeholder="RESET BONUS">
+        </label>
       </div>
-      <div id="hermesMessages" class="hermes-messages"></div>
-      <form id="hermesForm" class="hermes-form">
-        <input id="hermesInput" type="text" maxlength="2000" placeholder="Tulis pertanyaan..." autocomplete="off">
-        <button id="hermesSendBtn" class="primary" type="submit">Kirim</button>
-      </form>
+      <div id="bonusResetDialogError" class="reset-dialog-error"></div>
+      <div class="reset-dialog-actions">
+        <button id="bonusResetCancelBtn" class="ghost" type="button">Batal</button>
+        <button id="bonusResetConfirmBtn" class="danger" type="button">Reset Data Supabase</button>
+      </div>
     </div>
-    <button id="hermesToggleBtn" class="hermes-fab primary" type="button" title="Buka Hermes">Hermes</button>
-  </div>
+  </dialog>
   <div class="container">
     <header>
       <div class="dashboard-brand">
@@ -2498,7 +2602,6 @@
       <button class="tool-tab active" data-panel="parser">Parser QRIS</button>
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" data-panel="claim-mahjong">Klaim Mahjong</button>
-      <button class="tool-tab" id="dashboardTab" data-panel="dashboard" style="display:none;">Dashboard</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
       <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
@@ -2684,6 +2787,34 @@
         </div>
       </section>
     </div>
+
+    <section class="card" style="margin-top:24px;" id="telegramParserInputSection">
+      <div class="card-title">Input dari Telegram</div>
+      <div class="card-desc">Batch deposit dari Telegram Parser QRIS. Bagian ini hanya menampilkan hasil ingest dan tidak mengubah input Parser QRIS manual.</div>
+      <div class="bonus-actions">
+        <button type="button" id="telegramParserRefreshBtn" class="ghost">Refresh Batch Telegram</button>
+      </div>
+      <div id="telegramParserNote" class="source-note">Belum memuat batch Telegram Parser QRIS.</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Batch Code</th><th>Tanggal Bonus</th><th>Source</th><th>Status</th><th class="num">Parsed</th><th class="num">Ready</th><th class="num">Skipped</th><th class="num">Manual Review</th><th>Detail</th></tr></thead>
+          <tbody id="telegramParserBatchTable"><tr><td colspan="9" class="empty">Klik Refresh Batch Telegram untuk memuat data.</td></tr></tbody>
+        </table>
+      </div>
+      <div id="telegramParserDetail" style="display:none; margin-top:18px;">
+        <div class="card-title">Detail Batch Telegram</div>
+        <div id="telegramParserDetailNote" class="source-note"></div>
+        <div class="bonus-actions">
+          <button type="button" id="telegramParserCancelBtn" class="danger superadmin-only" style="display:none;">Cancel Preview</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Application Time</th><th>Login ID</th><th>Member</th><th class="num">Nominal</th><th class="num">Fee</th><th class="num">Total</th><th>Status</th></tr></thead>
+            <tbody id="telegramParserDepositDetailTable"><tr><td colspan="8" class="empty">Pilih batch untuk melihat detail.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
     </section>
 
     <section class="tool-panel" id="panel-bonus">
@@ -2695,13 +2826,14 @@
           <div class="source-note" id="bonusSourceNote">Belum ada data dari Parser QRIS.</div>
           <div class="bonus-actions">
             <button id="bonusProcessBtn" class="primary">Proses Bonus Harian</button>
-            <button id="bonusExpirePendingBtn" class="ghost">Bersihkan Pending Expired</button>
-            <button id="bonusRefreshStatusBtn" class="ghost">Refresh Status Bonus</button>
-            <button id="bonusPendingActiveBtn" class="ghost">Lihat Pending Aktif</button>
-            <button id="bonusBatchDoneBtn" class="success">Tandai Batch DONE</button>
-            <button id="bonusBatchExpireBtn" class="danger">Batalkan / Expire Batch Saya</button>
-            <button id="bonusCopyExcelBtn" class="primary">Copy Output Bonus Harian ke Excel</button>
-            <button id="bonusResetBtn" class="ghost">Reset Bonus</button>
+            <button id="bonusLocalResetBtn" class="ghost">Reset Bonus</button>
+            <button id="bonusResetBtn" class="danger admin-only">Reset Supabase</button>
+            <button id="bonusExpirePendingBtn" hidden aria-hidden="true" style="display:none !important;">Bersihkan Pending Expired</button>
+            <button id="bonusRefreshStatusBtn" hidden aria-hidden="true" style="display:none !important;">Refresh Status Bonus</button>
+            <button id="bonusPendingActiveBtn" hidden aria-hidden="true" style="display:none !important;">Lihat Pending Aktif</button>
+            <button id="bonusBatchDoneBtn" hidden aria-hidden="true" style="display:none !important;">Tandai Batch DONE</button>
+            <button id="bonusBatchExpireBtn" hidden aria-hidden="true" style="display:none !important;">Batalkan / Expire Batch Saya</button>
+            <button id="bonusCopyExcelBtn" hidden aria-hidden="true" style="display:none !important;">Copy Output Bonus Harian ke Excel</button>
           </div>
           <div class="source-note" id="bonusStatusRefreshInfo" style="display:none;"></div>
           <div class="hint">
@@ -2779,6 +2911,28 @@
           </div>
         </section>
       </div>
+
+      <section class="card" style="margin-top:24px;" id="telegramBonusPreviewSection">
+        <div class="card-title">Preview Batch Telegram Parser QRIS</div>
+        <div class="card-desc">Preview ini terpisah dari flow Bonus Harian manual. Tidak ada approval atau release worker pada tahap ini.</div>
+        <div class="bonus-actions"><button type="button" id="telegramBonusRefreshBtn" class="ghost">Refresh Preview Telegram</button></div>
+        <div id="telegramBonusPreviewNote" class="source-note">Belum memuat preview Telegram.</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Batch Code</th><th>Tanggal</th><th>Source</th><th>Status</th><th class="num">Ready</th><th class="num">Skipped</th><th class="num">Manual Review</th><th class="num">Total Bonus BO</th><th>Detail</th></tr></thead>
+            <tbody id="telegramBonusPreviewTable"><tr><td colspan="9" class="empty">Klik Refresh Preview Telegram untuk memuat data.</td></tr></tbody>
+          </table>
+        </div>
+        <div id="telegramBonusItemWrap" style="display:none; margin-top:18px;">
+          <div id="telegramBonusItemNote" class="source-note"></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>#</th><th>Login ID</th><th>Member</th><th class="num">Deposit Terbesar</th><th class="num">Bonus</th><th>Status</th><th>Warning / Reason</th></tr></thead>
+              <tbody id="telegramBonusItemTable"><tr><td colspan="7" class="empty">Pilih batch untuk melihat item preview.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </section>
 
     <section class="tool-panel" id="panel-claim-mahjong">
@@ -3066,16 +3220,12 @@
       </div>
     </section>
 
-    <section class="tool-panel" id="panel-dashboard">
+    <section class="tool-panel" id="panel-dashboard" hidden aria-hidden="true" style="display:none !important;">
       <div class="bonus-grid">
         <section class="card">
           <div class="card-title">Connection</div>
           <div class="card-desc">Status koneksi dashboard superadmin.</div>
           <div class="monitor-grid">
-            <div class="stat">
-              <div class="stat-label">Hermes</div>
-              <div class="stat-value" id="dashboardHermesStatus">-</div>
-            </div>
             <div class="stat">
               <div class="stat-label">Supabase</div>
               <div class="stat-value" id="dashboardSupabaseStatus">-</div>
@@ -3197,32 +3347,6 @@
           <textarea id="dashboardExcelPreview" style="min-height:220px;" placeholder="TSV preview akan muncul di sini..." readonly></textarea>
         </section>
 
-        <section class="card">
-          <div class="card-title">Hermes Workflow</div>
-          <div class="card-desc">Preview queue dari Hermes Telegram sebelum release manual ke worker.</div>
-          <div class="bonus-actions">
-            <button id="dashboardRefreshHermesBtn" class="primary">Refresh Hermes Preview</button>
-            <button id="dashboardCopyHermesExcelBtn" class="ghost">Copy Excel Preview</button>
-          </div>
-          <div id="dashboardHermesNote" class="source-note">Hermes preview queue belum dimuat.</div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Status</th>
-                  <th>Batch</th>
-                  <th>Type</th>
-                  <th>Operator</th>
-                  <th>Created</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody id="dashboardHermesTable">
-                <tr><td colspan="6" class="empty">Hermes preview queue belum dibuat.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
       </div>
     </section>
 
@@ -3396,6 +3520,8 @@
   let bonusRemoteStatus = 'idle';
   let bonusPendingTimerInterval = null;
   let bonusPendingServerOffsetMs = 0;
+  let bonusActiveLock = null;
+  let bonusResetChallenge = null;
   let currentOperator = null;
   let adminOperatorRows = [];
   let currentLoadingSteps = [];
@@ -3606,15 +3732,19 @@
   function saveOperatorSession(token, operator) {
     localStorage.setItem(OPERATOR_TOKEN_KEY, token);
     localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(operator || {}));
+    localStorage.setItem('operator_role', String(operator?.role || ''));
     currentOperator = operator || null;
+    window.currentOperator = currentOperator;
   }
 
   function clearOperatorSession() {
     localStorage.removeItem(OPERATOR_TOKEN_KEY);
     localStorage.removeItem(OPERATOR_PROFILE_KEY);
+    localStorage.removeItem('operator_role');
+    sessionStorage.removeItem('operator_role');
     currentOperator = null;
+    window.currentOperator = null;
     stopOperatorActivityTracking();
-    resetHermesWidget();
     const info = document.getElementById('operatorInfo');
     if (info) {
       info.style.display = 'none';
@@ -3623,15 +3753,77 @@
   }
 
   function hasAuditAccess() {
-    return currentOperator && ['audit', 'admin', 'superadmin'].includes(currentOperator.role);
+    return ['audit', 'admin', 'superadmin'].includes(normalizeRole(activeRole()));
   }
 
   function isAdmin() {
-    return currentOperator && ['admin', 'superadmin'].includes(currentOperator.role);
+    return ['admin', 'superadmin'].includes(normalizeRole(activeRole()));
+  }
+
+  function normalizeRole(role) {
+    return String(role || '')
+      .toLowerCase()
+      .replace(/[\s_-]+/g, '');
+  }
+
+  function storedOperatorRole() {
+    try {
+      const profile = JSON.parse(localStorage.getItem(OPERATOR_PROFILE_KEY) || '{}');
+      return profile?.role || '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function activeRole() {
+    return currentOperator?.role
+      || window.currentOperator?.role
+      || window.activeOperator?.role
+      || window.currentUser?.role
+      || window.operator?.role
+      || localStorage.getItem('operator_role')
+      || sessionStorage.getItem('operator_role')
+      || storedOperatorRole()
+      || '';
   }
 
   function isSuperAdmin() {
-    return currentOperator && currentOperator.role === 'superadmin';
+    return normalizeRole(activeRole()) === 'superadmin';
+  }
+
+  function isSuperadmin() {
+    return isSuperAdmin();
+  }
+
+  function logRoleDebug() {
+    const role = activeRole();
+    console.log('[ROLE_DEBUG]', {
+      role,
+      normalizedRole: normalizeRole(role),
+      isSuperadmin: isSuperadmin()
+    });
+  }
+
+  function applySuperadminVisibility() {
+    const allowed = isSuperadmin();
+    document.querySelectorAll('.superadmin-only').forEach(el => {
+      el.style.display = allowed ? 'inline-flex' : 'none';
+    });
+    document.querySelectorAll('.superadmin-only-tab').forEach(el => {
+      el.style.display = allowed ? 'inline-flex' : 'none';
+    });
+    if (!allowed && document.getElementById('panel-dashboard')?.classList.contains('active')) {
+      const fallback = document.querySelector('.tool-tab[data-panel="parser"]')
+        || document.querySelector('.tool-tab[data-panel="bonus"]');
+      if (fallback) fallback.click();
+    }
+  }
+
+  function applyAdminVisibility() {
+    const allowed = isAdmin();
+    document.querySelectorAll('.admin-only').forEach(el => {
+      el.style.display = allowed ? 'inline-flex' : 'none';
+    });
   }
 
   function requireOperator() {
@@ -3770,87 +3962,6 @@
       await logoutOperator();
       window.location.reload();
     });
-    renderHermesWidget();
-  }
-
-  function hermesLabelForRole() {
-    return 'Hermes Superadmin Debug';
-  }
-
-  function resetHermesWidget() {
-    const widget = document.getElementById('hermesWidget');
-    const messages = document.getElementById('hermesMessages');
-    const input = document.getElementById('hermesInput');
-    if (widget) widget.classList.remove('show', 'open');
-    if (messages) messages.innerHTML = '';
-    if (input) input.value = '';
-  }
-
-  function renderHermesWidget() {
-    const widget = document.getElementById('hermesWidget');
-    const title = document.getElementById('hermesTitle');
-    const subtitle = document.getElementById('hermesSubtitle');
-    const messages = document.getElementById('hermesMessages');
-    if (!widget) return;
-    if (!currentOperator || !isSuperAdmin()) {
-      resetHermesWidget();
-      return;
-    }
-    widget.classList.add('show');
-    if (title) title.textContent = hermesLabelForRole();
-    if (subtitle) {
-      subtitle.textContent = 'Akses tanya debug/log aman untuk superadmin.';
-    }
-    if (messages && !messages.children.length) {
-      addHermesMessage('Hermes siap membantu. Aksi penting tetap dilakukan lewat Telegram Hermes dengan preview/confirm.', 'bot');
-    }
-  }
-
-  function addHermesMessage(text, type = 'bot') {
-    const messages = document.getElementById('hermesMessages');
-    if (!messages) return;
-    const item = document.createElement('div');
-    item.className = `hermes-message ${type === 'user' ? 'user' : type === 'error' ? 'error' : ''}`;
-    item.textContent = text;
-    messages.appendChild(item);
-    messages.scrollTop = messages.scrollHeight;
-  }
-
-  async function sendHermesQuestion(question) {
-    const response = await fetch('/api/hermes-chat', {
-      method: 'POST',
-      headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ question })
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.ok !== true) {
-      throw new Error(result.message || 'Hermes belum dapat dihubungi.');
-    }
-    return result.answer || 'Hermes belum memberi jawaban.';
-  }
-
-  async function handleHermesSubmit(event) {
-    event.preventDefault();
-    if (!currentOperator || !isSuperAdmin()) {
-      resetHermesWidget();
-      return;
-    }
-    const input = document.getElementById('hermesInput');
-    const button = document.getElementById('hermesSendBtn');
-    const question = String(input?.value || '').trim();
-    if (!question) return;
-    addHermesMessage(question, 'user');
-    input.value = '';
-    setButtonLoading(button, true, '...');
-    try {
-      const answer = await sendHermesQuestion(question);
-      addHermesMessage(answer, 'bot');
-    } catch (error) {
-      addHermesMessage(error.message || 'Hermes belum dapat dihubungi.', 'error');
-    } finally {
-      setButtonLoading(button, false);
-      input.focus();
-    }
   }
 
   function featureKeyForPanel(panel) {
@@ -3991,7 +4102,8 @@
     const dashboardTab = document.getElementById('dashboardTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
-    if (dashboardTab) dashboardTab.style.display = isSuperAdmin() ? '' : 'none';
+    applyAdminVisibility();
+    if (dashboardTab) dashboardTab.style.display = isSuperAdmin() ? 'inline-flex' : 'none';
     if (!isSuperAdmin() && document.getElementById('panel-dashboard')?.classList.contains('active')) {
       document.querySelector('[data-panel="parser"]').click();
       if (currentOperator) showToast('Dashboard hanya untuk Superadmin.', 'error');
@@ -4026,6 +4138,7 @@
         if (currentOperator) showToast('Akses monitoring dibatasi.', 'error');
       }
     }
+    applySuperadminVisibility();
     renderFeatureLocks();
     renderFeatureLockTable();
   }
@@ -4048,12 +4161,15 @@
         throw new Error('invalid');
       }
       currentOperator = result.operator;
+      window.currentOperator = currentOperator;
       localStorage.setItem(OPERATOR_PROFILE_KEY, JSON.stringify(result.operator));
+      localStorage.setItem('operator_role', String(result.operator?.role || ''));
       featureAccessLocks = {};
       featureLocksLoadedAt = 0;
       hideOperatorLogin();
       renderOperatorInfo();
       applyRoleAccess();
+      logRoleDebug();
       activateDefaultToolPanel();
       fetchFeatureLocksInBackground();
       startOperatorActivityTracking();
@@ -4092,6 +4208,7 @@
       hideOperatorLogin();
       renderOperatorInfo();
       applyRoleAccess();
+      logRoleDebug();
       activateDefaultToolPanel();
       fetchFeatureLocksInBackground(true);
       startOperatorActivityTracking();
@@ -4117,6 +4234,11 @@
       }
       if (target === 'bonus-monitoring' && !isAdmin()) {
         showToast('Akses monitoring dibatasi.', 'error');
+        return;
+      }
+      if (target === 'dashboard' && !isSuperadmin()) {
+        showToast('Dashboard hanya untuk Superadmin.', 'error');
+        applySuperadminVisibility();
         return;
       }
       const featureKey = featureKeyForPanel(target);
@@ -5456,7 +5578,10 @@
       throw new Error('Session operator expired, silakan login ulang.');
     }
     if (!response.ok || (result.ok !== true && action !== 'health')) {
-      throw new Error(result.message || result.error || `Gagal menjalankan ${action}.`);
+      const error = new Error(result.message || result.error || `Gagal menjalankan ${action}.`);
+      error.debug = result.debug || null;
+      error.code = result.error || '';
+      throw error;
     }
     return result;
   }
@@ -5468,6 +5593,7 @@
     setButtonLoading(btn, true, 'Membersihkan...');
     try {
       const result = await bonusControlApi('expire_pending');
+      clearBonusActiveLock('expire_pending_clicked');
       if (dateValue) {
         delete bonusRemoteDoneCache[dateValue];
         delete bonusRemotePendingCache[dateValue];
@@ -5495,6 +5621,7 @@
       delete bonusRemoteDoneCache[dateValue];
       delete bonusRemotePendingCache[dateValue];
       const result = await bonusControlApi('status', { bonus_date: dateValue });
+      syncBonusActiveLockFromStatus(result);
       renderBonusStatusRefreshInfo(result);
       renderBonusDoneInfo();
       showToast('Status bonus berhasil diperbarui.', 'success');
@@ -5565,28 +5692,86 @@
     return currentOperator ? (currentOperator.display_name || currentOperator.username || 'Operator') : 'Operator';
   }
 
+  function bonusDebugContext(claimBatchId, extra = {}) {
+    return {
+      role: currentOperator?.role || '',
+      operator_name: currentOperatorName(),
+      claim_batch_id: claimBatchId || '',
+      active_claim_batch_id: bonusActiveLock?.claim_batch_id || '',
+      active_lock_status: bonusActiveLock?.lock_status || '',
+      active_claim_owner: bonusActiveLock?.claim_owner || '',
+      active_pending_expires_at: bonusActiveLock?.pending_expires_at || '',
+      ...extra
+    };
+  }
+
+  function setBonusActiveLock(lock) {
+    if (lock && String(lock.lock_status || '').toUpperCase() === 'PENDING' && lock.claim_batch_id) {
+      bonusActiveLock = lock;
+      return;
+    }
+    bonusActiveLock = null;
+  }
+
+  function clearBonusActiveLock(reason = '') {
+    if (bonusActiveLock) {
+      console.info('bonus active batch cleared', bonusDebugContext(bonusActiveLock.claim_batch_id, { reason }));
+    }
+    bonusActiveLock = null;
+  }
+
+  function syncBonusActiveLockFromStatus(result) {
+    const locks = Array.isArray(result?.locks) ? result.locks : [];
+    const activeLock = locks.find(lock => String(lock.lock_status || '').toUpperCase() === 'PENDING' && lock.claim_batch_id);
+    if (activeLock) {
+      setBonusActiveLock(activeLock);
+      return;
+    }
+    clearBonusActiveLock('refresh_status_no_pending_lock');
+  }
+
+  function resolveBonusBatchIdForAction(promptMessage) {
+    if (bonusActiveLock && String(bonusActiveLock.lock_status || '').toUpperCase() === 'PENDING' && bonusActiveLock.claim_batch_id) {
+      return String(bonusActiveLock.claim_batch_id).trim();
+    }
+    if (isSuperAdmin()) {
+      return promptBonusBatchId(promptMessage);
+    }
+    showToast('Tidak ada PENDING aktif untuk batch Anda. Silakan Proses Bonus Harian dulu.', 'error');
+    return '';
+  }
+
+  function handleBonusControlError(action, error) {
+    console.error(`bonus-control ${action} error:`, error);
+    if (error && error.debug) console.error(`bonus-control ${action} debug:`, error.debug);
+    showToast(error.message || `Gagal menjalankan ${action}.`, 'error');
+  }
+
   async function markBatchDoneFromUi() {
     if (!requireOperator()) return;
-    const claimBatchId = promptBonusBatchId('Masukkan Claim Batch ID yang akan ditandai DONE:');
+    const claimBatchId = resolveBonusBatchIdForAction('Masukkan Claim Batch ID yang akan ditandai DONE:');
     if (!claimBatchId) return;
+    if (isSuperAdmin() && !window.confirm(`Superadmin akan menandai batch ${claimBatchId} sebagai DONE. Pastikan batch ini benar. Lanjutkan?`)) return;
     const btn = document.getElementById('bonusBatchDoneBtn');
     setButtonLoading(btn, true, 'Finalisasi...');
     try {
+      console.info('bonus mark_done submit', bonusDebugContext(claimBatchId));
       const result = await bonusControlApi('mark_done', {
         claim_batch_id: claimBatchId,
-        operator_name: currentOperatorName()
+        operator_name: currentOperatorName(),
+        role: currentOperator?.role || ''
       });
       const dateValue = document.getElementById('bonusDate').value;
       if (dateValue) {
         delete bonusRemoteDoneCache[dateValue];
         delete bonusRemotePendingCache[dateValue];
       }
+      clearBonusActiveLock('mark_done_success');
       renderBonusStatusRefreshInfo({ summary: { done: result.done_count, pending_active: 0, expired: 0 } });
       renderBonusDoneInfo();
       showToast(`Batch DONE. Rows: ${result.done_count || 0}, locks: ${result.lock_done_count || 0}.`, 'success');
     } catch (error) {
-      console.error('bonus-control mark_done error:', error);
-      showToast(error.message || 'Gagal tandai batch DONE.', 'error');
+      handleBonusControlError('mark_done', error);
     } finally {
       setButtonLoading(btn, false);
     }
@@ -5594,27 +5779,29 @@
 
   async function expireBatchFromUi() {
     if (!requireOperator()) return;
-    const claimBatchId = promptBonusBatchId('Masukkan Claim Batch ID yang akan di-expire:');
+    const claimBatchId = resolveBonusBatchIdForAction('Masukkan Claim Batch ID yang akan di-expire:');
     if (!claimBatchId) return;
-    if (!window.confirm(`Expire batch ${claimBatchId}? Data PENDING dalam batch ini akan menjadi EXPIRED.`)) return;
+    if (!window.confirm(`${isSuperAdmin() ? 'Superadmin akan expire' : 'Expire'} batch ${claimBatchId}? Data PENDING dalam batch ini akan menjadi EXPIRED.`)) return;
     const btn = document.getElementById('bonusBatchExpireBtn');
     setButtonLoading(btn, true, 'Expire...');
     try {
+      console.info('bonus expire_batch submit', bonusDebugContext(claimBatchId));
       const result = await bonusControlApi('expire_batch', {
         claim_batch_id: claimBatchId,
-        operator_name: currentOperatorName()
+        operator_name: currentOperatorName(),
+        role: currentOperator?.role || ''
       });
       const dateValue = document.getElementById('bonusDate').value;
       if (dateValue) {
         delete bonusRemoteDoneCache[dateValue];
         delete bonusRemotePendingCache[dateValue];
       }
+      clearBonusActiveLock('expire_batch_success');
       renderBonusStatusRefreshInfo({ summary: { done: 0, pending_active: 0, expired: result.expired_count } });
       renderBonusDoneInfo();
       showToast(`Batch di-expire. Rows: ${result.expired_count || 0}, locks: ${result.lock_expired_count || 0}.`, 'success');
     } catch (error) {
-      console.error('bonus-control expire_batch error:', error);
-      showToast(error.message || 'Gagal expire batch.', 'error');
+      handleBonusControlError('expire_batch', error);
     } finally {
       setButtonLoading(btn, false);
     }
@@ -5748,28 +5935,32 @@
   }
 
   async function finalizeRemoteBonusBatch(dateValue) {
-    const response = await fetch('/api/bonus-done', {
-      method: 'POST',
-      headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        action: 'done',
-        date: dateValue,
-        claim_owner: getBonusClaimOwner(),
-        operator_name: currentOperator ? currentOperator.display_name : ''
-      })
-    });
+    if (!bonusActiveLock || !bonusActiveLock.claim_batch_id || String(bonusActiveLock.lock_status || '').toUpperCase() !== 'PENDING') {
+      const statusResult = await bonusControlApi('status', { bonus_date: dateValue });
+      syncBonusActiveLockFromStatus(statusResult);
+    }
 
-    const result = await response.json().catch(() => ({}));
-    if (response.status === 401) {
-      handleOperatorUnauthorized();
+    const claimBatchId = bonusActiveLock && String(bonusActiveLock.lock_status || '').toUpperCase() === 'PENDING'
+      ? bonusActiveLock.claim_batch_id
+      : '';
+    if (!claimBatchId) {
+      throw new Error('Tidak ada PENDING aktif untuk ditandai DONE. Silakan Proses Bonus Harian dulu atau refresh status.');
     }
-    if (!response.ok || result.success !== true) {
-      throw new Error(result.message || result.error || 'Gagal finalisasi batch.');
+    if (isSuperAdmin() && !window.confirm(`Superadmin akan menandai batch ${claimBatchId} sebagai DONE. Pastikan batch ini benar. Lanjutkan?`)) {
+      throw new Error('Finalisasi dibatalkan.');
     }
+
+    console.info('bonus finalize submit', bonusDebugContext(claimBatchId));
+    const result = await bonusControlApi('mark_done', {
+      claim_batch_id: claimBatchId,
+      operator_name: currentOperatorName(),
+      role: currentOperator?.role || ''
+    });
 
     bonusRemoteStatus = 'online';
     delete bonusRemoteDoneCache[dateValue];
     delete bonusRemotePendingCache[dateValue];
+    clearBonusActiveLock('finalize_success');
     return result;
   }
 
@@ -6173,7 +6364,6 @@
     setButtonLoading(btn, true, 'Refresh...');
     try {
       const result = await bonusControlApi('health');
-      dashboardSetText('dashboardHermesStatus', result.hermes_connected === null ? 'N/A' : (result.hermes_connected ? 'Connected' : 'Error'));
       dashboardSetText('dashboardSupabaseStatus', result.supabase_connected ? 'Connected' : 'Error');
       dashboardSetText('dashboardParserStatus', result.parser_api_connected ? 'OK' : 'Error');
       dashboardSetText('dashboardServerTime', result.server_time || '-');
@@ -6436,56 +6626,6 @@
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  }
-
-  async function dashboardRefreshHermes() {
-    if (!dashboardRequireSuperadmin()) return;
-    const btn = document.getElementById('dashboardRefreshHermesBtn');
-    setButtonLoading(btn, true, 'Refresh...');
-    try {
-      const result = await bonusControlApi('hermes_preview_status');
-      const note = document.getElementById('dashboardHermesNote');
-      const table = document.getElementById('dashboardHermesTable');
-      if (note) note.textContent = result.message || 'Hermes preview queue dimuat.';
-      const rows = Array.isArray(result.rows) ? result.rows : [];
-      if (table) {
-        table.innerHTML = rows.map(row => `
-          <tr>
-            <td>${escapeHtml(row.status || '')}</td>
-            <td>${escapeHtml(row.batch_code || row.claim_batch_id || '')}</td>
-            <td>${escapeHtml(row.bonus_type || row.type || '')}</td>
-            <td>${escapeHtml(row.operator_name || '')}</td>
-            <td>${escapeHtml(row.created_at || '')}</td>
-            <td class="row-actions"><button disabled>Approve/Release</button></td>
-          </tr>
-        `).join('') || '<tr><td colspan="6" class="empty">Hermes preview queue belum dibuat.</td></tr>';
-      }
-      showToast(result.message || 'Hermes preview status dimuat.', rows?.length ? 'success' : '');
-    } catch (error) {
-      console.error('dashboard hermes_preview_status error:', error);
-      showToast(error.message || 'Gagal refresh Hermes preview.', 'error');
-    } finally {
-      setButtonLoading(btn, false);
-    }
-  }
-
-  async function dashboardCopyHermesExcel() {
-    if (!dashboardRequireSuperadmin()) return;
-    try {
-      const result = await bonusControlApi('hermes_preview_status');
-      const rows = Array.isArray(result.rows) ? result.rows : [];
-      if (!rows.length) {
-        showToast(result.message || 'Hermes preview queue belum dibuat.', 'error');
-        return;
-      }
-      const columns = Object.keys(rows[0]);
-      const tsv = [columns.join('\t'), ...rows.map(row => columns.map(column => String(row[column] ?? '').replace(/\t/g, ' ')).join('\t'))].join('\n');
-      await copyTextToClipboard(tsv);
-      showToast('Preview Hermes dicopy ke Excel.', 'success');
-    } catch (error) {
-      console.error('dashboard copy hermes error:', error);
-      showToast(error.message || 'Gagal copy Hermes preview.', 'error');
-    }
   }
 
   async function adminLogBonusClaimCopy(copiedCount) {
@@ -7907,6 +8047,8 @@
 
     if (claimResult && claimResult.success === true) {
       if (claimResult.status === 'locked_by_other') {
+        if (isSuperAdmin()) setBonusActiveLock(claimResult.lock);
+        else clearBonusActiveLock('locked_by_other_not_superadmin');
         bonusRows = [];
         bonusRender();
         const operatorName = claimResult.lock && claimResult.lock.operator_name ? claimResult.lock.operator_name : 'operator lain';
@@ -7925,6 +8067,8 @@
       }
 
       if (claimResult.status === 'pending_expired') {
+        if (isSuperAdmin()) setBonusActiveLock(claimResult.lock);
+        else clearBonusActiveLock('pending_expired_not_superadmin');
         bonusRows = [];
         bonusRender();
         showBonusLockWarning(
@@ -7942,6 +8086,7 @@
       }
 
       if (claimResult.status === 'all_already_done') {
+        clearBonusActiveLock('all_already_done');
         bonusRows = [];
         bonusRender();
         showBonusLockWarning(
@@ -7954,6 +8099,7 @@
       }
 
       if (claimResult.status === 'no_candidates') {
+        clearBonusActiveLock('no_candidates');
         bonusRows = [];
         bonusRender();
         hideBonusLockWarning();
@@ -7963,6 +8109,7 @@
       }
 
       if (claimResult.status === 'already_done') {
+        clearBonusActiveLock('already_done');
         bonusRows = [];
         bonusRender();
         showBonusLockWarning(
@@ -7976,6 +8123,7 @@
 
       bonusRows = rowsFromClaimResponse(claimResult.rows || [], candidateRows);
       if (claimResult.status === 'own_pending' && bonusRows.length > 0) {
+        setBonusActiveLock(claimResult.lock);
         showBonusLockWarning(
           'PENDING MILIK ANDA',
           'Menampilkan ulang pending milik Anda. Silakan copy ulang jika sebelumnya lupa.'
@@ -7987,6 +8135,7 @@
           title: 'MENAMPILKAN ULANG PENDING MILIK ANDA'
         });
       } else if (claimResult.status === 'own_pending') {
+        clearBonusActiveLock('own_pending_empty');
         bonusRows = [];
         bonusRender();
         hideBonusLockWarning();
@@ -7996,6 +8145,7 @@
       } else {
         hideBonusLockWarning();
         if (claimResult.status === 'claimed') {
+          setBonusActiveLock(claimResult.lock);
           startBonusPendingTimer(claimResult.lock, {
             ownerType: 'self',
             serverTime: claimResult.serverTime,
@@ -8003,10 +8153,12 @@
             title: 'PENDING BONUS HARIAN MILIK ANDA'
           });
         } else {
+          clearBonusActiveLock('claim_result_not_pending');
           stopBonusPendingTimer();
         }
       }
     } else {
+      clearBonusActiveLock('remote_claim_failed_or_offline');
       hideBonusLockWarning();
       stopBonusPendingTimer();
       bonusRows = candidateRows;
@@ -8039,7 +8191,7 @@
     }
   }
 
-  function bonusReset() {
+  function resetBonusLocalState() {
     bonusRows = [];
     bonusRemark = '';
     document.getElementById('bonusAdjustRaw').value = '';
@@ -8049,11 +8201,114 @@
     document.getElementById('bonusStats').style.display = 'none';
     document.getElementById('bonusCopyActions').style.display = 'flex';
     resetAdjustmentBatchPreview();
+    clearBonusActiveLock('bonus_reset');
     hideBonusLockWarning();
     stopBonusPendingTimer();
     updateBonusSourceNote();
     renderBonusDoneInfo();
-    showToast('Data bonus dibersihkan.');
+  }
+
+  function resetBonusLocalFromUi() {
+    resetBonusLocalState();
+    showToast('Data tampilan Bonus Harian dibersihkan.', 'success');
+  }
+
+  async function bonusReset() {
+    if (!requireOperator()) return;
+    if (!isAdmin()) {
+      showToast('Reset Bonus hanya untuk Admin atau Superadmin.', 'error');
+      return;
+    }
+    const bonusDate = document.getElementById('bonusDate').value;
+    if (!bonusDate) {
+      showToast('Pilih tanggal bonus yang akan direset.', 'error');
+      return;
+    }
+
+    const button = document.getElementById('bonusResetBtn');
+    setButtonLoading(button, true, 'Memeriksa data...');
+    try {
+      const result = await bonusControlApi('reset_bonus_prepare', { bonus_date: bonusDate });
+      bonusResetChallenge = {
+        bonusDate,
+        token: result.challenge_token || ''
+      };
+      document.getElementById('bonusResetImpact').innerHTML = `
+        <div class="reset-impact-title">Tindakan ini menghapus data secara permanen.</div>
+        <div class="reset-impact-stats">
+          <div class="reset-impact-stat"><span>Tanggal</span><strong>${escapeHtml(bonusDate)}</strong></div>
+          <div class="reset-impact-stat"><span>Data Bonus</span><strong>${Number(result.affected_bonus_rows || 0)}</strong></div>
+          <div class="reset-impact-stat"><span>Lock Terkait</span><strong>${Number(result.affected_lock_rows || 0)}</strong></div>
+        </div>
+        <div style="margin-top:10px; color:#b6c0da;">Challenge berlaku ${Number(result.expires_in_seconds || 120)} detik.</div>
+      `;
+      document.getElementById('bonusResetChallengeLabel').textContent = result.challenge || '-';
+      document.getElementById('bonusResetChallengeAnswer').value = '';
+      document.getElementById('bonusResetPhrase').value = '';
+      document.getElementById('bonusResetAcknowledge').checked = false;
+      document.getElementById('bonusResetDialogError').textContent = '';
+      document.getElementById('bonusResetDialog').showModal();
+      document.getElementById('bonusResetChallengeAnswer').focus();
+    } catch (error) {
+      console.error('reset bonus prepare error:', error);
+      showToast(error.message || 'Gagal menyiapkan reset Bonus.', 'error');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  function closeBonusResetDialog() {
+    const dialog = document.getElementById('bonusResetDialog');
+    if (dialog?.open) dialog.close();
+    bonusResetChallenge = null;
+  }
+
+  async function confirmBonusReset() {
+    const errorBox = document.getElementById('bonusResetDialogError');
+    const acknowledged = document.getElementById('bonusResetAcknowledge').checked;
+    const answer = document.getElementById('bonusResetChallengeAnswer').value.trim();
+    const phrase = document.getElementById('bonusResetPhrase').value.trim();
+    if (!bonusResetChallenge) {
+      errorBox.textContent = 'Challenge reset tidak tersedia. Tutup dialog lalu mulai ulang.';
+      return;
+    }
+    if (!acknowledged) {
+      errorBox.textContent = 'Centang pernyataan risiko terlebih dahulu.';
+      return;
+    }
+    if (!answer || phrase.toUpperCase() !== 'RESET BONUS') {
+      errorBox.textContent = 'Jawab verifikasi angka dan ketik RESET BONUS dengan benar.';
+      return;
+    }
+    if (!window.confirm(`Konfirmasi terakhir: hapus data Bonus Harian Supabase tanggal ${bonusResetChallenge.bonusDate}?`)) return;
+
+    const button = document.getElementById('bonusResetConfirmBtn');
+    setButtonLoading(button, true, 'Mereset...');
+    errorBox.textContent = '';
+    try {
+      const result = await bonusControlApi('reset_bonus_execute', {
+        bonus_date: bonusResetChallenge.bonusDate,
+        challenge_token: bonusResetChallenge.token,
+        challenge_answer: answer,
+        confirmation_phrase: phrase
+      });
+      const resetDate = bonusResetChallenge.bonusDate;
+      document.getElementById('bonusResetDialog').close();
+      bonusResetChallenge = null;
+      const localDoneStore = getBonusDoneStore();
+      delete localDoneStore[resetDate];
+      saveBonusDoneStore(localDoneStore);
+      delete bonusRemoteDoneCache[resetDate];
+      delete bonusRemotePendingCache[resetDate];
+      resetBonusLocalState();
+      showToast(`${result.message} ${result.deleted_bonus_rows || 0} data dan ${result.deleted_lock_rows || 0} lock dihapus.`, 'success');
+    } catch (error) {
+      console.error('reset bonus execute error:', error);
+      errorBox.textContent = error.message || 'Reset Bonus gagal.';
+      showToast(error.message || 'Reset Bonus gagal.', 'error');
+    } finally {
+      setButtonLoading(button, false);
+    }
   }
 
   function bonusRowText(row) {
@@ -9172,6 +9427,7 @@
     showToast('Data audit dibersihkan.');
   }
   document.getElementById('bonusProcessBtn').addEventListener('click', bonusProcess);
+  document.getElementById('bonusLocalResetBtn').addEventListener('click', resetBonusLocalFromUi);
   document.getElementById('bonusExpirePendingBtn').addEventListener('click', expirePendingBonusFromUi);
   document.getElementById('bonusRefreshStatusBtn').addEventListener('click', refreshBonusStatusFromUi);
   document.getElementById('bonusPendingActiveBtn').addEventListener('click', showPendingActiveFromUi);
@@ -9179,6 +9435,12 @@
   document.getElementById('bonusBatchExpireBtn').addEventListener('click', expireBatchFromUi);
   document.getElementById('bonusCopyExcelBtn').addEventListener('click', copyBonusOutputExcelFromUi);
   document.getElementById('bonusResetBtn').addEventListener('click', bonusReset);
+  document.getElementById('bonusResetCancelBtn').addEventListener('click', closeBonusResetDialog);
+  document.getElementById('bonusResetConfirmBtn').addEventListener('click', confirmBonusReset);
+  document.getElementById('bonusResetDialog').addEventListener('cancel', event => {
+    event.preventDefault();
+    closeBonusResetDialog();
+  });
   document.getElementById('bonusCopyAllBtn').addEventListener('click', bonusCopyAll);
   document.getElementById('bonusExportAdjustmentJsonBtn').addEventListener('click', previewAdjustmentBatchJson);
   document.getElementById('adjustmentBatchDownloadBtn').addEventListener('click', downloadAdjustmentBatchJson);
@@ -9206,8 +9468,6 @@
   document.getElementById('dashboardRefreshOutputBonusBtn').addEventListener('click', dashboardRefreshBonusOutput);
   document.getElementById('dashboardCopyBonusExcelBtn').addEventListener('click', dashboardCopyBonusExcel);
   document.getElementById('dashboardDownloadCsvBtn').addEventListener('click', dashboardDownloadCsv);
-  document.getElementById('dashboardRefreshHermesBtn').addEventListener('click', dashboardRefreshHermes);
-  document.getElementById('dashboardCopyHermesExcelBtn').addEventListener('click', dashboardCopyHermesExcel);
   document.getElementById('dashboardBonusDate').addEventListener('change', () => {
     dashboardBonusOutputTsv = '';
     const preview = document.getElementById('dashboardExcelPreview');
@@ -9321,15 +9581,6 @@
     const isMaintenance = await checkMaintenanceMode();
     if (!isMaintenance) await verifyOperatorSession();
   });
-  document.getElementById('hermesToggleBtn').addEventListener('click', () => {
-    const widget = document.getElementById('hermesWidget');
-    widget.classList.toggle('open');
-    if (widget.classList.contains('open')) document.getElementById('hermesInput').focus();
-  });
-  document.getElementById('hermesCloseBtn').addEventListener('click', () => {
-    document.getElementById('hermesWidget').classList.remove('open');
-  });
-  document.getElementById('hermesForm').addEventListener('submit', handleHermesSubmit);
   document.getElementById('operatorPassword').addEventListener('keydown', event => {
     if (event.key === 'Enter') loginOperator();
   });
@@ -10432,5 +10683,6 @@
   });
 })();
 </script>
+<script src="/telegram-parser-preview.js"></script>
 </body>
 </html>

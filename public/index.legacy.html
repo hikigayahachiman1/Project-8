@@ -178,126 +178,6 @@
     font-weight: 800;
   }
 
-  .hermes-widget {
-    position: fixed;
-    right: 22px;
-    bottom: 22px;
-    z-index: 900;
-    display: none;
-    align-items: flex-end;
-    gap: 12px;
-  }
-
-  .hermes-widget.show { display: flex; }
-
-  /* Chat bubble web dinonaktifkan; Hermes Telegram dan Dashboard tetap aktif. */
-  #hermesWidget {
-    display: none !important;
-  }
-
-  .hermes-fab {
-    min-width: 0;
-    width: 58px;
-    height: 58px;
-    border-radius: 20px;
-    padding: 0;
-    box-shadow: 0 18px 42px rgba(39,245,255,0.22), 0 0 24px rgba(155,92,255,0.18);
-  }
-
-  .hermes-panel {
-    display: none;
-    width: min(380px, calc(100vw - 32px));
-    max-height: min(620px, calc(100vh - 100px));
-    border: 1px solid rgba(143,178,255,0.26);
-    border-radius: 24px;
-    background:
-      linear-gradient(145deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04)),
-      rgba(9, 15, 33, 0.94);
-    box-shadow: 0 24px 80px rgba(0,0,0,0.48), 0 0 28px rgba(39,245,255,0.12);
-    overflow: hidden;
-  }
-
-  .hermes-widget.open .hermes-panel {
-    display: grid;
-    grid-template-rows: auto minmax(180px, 1fr) auto;
-  }
-
-  .hermes-head {
-    padding: 16px 17px;
-    border-bottom: 1px solid rgba(143,178,255,0.16);
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: center;
-  }
-
-  .hermes-title {
-    font-family: 'Fraunces', serif;
-    font-size: 1.08rem;
-    font-weight: 800;
-  }
-
-  .hermes-subtitle {
-    margin-top: 3px;
-    color: var(--ink-soft);
-    font-size: 0.78rem;
-  }
-
-  .hermes-close {
-    min-width: 0;
-    width: 34px;
-    height: 34px;
-    padding: 0;
-    border-radius: 999px;
-  }
-
-  .hermes-messages {
-    padding: 16px;
-    overflow: auto;
-    display: grid;
-    gap: 10px;
-  }
-
-  .hermes-message {
-    padding: 10px 12px;
-    border-radius: 16px;
-    border: 1px solid rgba(143,178,255,0.14);
-    background: rgba(255,255,255,0.055);
-    color: var(--ink-soft);
-    line-height: 1.55;
-    white-space: pre-wrap;
-  }
-
-  .hermes-message.user {
-    background: rgba(39,245,255,0.12);
-    color: var(--ink);
-    border-color: rgba(39,245,255,0.22);
-  }
-
-  .hermes-message.error {
-    background: rgba(255,79,139,0.12);
-    color: #ffcad8;
-    border-color: rgba(255,79,139,0.30);
-  }
-
-  .hermes-form {
-    padding: 14px;
-    border-top: 1px solid rgba(143,178,255,0.16);
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-  }
-
-  .hermes-form input {
-    min-height: 44px;
-    border-radius: 16px;
-    border: 1px solid rgba(143,178,255,0.24);
-    background: rgba(3,7,18,0.58);
-    color: var(--ink);
-    padding: 10px 12px;
-    outline: none;
-  }
-
   .login-orb {
     position: absolute;
     border-radius: 999px;
@@ -1638,12 +1518,6 @@
     .reset-dialog-actions button { width: 100%; }
   }
 
-  .worker-result-filter.active {
-    border-color: rgba(39,245,255,0.58);
-    background: rgba(39,245,255,0.14);
-    color: #ffffff;
-  }
-
   .locked-access-note {
     margin-top: 12px;
     padding: 12px 14px;
@@ -2644,10 +2518,6 @@
     .qris-parser-mode { display: grid; grid-template-columns: 1fr; width: 100%; }
     .controls { align-items: stretch; }
     button, select { width: 100%; }
-    .hermes-widget { right: 14px; bottom: 14px; }
-    .hermes-fab { width: 58px; flex: 0 0 58px; }
-    .hermes-close { width: 34px; }
-    .hermes-form button { width: auto; }
     th, td { padding: 11px 12px; }
   }
 </style>
@@ -2917,6 +2787,34 @@
         </div>
       </section>
     </div>
+
+    <section class="card" style="margin-top:24px;" id="telegramParserInputSection">
+      <div class="card-title">Input dari Telegram</div>
+      <div class="card-desc">Batch deposit dari Telegram Parser QRIS. Bagian ini hanya menampilkan hasil ingest dan tidak mengubah input Parser QRIS manual.</div>
+      <div class="bonus-actions">
+        <button type="button" id="telegramParserRefreshBtn" class="ghost">Refresh Batch Telegram</button>
+      </div>
+      <div id="telegramParserNote" class="source-note">Belum memuat batch Telegram Parser QRIS.</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Batch Code</th><th>Tanggal Bonus</th><th>Source</th><th>Status</th><th class="num">Parsed</th><th class="num">Ready</th><th class="num">Skipped</th><th class="num">Manual Review</th><th>Detail</th></tr></thead>
+          <tbody id="telegramParserBatchTable"><tr><td colspan="9" class="empty">Klik Refresh Batch Telegram untuk memuat data.</td></tr></tbody>
+        </table>
+      </div>
+      <div id="telegramParserDetail" style="display:none; margin-top:18px;">
+        <div class="card-title">Detail Batch Telegram</div>
+        <div id="telegramParserDetailNote" class="source-note"></div>
+        <div class="bonus-actions">
+          <button type="button" id="telegramParserCancelBtn" class="danger superadmin-only" style="display:none;">Cancel Preview</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Application Time</th><th>Login ID</th><th>Member</th><th class="num">Nominal</th><th class="num">Fee</th><th class="num">Total</th><th>Status</th></tr></thead>
+            <tbody id="telegramParserDepositDetailTable"><tr><td colspan="8" class="empty">Pilih batch untuk melihat detail.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
     </section>
 
     <section class="tool-panel" id="panel-bonus">
@@ -3013,6 +2911,28 @@
           </div>
         </section>
       </div>
+
+      <section class="card" style="margin-top:24px;" id="telegramBonusPreviewSection">
+        <div class="card-title">Preview Batch Telegram Parser QRIS</div>
+        <div class="card-desc">Preview ini terpisah dari flow Bonus Harian manual. Tidak ada approval atau release worker pada tahap ini.</div>
+        <div class="bonus-actions"><button type="button" id="telegramBonusRefreshBtn" class="ghost">Refresh Preview Telegram</button></div>
+        <div id="telegramBonusPreviewNote" class="source-note">Belum memuat preview Telegram.</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Batch Code</th><th>Tanggal</th><th>Source</th><th>Status</th><th class="num">Ready</th><th class="num">Skipped</th><th class="num">Manual Review</th><th class="num">Total Bonus BO</th><th>Detail</th></tr></thead>
+            <tbody id="telegramBonusPreviewTable"><tr><td colspan="9" class="empty">Klik Refresh Preview Telegram untuk memuat data.</td></tr></tbody>
+          </table>
+        </div>
+        <div id="telegramBonusItemWrap" style="display:none; margin-top:18px;">
+          <div id="telegramBonusItemNote" class="source-note"></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>#</th><th>Login ID</th><th>Member</th><th class="num">Deposit Terbesar</th><th class="num">Bonus</th><th>Status</th><th>Warning / Reason</th></tr></thead>
+              <tbody id="telegramBonusItemTable"><tr><td colspan="7" class="empty">Pilih batch untuk melihat item preview.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </section>
 
     <section class="tool-panel" id="panel-claim-mahjong">
@@ -3427,139 +3347,6 @@
           <textarea id="dashboardExcelPreview" style="min-height:220px;" placeholder="TSV preview akan muncul di sini..." readonly></textarea>
         </section>
 
-        <section class="card" hidden aria-hidden="true" style="display:none !important;">
-          <div class="card-title">Hermes Upload Preview</div>
-          <div class="card-desc">Preview batch Bonus Harian dari Hermes Telegram sebelum release manual ke worker.</div>
-          <div class="bonus-actions">
-            <button id="dashboardRefreshHermesBtn" class="primary">Refresh Hermes Preview</button>
-            <button id="dashboardCopyHermesExcelBtn" class="ghost">Copy Excel Preview</button>
-            <button id="dashboardReleaseHermesBtn" class="success">Approve / Release to Worker</button>
-            <button id="dashboardCancelHermesBtn" class="danger" disabled title="Hermes cancel sementara dinonaktifkan.">Cancel Preview</button>
-          </div>
-          <div id="dashboardHermesNote" class="source-note">Hermes preview queue belum dimuat.</div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Batch Code</th>
-                  <th>Source</th>
-                  <th>Bonus Date</th>
-                  <th class="num">Total Eligible</th>
-                  <th class="num">Ready Items</th>
-                  <th class="num">Skipped Already Given</th>
-                  <th class="num">Pending Other Batch</th>
-                  <th class="num">Manual Review</th>
-                  <th class="num">Total Amount BO</th>
-                  <th>Status</th>
-                  <th>Created At</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody id="dashboardHermesTable">
-                <tr><td colspan="12" class="empty">Hermes preview queue belum dibuat.</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="card-title" style="margin-top:18px;">Detail Preview Table</div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>No</th>
-                  <th>Login ID</th>
-                  <th>Login Key</th>
-                  <th>Member ID</th>
-                  <th class="num">Amount BO</th>
-                  <th>Remark</th>
-                  <th>Status</th>
-                  <th>Reason</th>
-                  <th>Warning</th>
-                  <th>Claim Batch ID</th>
-                  <th>Created At</th>
-                </tr>
-              </thead>
-              <tbody id="dashboardHermesDetailTable">
-                <tr><td colspan="11" class="empty">Pilih preview lalu klik Lihat Detail.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="card" id="dashboardHermesWorkerPanel" hidden aria-hidden="true" style="display:none !important;">
-          <div class="card-title">Hermes Worker Status</div>
-          <div class="card-desc">Monitoring task queue dan hasil Local Worker Hermes. BOT tetap berjalan di Local Worker, bukan di Vercel.</div>
-          <div class="bonus-actions">
-            <button id="dashboardRefreshWorkerBtn" class="primary">Refresh Worker Status</button>
-          </div>
-          <div id="dashboardWorkerNote" class="source-note">Klik Refresh Worker Status untuk memuat task.</div>
-
-          <div class="table-wrap" style="margin-top:10px; max-height:340px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>Task ID</th>
-                  <th>Batch Code</th>
-                  <th>Claim Batch ID</th>
-                  <th>Bonus Date</th>
-                  <th>Status</th>
-                  <th class="num">Items</th>
-                  <th>Created</th>
-                  <th>Started</th>
-                  <th>Completed / Failed</th>
-                  <th>Message</th>
-                  <th>Result File</th>
-                  <th>Aksi</th>
-                </tr>
-              </thead>
-              <tbody id="dashboardWorkerTaskTable">
-                <tr><td colspan="12" class="empty">Belum ada status worker.</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="stats" id="dashboardWorkerSummary" style="display:none; margin-top:14px;">
-            <div class="stat"><div class="stat-label">Approved</div><div class="stat-value" id="workerApprovedCount">0</div></div>
-            <div class="stat"><div class="stat-label">Manual Review</div><div class="stat-value" id="workerManualCount">0</div></div>
-            <div class="stat"><div class="stat-label">Rejected</div><div class="stat-value" id="workerRejectedCount">0</div></div>
-            <div class="stat"><div class="stat-label">Failed</div><div class="stat-value" id="workerFailedCount">0</div></div>
-            <div class="stat"><div class="stat-label">Total Items</div><div class="stat-value" id="workerTotalCount">0</div></div>
-            <div class="stat"><div class="stat-label">Member ID Mismatch</div><div class="stat-value" id="workerMismatchCount">0</div></div>
-            <div class="stat"><div class="stat-label">Missing Member ID</div><div class="stat-value" id="workerMissingMemberCount">0</div></div>
-          </div>
-
-          <div class="bonus-actions" id="dashboardWorkerResultActions" style="display:none; margin-top:14px;">
-            <button class="ghost worker-result-filter active" data-worker-filter="ALL">ALL</button>
-            <button class="ghost worker-result-filter" data-worker-filter="APPROVED">APPROVED</button>
-            <button class="ghost worker-result-filter" data-worker-filter="MANUAL_REVIEW">MANUAL REVIEW</button>
-            <button class="ghost worker-result-filter" data-worker-filter="REJECTED">REJECTED</button>
-            <button class="ghost worker-result-filter" data-worker-filter="FAILED">FAILED</button>
-            <button id="dashboardCopyWorkerApprovedBtn" class="success">Copy Approved</button>
-            <button id="dashboardCopyWorkerManualBtn" class="ghost">Copy Manual Review</button>
-            <button id="dashboardCopyWorkerRejectedBtn" class="ghost">Copy Rejected</button>
-            <button id="dashboardCopyWorkerFailedBtn" class="danger">Copy Failed</button>
-            <button id="dashboardCopyWorkerFinalBtn" class="primary">Copy Final Result Excel/TSV</button>
-          </div>
-          <div id="dashboardWorkerResultNote" class="source-note" style="display:none;"></div>
-          <div class="table-wrap" style="margin-top:10px; max-height:420px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>Login ID</th>
-                  <th>Member ID</th>
-                  <th>Member Name</th>
-                  <th class="num">Amount BO</th>
-                  <th>Remark</th>
-                  <th>Status</th>
-                  <th>Reason / Message</th>
-                  <th>Ticket / Trans No</th>
-                </tr>
-              </thead>
-              <tbody id="dashboardWorkerResultTable">
-                <tr><td colspan="8" class="empty">Pilih task lalu klik Lihat Result.</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
       </div>
     </section>
 
@@ -6839,341 +6626,6 @@
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  }
-
-  let dashboardHermesSelectedBatch = null;
-  let dashboardHermesPreviewTsv = '';
-  let dashboardWorkerTasks = [];
-  let dashboardWorkerResultRows = [];
-  let dashboardWorkerSelectedTask = null;
-  let dashboardWorkerFilter = 'ALL';
-  let dashboardWorkerRefreshTimer = null;
-  let dashboardWorkerRefreshing = false;
-
-  function dashboardRenderHermesList(rows) {
-    const table = document.getElementById('dashboardHermesTable');
-    if (!table) return;
-    table.innerHTML = (rows || []).map(row => {
-      const batchCode = row.batch_code || row.claim_batch_id || '';
-      return `
-        <tr>
-          <td>${escapeHtml(batchCode)}</td>
-          <td>${escapeHtml(row.source || 'hermes-telegram')}</td>
-          <td>${escapeHtml(row.bonus_date || '')}</td>
-          <td class="num">${escapeHtml(String(row.total_eligible ?? 0))}</td>
-          <td class="num">${escapeHtml(String(row.ready_items ?? 0))}</td>
-          <td class="num">${escapeHtml(String(row.skipped_already_given ?? 0))}</td>
-          <td class="num">${escapeHtml(String(row.pending_other_batch ?? 0))}</td>
-          <td class="num">${escapeHtml(String(row.manual_review ?? 0))}</td>
-          <td class="num">${escapeHtml(String(row.total_amount_bo ?? 0))}</td>
-          <td>${escapeHtml(row.status || '')}</td>
-          <td>${escapeHtml(row.created_at || '')}</td>
-          <td class="row-actions">
-            <button onclick="dashboardOpenHermesPreview('${escapeHtml(batchCode)}')">Lihat Detail</button>
-          </td>
-        </tr>
-      `;
-    }).join('') || '<tr><td colspan="12" class="empty">Hermes preview queue belum dibuat.</td></tr>';
-  }
-
-  function dashboardRenderHermesDetail(result) {
-    const table = document.getElementById('dashboardHermesDetailTable');
-    if (!table) return;
-    const rows = Array.isArray(result.rows) ? result.rows : [];
-    dashboardHermesSelectedBatch = result.batch || null;
-    const summary = result.summary || {};
-    const note = document.getElementById('dashboardHermesNote');
-    if (note) {
-      note.innerHTML = `
-        <span class="status-badge active">READY: ${escapeHtml(String(summary.READY || 0))}</span>
-        <span class="status-badge inactive">Already Given: ${escapeHtml(String(summary.SKIPPED_ALREADY_GIVEN || 0))}</span>
-        <span class="status-badge pending">Pending Other Batch: ${escapeHtml(String(summary.PENDING_OTHER_BATCH || 0))}</span>
-        <span class="status-badge warning">Manual Review: ${escapeHtml(String(summary.MANUAL_REVIEW || 0))}</span>
-      `;
-    }
-    table.innerHTML = rows.map(row => `
-      <tr>
-        <td>${escapeHtml(String(row.No ?? ''))}</td>
-        <td>${escapeHtml(row.login_id || '')}</td>
-        <td>${escapeHtml(row.login_key || '')}</td>
-        <td>${escapeHtml(row.member_id || '')}</td>
-        <td class="num">${escapeHtml(String(row.amount_bo ?? ''))}</td>
-        <td>${escapeHtml(row.remark || '')}</td>
-        <td>${escapeHtml(row.status || '')}</td>
-        <td>${escapeHtml(row.reason || '')}</td>
-        <td>${escapeHtml(row.warning || '')}</td>
-        <td>${escapeHtml(row.claim_batch_id || '')}</td>
-        <td>${escapeHtml(row.created_at || '')}</td>
-      </tr>
-    `).join('') || `<tr><td colspan="11" class="empty">${escapeHtml(result.message || 'Detail preview belum tersimpan. Generate ulang preview setelah migration.')}</td></tr>`;
-  }
-
-  async function dashboardOpenHermesPreview(claimBatchId) {
-    if (!dashboardRequireSuperadmin() || !claimBatchId) return;
-    try {
-      const result = await bonusControlApi('hermes_preview_detail', { claim_batch_id: claimBatchId });
-      dashboardRenderHermesDetail(result);
-      dashboardHermesPreviewTsv = '';
-      showToast(`Detail preview ${claimBatchId} dimuat.`, 'success');
-    } catch (error) {
-      console.error('dashboard hermes_preview_detail error:', error);
-      showToast(error.message || 'Gagal memuat detail preview Hermes.', 'error');
-    }
-  }
-
-  async function dashboardRefreshHermes() {
-    if (!dashboardRequireSuperadmin()) return;
-    const btn = document.getElementById('dashboardRefreshHermesBtn');
-    setButtonLoading(btn, true, 'Refresh...');
-    try {
-      const result = await bonusControlApi('hermes_preview_list', { bonus_date: dashboardDateValue() });
-      const note = document.getElementById('dashboardHermesNote');
-      if (note) note.textContent = result.message || 'Hermes preview queue dimuat.';
-      const rows = Array.isArray(result.rows) ? result.rows : [];
-      dashboardRenderHermesList(rows);
-      showToast(result.message || 'Hermes preview status dimuat.', rows?.length ? 'success' : '');
-    } catch (error) {
-      console.error('dashboard hermes_preview_list error:', error);
-      showToast(error.message || 'Gagal refresh Hermes preview.', 'error');
-    } finally {
-      setButtonLoading(btn, false);
-    }
-  }
-
-  async function dashboardCopyHermesExcel() {
-    if (!dashboardRequireSuperadmin()) return;
-    try {
-      const claimBatchId = dashboardHermesSelectedBatch?.claim_batch_id || dashboardHermesSelectedBatch?.batch_code || '';
-      if (!claimBatchId) {
-        showToast('Pilih preview dulu, lalu klik Lihat Detail.', 'error');
-        return;
-      }
-      const result = await bonusControlApi('hermes_preview_export', { claim_batch_id: claimBatchId });
-      dashboardHermesPreviewTsv = result.tsv || '';
-      if (!dashboardHermesPreviewTsv) {
-        showToast('Preview ini belum punya output Excel.', 'error');
-        return;
-      }
-      await copyTextToClipboard(dashboardHermesPreviewTsv);
-      showToast('Preview Hermes dicopy ke Excel.', 'success');
-    } catch (error) {
-      console.error('dashboard copy hermes error:', error);
-      showToast(error.message || 'Gagal copy Hermes preview.', 'error');
-    }
-  }
-
-  async function dashboardReleaseHermesPreview() {
-    if (!dashboardRequireSuperadmin()) return;
-    const claimBatchId = dashboardHermesSelectedBatch?.claim_batch_id || dashboardHermesSelectedBatch?.batch_code || '';
-    if (!claimBatchId) return showToast('Pilih preview dulu, lalu klik Lihat Detail.', 'error');
-    if (!window.confirm(`Approve dan kirim preview ${claimBatchId} ke Hermes task queue? BOT tetap berjalan di Hermes VPS, bukan dari Vercel.`)) return;
-    try {
-      const result = await bonusControlApi('hermes_preview_release', {
-        claim_batch_id: claimBatchId,
-        operator_name: currentOperatorName(),
-        role: currentOperator?.role || ''
-      });
-      showToast(`Task berhasil dikirim ke Hermes. Task ID: ${result.task_id || '-'}`, 'success');
-      await dashboardRefreshHermes();
-      await dashboardOpenHermesPreview(claimBatchId);
-      console.info('Hermes release task response', {
-        task_id: result.task_id || '',
-        task_response: result.task_response || null,
-        task_payload: result.task_payload || null
-      });
-    } catch (error) {
-      console.error('dashboard hermes_preview_release error:', error);
-      showToast(error.code === 'NO_READY_ITEMS' ? 'Tidak ada item READY untuk dikirim ke worker.' : (error.message || 'Gagal release preview Hermes.'), 'error');
-    }
-  }
-
-  async function dashboardCancelHermesPreview() {
-    if (!dashboardRequireSuperadmin()) return;
-    showToast('Hermes cancel sementara dinonaktifkan.', 'error');
-    return;
-    const claimBatchId = dashboardHermesSelectedBatch?.claim_batch_id || dashboardHermesSelectedBatch?.batch_code || '';
-    if (!claimBatchId) return showToast('Pilih preview dulu, lalu klik Lihat Detail.', 'error');
-    if (!window.confirm(`Cancel preview ${claimBatchId}? Data tidak dihapus, item PENDING akan dijadikan EXPIRED.`)) return;
-    try {
-      const result = await bonusControlApi('hermes_preview_cancel', {
-        claim_batch_id: claimBatchId,
-        operator_name: currentOperatorName(),
-        role: currentOperator?.role || ''
-      });
-      showToast(`Preview ${claimBatchId} dibatalkan. Rows: ${result.cancelled_rows || 0}.`, 'success');
-      await dashboardRefreshHermes();
-      await dashboardOpenHermesPreview(claimBatchId);
-    } catch (error) {
-      console.error('dashboard hermes_preview_cancel error:', error);
-      showToast(error.message || 'Gagal cancel preview Hermes.', 'error');
-    }
-  }
-
-  function stopHermesWorkerAutoRefresh() {
-    if (dashboardWorkerRefreshTimer) clearTimeout(dashboardWorkerRefreshTimer);
-    dashboardWorkerRefreshTimer = null;
-  }
-
-  function scheduleHermesWorkerAutoRefresh(tasks = dashboardWorkerTasks) {
-    stopHermesWorkerAutoRefresh();
-    if (!isSuperadmin() || !document.getElementById('panel-dashboard')?.classList.contains('active')) return;
-    const active = (tasks || []).some(task => ['PENDING', 'RUNNING'].includes(String(task.status || '').toUpperCase()));
-    dashboardWorkerRefreshTimer = setTimeout(() => {
-      dashboardRefreshHermesWorker({ silent: true });
-    }, active ? 5000 : 30000);
-  }
-
-  function workerTaskStatusClass(status) {
-    const value = String(status || '').toUpperCase();
-    if (value === 'COMPLETED') return 'active';
-    if (value === 'FAILED') return 'inactive';
-    return 'pending';
-  }
-
-  function dashboardRenderWorkerTasks(tasks) {
-    const table = document.getElementById('dashboardWorkerTaskTable');
-    if (!table) return;
-    dashboardWorkerTasks = Array.isArray(tasks) ? tasks : [];
-    if (dashboardWorkerTasks[0]) dashboardRenderWorkerSummary(dashboardWorkerTasks[0].summary || {});
-    table.innerHTML = dashboardWorkerTasks.map(task => {
-      const taskId = String(task.task_id || task.id || '');
-      const resultFile = String(task.result_file || '');
-      const finishedAt = task.completed_at || task.failed_at || '';
-      return `
-        <tr>
-          <td>${escapeHtml(taskId)}</td>
-          <td>${escapeHtml(task.batch_code || '')}</td>
-          <td>${escapeHtml(task.claim_batch_id || '')}</td>
-          <td>${escapeHtml(task.bonus_date || '')}</td>
-          <td><span class="status-badge ${workerTaskStatusClass(task.status)}">${escapeHtml(task.status || '')}</span></td>
-          <td class="num">${escapeHtml(String(task.item_count ?? 0))}</td>
-          <td>${escapeHtml(task.created_at || '')}</td>
-          <td>${escapeHtml(task.started_at || '')}</td>
-          <td>${escapeHtml(finishedAt)}</td>
-          <td>${escapeHtml(task.message || '')}</td>
-          <td>${escapeHtml(resultFile)}</td>
-          <td><button onclick="dashboardOpenHermesWorkerResult('${escapeHtml(taskId)}', '${escapeHtml(resultFile)}')">Lihat Result</button></td>
-        </tr>
-      `;
-    }).join('') || '<tr><td colspan="12" class="empty">Belum ada task Hermes Worker.</td></tr>';
-  }
-
-  function dashboardRenderWorkerSummary(summary = {}) {
-    const wrap = document.getElementById('dashboardWorkerSummary');
-    if (wrap) wrap.style.display = '';
-    dashboardSetText('workerApprovedCount', summary.approved_success ?? summary.approved ?? 0);
-    dashboardSetText('workerManualCount', summary.manual_review ?? 0);
-    dashboardSetText('workerRejectedCount', summary.auto_rejected ?? summary.rejected ?? 0);
-    dashboardSetText('workerFailedCount', summary.failed ?? 0);
-    dashboardSetText('workerTotalCount', summary.total_items ?? dashboardWorkerResultRows.length ?? 0);
-    dashboardSetText('workerMismatchCount', summary.member_id_mismatch ?? 0);
-    dashboardSetText('workerMissingMemberCount', summary.missing_member_id ?? 0);
-  }
-
-  function workerResultCategory(row) {
-    const value = String(row.status || '').toUpperCase().replace(/[\s-]+/g, '_');
-    if (/MANUAL|REVIEW/.test(value)) return 'MANUAL_REVIEW';
-    if (/REJECT/.test(value)) return 'REJECTED';
-    if (/FAIL|ERROR/.test(value)) return 'FAILED';
-    if (/APPROV|SUCCESS|COMPLETED|DONE/.test(value)) return 'APPROVED';
-    return value || 'FAILED';
-  }
-
-  function workerRowsByFilter(filter = dashboardWorkerFilter) {
-    if (filter === 'ALL') return dashboardWorkerResultRows;
-    return dashboardWorkerResultRows.filter(row => workerResultCategory(row) === filter);
-  }
-
-  function dashboardRenderWorkerResult() {
-    const table = document.getElementById('dashboardWorkerResultTable');
-    const actions = document.getElementById('dashboardWorkerResultActions');
-    const note = document.getElementById('dashboardWorkerResultNote');
-    if (!table) return;
-    const rows = workerRowsByFilter();
-    if (actions) actions.style.display = dashboardWorkerResultRows.length ? '' : 'none';
-    if (note) {
-      note.style.display = '';
-      note.textContent = `${dashboardWorkerSelectedTask?.task_id || ''} - ${dashboardWorkerFilter}: ${rows.length} item.`;
-    }
-    document.querySelectorAll('.worker-result-filter').forEach(button => {
-      button.classList.toggle('active', button.dataset.workerFilter === dashboardWorkerFilter);
-    });
-    table.innerHTML = rows.map(row => `
-      <tr>
-        <td>${escapeHtml(row.login_id || '')}</td>
-        <td>${escapeHtml(row.member_id || '')}</td>
-        <td>${escapeHtml(row.member_name || '')}</td>
-        <td class="num">${escapeHtml(String(row.amount_bo ?? ''))}</td>
-        <td>${escapeHtml(row.remark || '')}</td>
-        <td><span class="status-badge ${workerTaskStatusClass(workerResultCategory(row) === 'APPROVED' ? 'COMPLETED' : workerResultCategory(row) === 'FAILED' ? 'FAILED' : 'PENDING')}">${escapeHtml(row.status || '')}</span></td>
-        <td>${escapeHtml(row.reason || row.message || '')}</td>
-        <td>${escapeHtml(row.ticket || row.trans_no || '')}</td>
-      </tr>
-    `).join('') || `<tr><td colspan="8" class="empty">Tidak ada item ${escapeHtml(dashboardWorkerFilter)}.</td></tr>`;
-  }
-
-  async function dashboardRefreshHermesWorker(options = {}) {
-    if (!isSuperadmin() || dashboardWorkerRefreshing) return;
-    const button = document.getElementById('dashboardRefreshWorkerBtn');
-    const note = document.getElementById('dashboardWorkerNote');
-    dashboardWorkerRefreshing = true;
-    if (!options.silent) setButtonLoading(button, true, 'Refresh...');
-    try {
-      const result = await bonusControlApi('hermes_worker_tasks');
-      dashboardRenderWorkerTasks(result.tasks || []);
-      if (note) note.textContent = result.message || 'Status Hermes Worker dimuat.';
-      if (!options.silent) showToast(result.message || 'Status Hermes Worker dimuat.', 'success');
-      scheduleHermesWorkerAutoRefresh(result.tasks || []);
-    } catch (error) {
-      if (note) note.textContent = 'Hermes tidak dapat dihubungi.';
-      if (!options.silent) showToast(error.message || 'Hermes tidak dapat dihubungi.', 'error');
-      scheduleHermesWorkerAutoRefresh([]);
-    } finally {
-      dashboardWorkerRefreshing = false;
-      if (!options.silent) setButtonLoading(button, false);
-    }
-  }
-
-  async function dashboardOpenHermesWorkerResult(taskId, resultFile = '') {
-    if (!dashboardRequireSuperadmin()) return;
-    dashboardWorkerSelectedTask = dashboardWorkerTasks.find(task => String(task.task_id || task.id || '') === String(taskId)) || { task_id: taskId, result_file: resultFile };
-    const note = document.getElementById('dashboardWorkerResultNote');
-    if (note) {
-      note.style.display = '';
-      note.textContent = 'Memuat result Hermes Worker...';
-    }
-    try {
-      const result = await bonusControlApi('hermes_worker_result', { task_id: taskId, result_file: resultFile });
-      dashboardWorkerResultRows = Array.isArray(result.rows) ? result.rows : [];
-      dashboardWorkerFilter = 'ALL';
-      dashboardRenderWorkerSummary(result.summary || dashboardWorkerSelectedTask.summary || {});
-      dashboardRenderWorkerResult();
-      showToast(`Result worker dimuat: ${dashboardWorkerResultRows.length} item.`, 'success');
-    } catch (error) {
-      dashboardWorkerResultRows = [];
-      dashboardRenderWorkerResult();
-      if (note) note.textContent = error.code === 'RESULT_ENDPOINT_NOT_AVAILABLE'
-        ? 'Endpoint detail result Hermes belum tersedia.'
-        : (error.message || 'Gagal memuat result Hermes Worker.');
-      showToast(note?.textContent || 'Gagal memuat result Hermes Worker.', 'error');
-    }
-  }
-
-  function workerRowsToTsv(rows) {
-    const columns = ['Login ID', 'Member ID', 'Member Name', 'Amount BO', 'Remark', 'Status', 'Reason / Message', 'Ticket / Trans No'];
-    const values = (rows || []).map(row => [
-      row.login_id || '', row.member_id || '', row.member_name || '', row.amount_bo ?? '',
-      row.remark || '', row.status || '', row.reason || row.message || '', row.ticket || row.trans_no || ''
-    ]);
-    return [columns, ...values].map(cells => cells.map(value => String(value ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
-  }
-
-  async function dashboardCopyWorkerRows(filter) {
-    if (!dashboardRequireSuperadmin()) return;
-    const rows = filter === 'ALL' ? dashboardWorkerResultRows : dashboardWorkerResultRows.filter(row => workerResultCategory(row) === filter);
-    if (!rows.length) return showToast(`Tidak ada item ${filter} untuk dicopy.`, 'error');
-    await copyTextToClipboard(workerRowsToTsv(rows));
-    showToast(`${rows.length} item ${filter} dicopy ke Excel.`, 'success');
   }
 
   async function adminLogBonusClaimCopy(copiedCount) {
@@ -11231,5 +10683,6 @@
   });
 })();
 </script>
+<script src="/telegram-parser-preview.js"></script>
 </body>
 </html>

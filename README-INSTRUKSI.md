@@ -13,6 +13,23 @@ OCR_SPACE_API_KEY=isi_api_key_ocr_space
 
 `OCR_SPACE_API_KEY` hanya dipakai backend untuk fitur Klaim Mahjong di `index.html`. Jika belum diisi, OCR API tidak aktif dan helper tetap bisa dipakai dengan input manual.
 
+Untuk endpoint ingest Telegram Parser QRIS Tahap 2B, tambahkan token terpisah:
+
+```text
+TELEGRAM_PARSER_QRIS_API_TOKEN=isi_random_panjang_dan_rahasia
+```
+
+Token ini hanya untuk `/api/telegram-parser-qris?action=ingest` dan tidak mengaktifkan Hermes, approval, atau local worker.
+
+Contoh test `raw_text` tanpa Telegram Bot:
+
+```bash
+curl -X POST "https://DOMAIN-VERCEL-ANDA/api/telegram-parser-qris?action=ingest" \
+  -H "Authorization: Bearer TOKEN_RAHASIA" \
+  -H "Content-Type: application/json" \
+  -d '{"bonus_date":"2026-06-21","idempotency_key":"test-raw-001","raw_text":"Login ID,Member ID,Member Name,Application Time (GMT+8),Payment,Payment Method,Currency,Amount,Fee,Status\nTESTUSER1,1001,Member Satu,06/21/2026 10:00:00,QRIS IM,QRIS,IDR,100.00,0.70,Approved"}'
+```
+
 Untuk membuat admin pertama dari browser, aktifkan sementara:
 
 ```text
@@ -31,6 +48,14 @@ feature_access_locks.sql
 ```
 
 `feature_access_locks.sql` diperlukan agar menu `Kontrol Akses Menu` di Admin Operator bisa mengunci/membuka fitur untuk role selain superadmin.
+
+Tahap 2B memiliki migration terpisah yang harus direview dan dijalankan manual:
+
+```text
+telegram_parser_qris_preview.sql
+```
+
+Migration tersebut hanya membuat tabel ingest/preview Telegram. Migration tidak menulis `bonus_done_daily`, tidak membuat `bonus_process_locks`, dan tidak menjalankan task worker.
 
 SQL penting untuk operator:
 
