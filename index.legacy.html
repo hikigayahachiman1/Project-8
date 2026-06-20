@@ -1434,6 +1434,210 @@
     display: none;
   }
 
+  .admin-only {
+    display: none;
+  }
+
+  .reset-bonus-dialog {
+    position: fixed;
+    inset: 0;
+    width: min(520px, calc(100vw - 32px));
+    max-height: min(720px, calc(100vh - 32px));
+    margin: auto;
+    padding: 0;
+    overflow: auto;
+    border: 1px solid rgba(39, 245, 255, 0.42);
+    border-radius: 8px;
+    background: #11152a;
+    color: var(--ink);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.64), 0 0 32px rgba(39, 245, 255, 0.12);
+  }
+
+  .reset-bonus-dialog::backdrop {
+    background: rgba(4, 7, 18, 0.82);
+  }
+
+  .reset-dialog-body {
+    position: relative;
+    padding: 28px;
+  }
+
+  .reset-dialog-body::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 28px;
+    right: 28px;
+    height: 3px;
+    background: #27f5ff;
+    box-shadow: 0 0 16px rgba(39, 245, 255, 0.5);
+  }
+
+  .reset-dialog-kicker {
+    margin: 2px 0 7px;
+    color: #27f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .reset-dialog-body h3 {
+    margin: 0;
+    font-size: 1.2rem;
+  }
+
+  .reset-dialog-subtitle {
+    margin: 8px 0 0;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    line-height: 1.55;
+  }
+
+  .reset-warning {
+    padding: 14px 16px;
+    margin: 18px 0;
+    border: 1px solid rgba(255, 77, 109, 0.34);
+    border-left: 3px solid #ff4d6d;
+    border-radius: 6px;
+    background: #231628;
+    color: #ffe4e9;
+    font-size: 0.79rem;
+    line-height: 1.55;
+  }
+
+  .reset-impact-title {
+    margin-bottom: 10px;
+    color: #ff9bab;
+    font-weight: 800;
+  }
+
+  .reset-impact-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .reset-impact-stat {
+    padding: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 5px;
+    background: #15192c;
+  }
+
+  .reset-impact-stat span {
+    display: block;
+    color: #9da9c8;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+  }
+
+  .reset-impact-stat strong {
+    display: block;
+    margin-top: 4px;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+  }
+
+  .reset-challenge-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .reset-challenge-grid label {
+    display: grid;
+    gap: 7px;
+    padding: 13px 14px;
+    border: 1px solid rgba(39, 245, 255, 0.14);
+    border-radius: 6px;
+    background: #0c1122;
+    color: #c8d1e8;
+    font-size: 0.78rem;
+  }
+
+  .reset-challenge-grid input[type="text"],
+  .reset-challenge-grid input[type="number"] {
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 12px;
+    border: 1px solid rgba(142, 158, 199, 0.34);
+    border-radius: 6px;
+    outline: none;
+    background: #080d1b;
+    color: #f2f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+  }
+
+  .reset-challenge-grid input[type="text"]:focus,
+  .reset-challenge-grid input[type="number"]:focus {
+    border-color: #27f5ff;
+    box-shadow: 0 0 0 3px rgba(39, 245, 255, 0.1);
+  }
+
+  .reset-step-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #f2f5ff;
+    font-weight: 800;
+  }
+
+  .reset-step-number {
+    display: inline-grid;
+    width: 23px;
+    height: 23px;
+    place-items: center;
+    flex: 0 0 23px;
+    border: 1px solid rgba(39, 245, 255, 0.46);
+    border-radius: 50%;
+    color: #27f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.66rem;
+  }
+
+  .reset-confirm-check {
+    display: flex !important;
+    grid-template-columns: none;
+    align-items: flex-start;
+    gap: 9px !important;
+  }
+
+  .reset-confirm-check input {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    margin-top: 2px;
+    accent-color: #27f5ff;
+  }
+
+  .reset-dialog-error {
+    min-height: 18px;
+    margin-top: 10px;
+    color: #ff9bab;
+    font-size: 0.76rem;
+  }
+
+  .reset-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .reset-dialog-actions button {
+    min-height: 42px;
+  }
+
+  @media (max-width: 560px) {
+    .reset-dialog-body { padding: 24px 18px 20px; }
+    .reset-dialog-body::before { left: 18px; right: 18px; }
+    .reset-impact-stats { grid-template-columns: 1fr; }
+    .reset-dialog-actions { flex-direction: column-reverse; }
+    .reset-dialog-actions button { width: 100%; }
+  }
+
   .worker-result-filter.active {
     border-color: rgba(39,245,255,0.58);
     background: rgba(39,245,255,0.14);
@@ -2476,6 +2680,35 @@
       </div>
     </div>
   </div>
+  <dialog id="bonusResetDialog" class="reset-bonus-dialog">
+    <div class="reset-dialog-body">
+      <div class="reset-dialog-kicker">Admin Security Check</div>
+      <h3>Konfirmasi Reset Bonus Supabase</h3>
+      <p class="reset-dialog-subtitle">Verifikasi tiga langkah diperlukan sebelum data Bonus Harian dihapus.</p>
+      <div id="bonusResetImpact" class="reset-warning"></div>
+      <div class="reset-challenge-grid">
+        <label class="reset-confirm-check">
+          <input id="bonusResetAcknowledge" type="checkbox">
+          <span><span class="reset-step-title"><span class="reset-step-number">1</span>Periksa dampak reset</span><br>Saya memahami data Bonus Harian pada tanggal ini akan dihapus dari Supabase dan tidak dapat dipulihkan dari tombol ini.</span>
+        </label>
+        <label>
+          <span class="reset-step-title"><span class="reset-step-number">2</span>Verifikasi angka</span>
+          <span>Jawab challenge: <strong id="bonusResetChallengeLabel">-</strong></span>
+          <input id="bonusResetChallengeAnswer" type="number" inputmode="numeric" autocomplete="off" placeholder="Masukkan jawaban">
+        </label>
+        <label>
+          <span class="reset-step-title"><span class="reset-step-number">3</span>Konfirmasi perintah</span>
+          <span>Ketik <strong>RESET BONUS</strong> untuk melanjutkan.</span>
+          <input id="bonusResetPhrase" type="text" autocomplete="off" placeholder="RESET BONUS">
+        </label>
+      </div>
+      <div id="bonusResetDialogError" class="reset-dialog-error"></div>
+      <div class="reset-dialog-actions">
+        <button id="bonusResetCancelBtn" class="ghost" type="button">Batal</button>
+        <button id="bonusResetConfirmBtn" class="danger" type="button">Reset Data Supabase</button>
+      </div>
+    </div>
+  </dialog>
   <div class="container">
     <header>
       <div class="dashboard-brand">
@@ -2702,7 +2935,7 @@
             <button id="bonusBatchDoneBtn" class="success superadmin-only">Tandai Batch DONE</button>
             <button id="bonusBatchExpireBtn" class="danger superadmin-only">Batalkan / Expire Batch Saya</button>
             <button id="bonusCopyExcelBtn" class="primary superadmin-only">Copy Output Bonus Harian ke Excel</button>
-            <button id="bonusResetBtn" class="ghost">Reset Bonus</button>
+            <button id="bonusResetBtn" class="danger admin-only">Reset Bonus Supabase</button>
           </div>
           <div class="source-note" id="bonusStatusRefreshInfo" style="display:none;"></div>
           <div class="hint">
@@ -3501,6 +3734,7 @@
   let bonusPendingTimerInterval = null;
   let bonusPendingServerOffsetMs = 0;
   let bonusActiveLock = null;
+  let bonusResetChallenge = null;
   let currentOperator = null;
   let adminOperatorRows = [];
   let currentLoadingSteps = [];
@@ -3798,6 +4032,13 @@
     }
   }
 
+  function applyAdminVisibility() {
+    const allowed = isAdmin();
+    document.querySelectorAll('.admin-only').forEach(el => {
+      el.style.display = allowed ? 'inline-flex' : 'none';
+    });
+  }
+
   function requireOperator() {
     if (currentOperator) return true;
     showOperatorLogin();
@@ -4074,6 +4315,7 @@
     const dashboardTab = document.getElementById('dashboardTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
+    applyAdminVisibility();
     if (dashboardTab) dashboardTab.style.display = isSuperAdmin() ? 'inline-flex' : 'none';
     if (!isSuperAdmin() && document.getElementById('panel-dashboard')?.classList.contains('active')) {
       document.querySelector('[data-panel="parser"]').click();
@@ -8497,7 +8739,7 @@
     }
   }
 
-  function bonusReset() {
+  function resetBonusLocalState() {
     bonusRows = [];
     bonusRemark = '';
     document.getElementById('bonusAdjustRaw').value = '';
@@ -8512,7 +8754,104 @@
     stopBonusPendingTimer();
     updateBonusSourceNote();
     renderBonusDoneInfo();
-    showToast('Data bonus dibersihkan.');
+  }
+
+  async function bonusReset() {
+    if (!requireOperator()) return;
+    if (!isAdmin()) {
+      showToast('Reset Bonus hanya untuk Admin atau Superadmin.', 'error');
+      return;
+    }
+    const bonusDate = document.getElementById('bonusDate').value;
+    if (!bonusDate) {
+      showToast('Pilih tanggal bonus yang akan direset.', 'error');
+      return;
+    }
+
+    const button = document.getElementById('bonusResetBtn');
+    setButtonLoading(button, true, 'Memeriksa data...');
+    try {
+      const result = await bonusControlApi('reset_bonus_prepare', { bonus_date: bonusDate });
+      bonusResetChallenge = {
+        bonusDate,
+        token: result.challenge_token || ''
+      };
+      document.getElementById('bonusResetImpact').innerHTML = `
+        <div class="reset-impact-title">Tindakan ini menghapus data secara permanen.</div>
+        <div class="reset-impact-stats">
+          <div class="reset-impact-stat"><span>Tanggal</span><strong>${escapeHtml(bonusDate)}</strong></div>
+          <div class="reset-impact-stat"><span>Data Bonus</span><strong>${Number(result.affected_bonus_rows || 0)}</strong></div>
+          <div class="reset-impact-stat"><span>Lock Terkait</span><strong>${Number(result.affected_lock_rows || 0)}</strong></div>
+        </div>
+        <div style="margin-top:10px; color:#b6c0da;">Challenge berlaku ${Number(result.expires_in_seconds || 120)} detik.</div>
+      `;
+      document.getElementById('bonusResetChallengeLabel').textContent = result.challenge || '-';
+      document.getElementById('bonusResetChallengeAnswer').value = '';
+      document.getElementById('bonusResetPhrase').value = '';
+      document.getElementById('bonusResetAcknowledge').checked = false;
+      document.getElementById('bonusResetDialogError').textContent = '';
+      document.getElementById('bonusResetDialog').showModal();
+      document.getElementById('bonusResetChallengeAnswer').focus();
+    } catch (error) {
+      console.error('reset bonus prepare error:', error);
+      showToast(error.message || 'Gagal menyiapkan reset Bonus.', 'error');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  function closeBonusResetDialog() {
+    const dialog = document.getElementById('bonusResetDialog');
+    if (dialog?.open) dialog.close();
+    bonusResetChallenge = null;
+  }
+
+  async function confirmBonusReset() {
+    const errorBox = document.getElementById('bonusResetDialogError');
+    const acknowledged = document.getElementById('bonusResetAcknowledge').checked;
+    const answer = document.getElementById('bonusResetChallengeAnswer').value.trim();
+    const phrase = document.getElementById('bonusResetPhrase').value.trim();
+    if (!bonusResetChallenge) {
+      errorBox.textContent = 'Challenge reset tidak tersedia. Tutup dialog lalu mulai ulang.';
+      return;
+    }
+    if (!acknowledged) {
+      errorBox.textContent = 'Centang pernyataan risiko terlebih dahulu.';
+      return;
+    }
+    if (!answer || phrase.toUpperCase() !== 'RESET BONUS') {
+      errorBox.textContent = 'Jawab verifikasi angka dan ketik RESET BONUS dengan benar.';
+      return;
+    }
+    if (!window.confirm(`Konfirmasi terakhir: hapus data Bonus Harian Supabase tanggal ${bonusResetChallenge.bonusDate}?`)) return;
+
+    const button = document.getElementById('bonusResetConfirmBtn');
+    setButtonLoading(button, true, 'Mereset...');
+    errorBox.textContent = '';
+    try {
+      const result = await bonusControlApi('reset_bonus_execute', {
+        bonus_date: bonusResetChallenge.bonusDate,
+        challenge_token: bonusResetChallenge.token,
+        challenge_answer: answer,
+        confirmation_phrase: phrase
+      });
+      const resetDate = bonusResetChallenge.bonusDate;
+      document.getElementById('bonusResetDialog').close();
+      bonusResetChallenge = null;
+      const localDoneStore = getBonusDoneStore();
+      delete localDoneStore[resetDate];
+      saveBonusDoneStore(localDoneStore);
+      delete bonusRemoteDoneCache[resetDate];
+      delete bonusRemotePendingCache[resetDate];
+      resetBonusLocalState();
+      showToast(`${result.message} ${result.deleted_bonus_rows || 0} data dan ${result.deleted_lock_rows || 0} lock dihapus.`, 'success');
+    } catch (error) {
+      console.error('reset bonus execute error:', error);
+      errorBox.textContent = error.message || 'Reset Bonus gagal.';
+      showToast(error.message || 'Reset Bonus gagal.', 'error');
+    } finally {
+      setButtonLoading(button, false);
+    }
   }
 
   function bonusRowText(row) {
@@ -9638,6 +9977,12 @@
   document.getElementById('bonusBatchExpireBtn').addEventListener('click', expireBatchFromUi);
   document.getElementById('bonusCopyExcelBtn').addEventListener('click', copyBonusOutputExcelFromUi);
   document.getElementById('bonusResetBtn').addEventListener('click', bonusReset);
+  document.getElementById('bonusResetCancelBtn').addEventListener('click', closeBonusResetDialog);
+  document.getElementById('bonusResetConfirmBtn').addEventListener('click', confirmBonusReset);
+  document.getElementById('bonusResetDialog').addEventListener('cancel', event => {
+    event.preventDefault();
+    closeBonusResetDialog();
+  });
   document.getElementById('bonusCopyAllBtn').addEventListener('click', bonusCopyAll);
   document.getElementById('bonusExportAdjustmentJsonBtn').addEventListener('click', previewAdjustmentBatchJson);
   document.getElementById('adjustmentBatchDownloadBtn').addEventListener('click', downloadAdjustmentBatchJson);

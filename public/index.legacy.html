@@ -1439,13 +1439,18 @@
   }
 
   .reset-bonus-dialog {
+    position: fixed;
+    inset: 0;
     width: min(520px, calc(100vw - 32px));
+    max-height: min(720px, calc(100vh - 32px));
+    margin: auto;
     padding: 0;
-    border: 1px solid rgba(255, 77, 109, 0.55);
+    overflow: auto;
+    border: 1px solid rgba(39, 245, 255, 0.42);
     border-radius: 8px;
-    background: #15172d;
+    background: #11152a;
     color: var(--ink);
-    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.58);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.64), 0 0 32px rgba(39, 245, 255, 0.12);
   }
 
   .reset-bonus-dialog::backdrop {
@@ -1453,22 +1458,86 @@
   }
 
   .reset-dialog-body {
-    padding: 22px;
+    position: relative;
+    padding: 28px;
+  }
+
+  .reset-dialog-body::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 28px;
+    right: 28px;
+    height: 3px;
+    background: #27f5ff;
+    box-shadow: 0 0 16px rgba(39, 245, 255, 0.5);
+  }
+
+  .reset-dialog-kicker {
+    margin: 2px 0 7px;
+    color: #27f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
   }
 
   .reset-dialog-body h3 {
-    margin: 0 0 8px;
-    font-size: 1.05rem;
+    margin: 0;
+    font-size: 1.2rem;
+  }
+
+  .reset-dialog-subtitle {
+    margin: 8px 0 0;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+    line-height: 1.55;
   }
 
   .reset-warning {
-    padding: 12px;
-    margin: 14px 0;
-    border-left: 3px solid var(--danger);
-    background: rgba(255, 77, 109, 0.09);
-    color: #ffd4dc;
-    font-size: 0.82rem;
+    padding: 14px 16px;
+    margin: 18px 0;
+    border: 1px solid rgba(255, 77, 109, 0.34);
+    border-left: 3px solid #ff4d6d;
+    border-radius: 6px;
+    background: #231628;
+    color: #ffe4e9;
+    font-size: 0.79rem;
     line-height: 1.55;
+  }
+
+  .reset-impact-title {
+    margin-bottom: 10px;
+    color: #ff9bab;
+    font-weight: 800;
+  }
+
+  .reset-impact-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .reset-impact-stat {
+    padding: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 5px;
+    background: #15192c;
+  }
+
+  .reset-impact-stat span {
+    display: block;
+    color: #9da9c8;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+  }
+
+  .reset-impact-stat strong {
+    display: block;
+    margin-top: 4px;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
   }
 
   .reset-challenge-grid {
@@ -1479,8 +1548,53 @@
   .reset-challenge-grid label {
     display: grid;
     gap: 7px;
-    color: var(--ink-soft);
+    padding: 13px 14px;
+    border: 1px solid rgba(39, 245, 255, 0.14);
+    border-radius: 6px;
+    background: #0c1122;
+    color: #c8d1e8;
     font-size: 0.78rem;
+  }
+
+  .reset-challenge-grid input[type="text"],
+  .reset-challenge-grid input[type="number"] {
+    width: 100%;
+    min-height: 42px;
+    padding: 10px 12px;
+    border: 1px solid rgba(142, 158, 199, 0.34);
+    border-radius: 6px;
+    outline: none;
+    background: #080d1b;
+    color: #f2f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+  }
+
+  .reset-challenge-grid input[type="text"]:focus,
+  .reset-challenge-grid input[type="number"]:focus {
+    border-color: #27f5ff;
+    box-shadow: 0 0 0 3px rgba(39, 245, 255, 0.1);
+  }
+
+  .reset-step-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #f2f5ff;
+    font-weight: 800;
+  }
+
+  .reset-step-number {
+    display: inline-grid;
+    width: 23px;
+    height: 23px;
+    place-items: center;
+    flex: 0 0 23px;
+    border: 1px solid rgba(39, 245, 255, 0.46);
+    border-radius: 50%;
+    color: #27f5ff;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.66rem;
   }
 
   .reset-confirm-check {
@@ -1491,8 +1605,11 @@
   }
 
   .reset-confirm-check input {
-    width: auto;
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
     margin-top: 2px;
+    accent-color: #27f5ff;
   }
 
   .reset-dialog-error {
@@ -1500,6 +1617,25 @@
     margin-top: 10px;
     color: #ff9bab;
     font-size: 0.76rem;
+  }
+
+  .reset-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 4px;
+  }
+
+  .reset-dialog-actions button {
+    min-height: 42px;
+  }
+
+  @media (max-width: 560px) {
+    .reset-dialog-body { padding: 24px 18px 20px; }
+    .reset-dialog-body::before { left: 18px; right: 18px; }
+    .reset-impact-stats { grid-template-columns: 1fr; }
+    .reset-dialog-actions { flex-direction: column-reverse; }
+    .reset-dialog-actions button { width: 100%; }
   }
 
   .worker-result-filter.active {
@@ -2546,24 +2682,28 @@
   </div>
   <dialog id="bonusResetDialog" class="reset-bonus-dialog">
     <div class="reset-dialog-body">
+      <div class="reset-dialog-kicker">Admin Security Check</div>
       <h3>Konfirmasi Reset Bonus Supabase</h3>
+      <p class="reset-dialog-subtitle">Verifikasi tiga langkah diperlukan sebelum data Bonus Harian dihapus.</p>
       <div id="bonusResetImpact" class="reset-warning"></div>
       <div class="reset-challenge-grid">
         <label class="reset-confirm-check">
           <input id="bonusResetAcknowledge" type="checkbox">
-          <span>Saya memahami data Bonus Harian pada tanggal ini akan dihapus dari Supabase dan tidak dapat dipulihkan dari tombol ini.</span>
+          <span><span class="reset-step-title"><span class="reset-step-number">1</span>Periksa dampak reset</span><br>Saya memahami data Bonus Harian pada tanggal ini akan dihapus dari Supabase dan tidak dapat dipulihkan dari tombol ini.</span>
         </label>
         <label>
-          Verifikasi angka: <strong id="bonusResetChallengeLabel">-</strong>
-          <input id="bonusResetChallengeAnswer" type="number" inputmode="numeric" autocomplete="off" placeholder="Jawaban">
+          <span class="reset-step-title"><span class="reset-step-number">2</span>Verifikasi angka</span>
+          <span>Jawab challenge: <strong id="bonusResetChallengeLabel">-</strong></span>
+          <input id="bonusResetChallengeAnswer" type="number" inputmode="numeric" autocomplete="off" placeholder="Masukkan jawaban">
         </label>
         <label>
-          Ketik <strong>RESET BONUS</strong>
+          <span class="reset-step-title"><span class="reset-step-number">3</span>Konfirmasi perintah</span>
+          <span>Ketik <strong>RESET BONUS</strong> untuk melanjutkan.</span>
           <input id="bonusResetPhrase" type="text" autocomplete="off" placeholder="RESET BONUS">
         </label>
       </div>
       <div id="bonusResetDialogError" class="reset-dialog-error"></div>
-      <div class="bonus-actions">
+      <div class="reset-dialog-actions">
         <button id="bonusResetCancelBtn" class="ghost" type="button">Batal</button>
         <button id="bonusResetConfirmBtn" class="danger" type="button">Reset Data Supabase</button>
       </div>
@@ -8636,8 +8776,15 @@
         bonusDate,
         token: result.challenge_token || ''
       };
-      document.getElementById('bonusResetImpact').textContent =
-        `Tanggal ${bonusDate}: ${result.affected_bonus_rows || 0} data Bonus Harian dan ${result.affected_lock_rows || 0} lock terkait akan dihapus. Challenge berlaku ${result.expires_in_seconds || 120} detik.`;
+      document.getElementById('bonusResetImpact').innerHTML = `
+        <div class="reset-impact-title">Tindakan ini menghapus data secara permanen.</div>
+        <div class="reset-impact-stats">
+          <div class="reset-impact-stat"><span>Tanggal</span><strong>${escapeHtml(bonusDate)}</strong></div>
+          <div class="reset-impact-stat"><span>Data Bonus</span><strong>${Number(result.affected_bonus_rows || 0)}</strong></div>
+          <div class="reset-impact-stat"><span>Lock Terkait</span><strong>${Number(result.affected_lock_rows || 0)}</strong></div>
+        </div>
+        <div style="margin-top:10px; color:#b6c0da;">Challenge berlaku ${Number(result.expires_in_seconds || 120)} detik.</div>
+      `;
       document.getElementById('bonusResetChallengeLabel').textContent = result.challenge || '-';
       document.getElementById('bonusResetChallengeAnswer').value = '';
       document.getElementById('bonusResetPhrase').value = '';
