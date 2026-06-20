@@ -2646,6 +2646,7 @@
       <!-- OUTPUT -->
       <section class="card">
         <div class="card-title">Hasil Terurut</div>
+        <div id="telegramParserLoadedLabel" class="source-note" style="display:none;"></div>
         <div class="card-desc" id="resultDesc">Belum ada data. Paste raw data di kiri lalu klik "Parse &amp; Urutkan".</div>
 
         <div class="stats" id="stats" style="display:none;">
@@ -2693,7 +2694,8 @@
               <th>Nama Rekening</th>
               <th class="num">Nominal</th>
               <th class="num">Potongan QRIS</th>
-              <th class="num">Total (×1000)</th>
+              <th class="num" id="parserTotalHeader">Total (×1000)</th>
+              <th id="telegramParserStatusHeader" style="display:none;">Status</th>
             </tr>
           </thead>
           <tbody id="tbody">
@@ -2805,6 +2807,9 @@
         <div class="card-title">Detail Batch Telegram</div>
         <div id="telegramParserDetailNote" class="source-note"></div>
         <div class="bonus-actions">
+          <button type="button" id="telegramLoadParserBtn" class="primary" style="display:none;">Muat ke Hasil Parser</button>
+          <button type="button" id="telegramCopyExcelBtn" class="success" style="display:none;">Copy Output Excel</button>
+          <button type="button" id="telegramCopyTableBtn" class="ghost" style="display:none;">Copy Tabel</button>
           <button type="button" id="telegramParserCancelBtn" class="danger superadmin-only" style="display:none;">Cancel Preview</button>
         </div>
         <div class="table-wrap">
