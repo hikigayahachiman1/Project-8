@@ -1789,6 +1789,9 @@ async function processGenerateJson(req, ctx) {
   if (source && source !== FIXED_SOURCE) {
     throw parserError('INVALID_SOURCE', 'source harus hermes-telegram.', 400);
   }
+  if (isHermesSource(source || FIXED_SOURCE)) {
+    throw parserError('HERMES_DISABLED', 'Integrasi Hermes sudah dinonaktifkan.', 410);
+  }
 
   const depositPart = multipartPartFromField(files, fields, 'deposit_file');
   const adjustmentPart = multipartPartFromField(files, fields, 'adjustment_file');

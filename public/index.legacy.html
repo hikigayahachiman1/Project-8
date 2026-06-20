@@ -1434,6 +1434,12 @@
     display: none;
   }
 
+  .worker-result-filter.active {
+    border-color: rgba(39,245,255,0.58);
+    background: rgba(39,245,255,0.14);
+    color: #ffffff;
+  }
+
   .locked-access-note {
     margin-top: 12px;
     padding: 12px 14px;
@@ -2470,23 +2476,6 @@
       </div>
     </div>
   </div>
-  <div id="hermesWidget" class="hermes-widget" aria-live="polite">
-    <div class="hermes-panel">
-      <div class="hermes-head">
-        <div>
-          <div id="hermesTitle" class="hermes-title">Hermes Superadmin Debug</div>
-          <div id="hermesSubtitle" class="hermes-subtitle">Tanya panduan kerja Parser QRIS.</div>
-        </div>
-        <button id="hermesCloseBtn" class="hermes-close ghost" type="button" title="Tutup Hermes">×</button>
-      </div>
-      <div id="hermesMessages" class="hermes-messages"></div>
-      <form id="hermesForm" class="hermes-form">
-        <input id="hermesInput" type="text" maxlength="2000" placeholder="Tulis pertanyaan..." autocomplete="off">
-        <button id="hermesSendBtn" class="primary" type="submit">Kirim</button>
-      </form>
-    </div>
-    <button id="hermesToggleBtn" class="hermes-fab primary" type="button" title="Buka Hermes">Hermes</button>
-  </div>
   <div class="container">
     <header>
       <div class="dashboard-brand">
@@ -3085,10 +3074,6 @@
           <div class="card-desc">Status koneksi dashboard superadmin.</div>
           <div class="monitor-grid">
             <div class="stat">
-              <div class="stat-label">Hermes</div>
-              <div class="stat-value" id="dashboardHermesStatus">-</div>
-            </div>
-            <div class="stat">
               <div class="stat-label">Supabase</div>
               <div class="stat-value" id="dashboardSupabaseStatus">-</div>
             </div>
@@ -3209,7 +3194,7 @@
           <textarea id="dashboardExcelPreview" style="min-height:220px;" placeholder="TSV preview akan muncul di sini..." readonly></textarea>
         </section>
 
-        <section class="card">
+        <section class="card" hidden aria-hidden="true" style="display:none !important;">
           <div class="card-title">Hermes Upload Preview</div>
           <div class="card-desc">Preview batch Bonus Harian dari Hermes Telegram sebelum release manual ke worker.</div>
           <div class="bonus-actions">
@@ -3262,6 +3247,82 @@
               </thead>
               <tbody id="dashboardHermesDetailTable">
                 <tr><td colspan="11" class="empty">Pilih preview lalu klik Lihat Detail.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card" id="dashboardHermesWorkerPanel" hidden aria-hidden="true" style="display:none !important;">
+          <div class="card-title">Hermes Worker Status</div>
+          <div class="card-desc">Monitoring task queue dan hasil Local Worker Hermes. BOT tetap berjalan di Local Worker, bukan di Vercel.</div>
+          <div class="bonus-actions">
+            <button id="dashboardRefreshWorkerBtn" class="primary">Refresh Worker Status</button>
+          </div>
+          <div id="dashboardWorkerNote" class="source-note">Klik Refresh Worker Status untuk memuat task.</div>
+
+          <div class="table-wrap" style="margin-top:10px; max-height:340px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Task ID</th>
+                  <th>Batch Code</th>
+                  <th>Claim Batch ID</th>
+                  <th>Bonus Date</th>
+                  <th>Status</th>
+                  <th class="num">Items</th>
+                  <th>Created</th>
+                  <th>Started</th>
+                  <th>Completed / Failed</th>
+                  <th>Message</th>
+                  <th>Result File</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardWorkerTaskTable">
+                <tr><td colspan="12" class="empty">Belum ada status worker.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="stats" id="dashboardWorkerSummary" style="display:none; margin-top:14px;">
+            <div class="stat"><div class="stat-label">Approved</div><div class="stat-value" id="workerApprovedCount">0</div></div>
+            <div class="stat"><div class="stat-label">Manual Review</div><div class="stat-value" id="workerManualCount">0</div></div>
+            <div class="stat"><div class="stat-label">Rejected</div><div class="stat-value" id="workerRejectedCount">0</div></div>
+            <div class="stat"><div class="stat-label">Failed</div><div class="stat-value" id="workerFailedCount">0</div></div>
+            <div class="stat"><div class="stat-label">Total Items</div><div class="stat-value" id="workerTotalCount">0</div></div>
+            <div class="stat"><div class="stat-label">Member ID Mismatch</div><div class="stat-value" id="workerMismatchCount">0</div></div>
+            <div class="stat"><div class="stat-label">Missing Member ID</div><div class="stat-value" id="workerMissingMemberCount">0</div></div>
+          </div>
+
+          <div class="bonus-actions" id="dashboardWorkerResultActions" style="display:none; margin-top:14px;">
+            <button class="ghost worker-result-filter active" data-worker-filter="ALL">ALL</button>
+            <button class="ghost worker-result-filter" data-worker-filter="APPROVED">APPROVED</button>
+            <button class="ghost worker-result-filter" data-worker-filter="MANUAL_REVIEW">MANUAL REVIEW</button>
+            <button class="ghost worker-result-filter" data-worker-filter="REJECTED">REJECTED</button>
+            <button class="ghost worker-result-filter" data-worker-filter="FAILED">FAILED</button>
+            <button id="dashboardCopyWorkerApprovedBtn" class="success">Copy Approved</button>
+            <button id="dashboardCopyWorkerManualBtn" class="ghost">Copy Manual Review</button>
+            <button id="dashboardCopyWorkerRejectedBtn" class="ghost">Copy Rejected</button>
+            <button id="dashboardCopyWorkerFailedBtn" class="danger">Copy Failed</button>
+            <button id="dashboardCopyWorkerFinalBtn" class="primary">Copy Final Result Excel/TSV</button>
+          </div>
+          <div id="dashboardWorkerResultNote" class="source-note" style="display:none;"></div>
+          <div class="table-wrap" style="margin-top:10px; max-height:420px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Login ID</th>
+                  <th>Member ID</th>
+                  <th>Member Name</th>
+                  <th class="num">Amount BO</th>
+                  <th>Remark</th>
+                  <th>Status</th>
+                  <th>Reason / Message</th>
+                  <th>Ticket / Trans No</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardWorkerResultTable">
+                <tr><td colspan="8" class="empty">Pilih task lalu klik Lihat Result.</td></tr>
               </tbody>
             </table>
           </div>
@@ -3433,7 +3494,6 @@
   const OPERATOR_PROFILE_KEY = 'qris_operator_profile_v1';
   const OPERATOR_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
   const OPERATOR_SESSION_TOUCH_THROTTLE_MS = 60 * 1000;
-  const HERMES_WEB_CHAT_ENABLED = false;
   const bonusRemoteDoneCache = {};
   const bonusRemotePendingCache = {};
   const bonusAdjustmentDoneCache = {};
@@ -3664,7 +3724,6 @@
     currentOperator = null;
     window.currentOperator = null;
     stopOperatorActivityTracking();
-    resetHermesWidget();
     const info = document.getElementById('operatorInfo');
     if (info) {
       info.style.display = 'none';
@@ -3875,92 +3934,6 @@
       await logoutOperator();
       window.location.reload();
     });
-    renderHermesWidget();
-  }
-
-  function hermesLabelForRole() {
-    return 'Hermes Superadmin Debug';
-  }
-
-  function resetHermesWidget() {
-    const widget = document.getElementById('hermesWidget');
-    const messages = document.getElementById('hermesMessages');
-    const input = document.getElementById('hermesInput');
-    if (widget) widget.classList.remove('show', 'open');
-    if (messages) messages.innerHTML = '';
-    if (input) input.value = '';
-  }
-
-  function renderHermesWidget() {
-    const widget = document.getElementById('hermesWidget');
-    const title = document.getElementById('hermesTitle');
-    const subtitle = document.getElementById('hermesSubtitle');
-    const messages = document.getElementById('hermesMessages');
-    if (!widget) return;
-    if (!HERMES_WEB_CHAT_ENABLED) {
-      resetHermesWidget();
-      widget.setAttribute('aria-hidden', 'true');
-      return;
-    }
-    if (!currentOperator || !isSuperAdmin()) {
-      resetHermesWidget();
-      return;
-    }
-    widget.classList.add('show');
-    if (title) title.textContent = hermesLabelForRole();
-    if (subtitle) {
-      subtitle.textContent = 'Akses tanya debug/log aman untuk superadmin.';
-    }
-    if (messages && !messages.children.length) {
-      addHermesMessage('Hermes siap membantu. Aksi penting tetap dilakukan lewat Telegram Hermes dengan preview/confirm.', 'bot');
-    }
-  }
-
-  function addHermesMessage(text, type = 'bot') {
-    const messages = document.getElementById('hermesMessages');
-    if (!messages) return;
-    const item = document.createElement('div');
-    item.className = `hermes-message ${type === 'user' ? 'user' : type === 'error' ? 'error' : ''}`;
-    item.textContent = text;
-    messages.appendChild(item);
-    messages.scrollTop = messages.scrollHeight;
-  }
-
-  async function sendHermesQuestion(question) {
-    const response = await fetch('/api/hermes-chat', {
-      method: 'POST',
-      headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ question })
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.ok !== true) {
-      throw new Error(result.message || 'Hermes belum dapat dihubungi.');
-    }
-    return result.answer || 'Hermes belum memberi jawaban.';
-  }
-
-  async function handleHermesSubmit(event) {
-    event.preventDefault();
-    if (!currentOperator || !isSuperAdmin()) {
-      resetHermesWidget();
-      return;
-    }
-    const input = document.getElementById('hermesInput');
-    const button = document.getElementById('hermesSendBtn');
-    const question = String(input?.value || '').trim();
-    if (!question) return;
-    addHermesMessage(question, 'user');
-    input.value = '';
-    setButtonLoading(button, true, '...');
-    try {
-      const answer = await sendHermesQuestion(question);
-      addHermesMessage(answer, 'bot');
-    } catch (error) {
-      addHermesMessage(error.message || 'Hermes belum dapat dihubungi.', 'error');
-    } finally {
-      setButtonLoading(button, false);
-      input.focus();
-    }
   }
 
   function featureKeyForPanel(panel) {
@@ -6362,7 +6335,6 @@
     setButtonLoading(btn, true, 'Refresh...');
     try {
       const result = await bonusControlApi('health');
-      dashboardSetText('dashboardHermesStatus', result.hermes_connected === null ? 'N/A' : (result.hermes_connected ? 'Connected' : 'Error'));
       dashboardSetText('dashboardSupabaseStatus', result.supabase_connected ? 'Connected' : 'Error');
       dashboardSetText('dashboardParserStatus', result.parser_api_connected ? 'OK' : 'Error');
       dashboardSetText('dashboardServerTime', result.server_time || '-');
@@ -6629,6 +6601,12 @@
 
   let dashboardHermesSelectedBatch = null;
   let dashboardHermesPreviewTsv = '';
+  let dashboardWorkerTasks = [];
+  let dashboardWorkerResultRows = [];
+  let dashboardWorkerSelectedTask = null;
+  let dashboardWorkerFilter = 'ALL';
+  let dashboardWorkerRefreshTimer = null;
+  let dashboardWorkerRefreshing = false;
 
   function dashboardRenderHermesList(rows) {
     const table = document.getElementById('dashboardHermesTable');
@@ -6787,6 +6765,173 @@
       console.error('dashboard hermes_preview_cancel error:', error);
       showToast(error.message || 'Gagal cancel preview Hermes.', 'error');
     }
+  }
+
+  function stopHermesWorkerAutoRefresh() {
+    if (dashboardWorkerRefreshTimer) clearTimeout(dashboardWorkerRefreshTimer);
+    dashboardWorkerRefreshTimer = null;
+  }
+
+  function scheduleHermesWorkerAutoRefresh(tasks = dashboardWorkerTasks) {
+    stopHermesWorkerAutoRefresh();
+    if (!isSuperadmin() || !document.getElementById('panel-dashboard')?.classList.contains('active')) return;
+    const active = (tasks || []).some(task => ['PENDING', 'RUNNING'].includes(String(task.status || '').toUpperCase()));
+    dashboardWorkerRefreshTimer = setTimeout(() => {
+      dashboardRefreshHermesWorker({ silent: true });
+    }, active ? 5000 : 30000);
+  }
+
+  function workerTaskStatusClass(status) {
+    const value = String(status || '').toUpperCase();
+    if (value === 'COMPLETED') return 'active';
+    if (value === 'FAILED') return 'inactive';
+    return 'pending';
+  }
+
+  function dashboardRenderWorkerTasks(tasks) {
+    const table = document.getElementById('dashboardWorkerTaskTable');
+    if (!table) return;
+    dashboardWorkerTasks = Array.isArray(tasks) ? tasks : [];
+    if (dashboardWorkerTasks[0]) dashboardRenderWorkerSummary(dashboardWorkerTasks[0].summary || {});
+    table.innerHTML = dashboardWorkerTasks.map(task => {
+      const taskId = String(task.task_id || task.id || '');
+      const resultFile = String(task.result_file || '');
+      const finishedAt = task.completed_at || task.failed_at || '';
+      return `
+        <tr>
+          <td>${escapeHtml(taskId)}</td>
+          <td>${escapeHtml(task.batch_code || '')}</td>
+          <td>${escapeHtml(task.claim_batch_id || '')}</td>
+          <td>${escapeHtml(task.bonus_date || '')}</td>
+          <td><span class="status-badge ${workerTaskStatusClass(task.status)}">${escapeHtml(task.status || '')}</span></td>
+          <td class="num">${escapeHtml(String(task.item_count ?? 0))}</td>
+          <td>${escapeHtml(task.created_at || '')}</td>
+          <td>${escapeHtml(task.started_at || '')}</td>
+          <td>${escapeHtml(finishedAt)}</td>
+          <td>${escapeHtml(task.message || '')}</td>
+          <td>${escapeHtml(resultFile)}</td>
+          <td><button onclick="dashboardOpenHermesWorkerResult('${escapeHtml(taskId)}', '${escapeHtml(resultFile)}')">Lihat Result</button></td>
+        </tr>
+      `;
+    }).join('') || '<tr><td colspan="12" class="empty">Belum ada task Hermes Worker.</td></tr>';
+  }
+
+  function dashboardRenderWorkerSummary(summary = {}) {
+    const wrap = document.getElementById('dashboardWorkerSummary');
+    if (wrap) wrap.style.display = '';
+    dashboardSetText('workerApprovedCount', summary.approved_success ?? summary.approved ?? 0);
+    dashboardSetText('workerManualCount', summary.manual_review ?? 0);
+    dashboardSetText('workerRejectedCount', summary.auto_rejected ?? summary.rejected ?? 0);
+    dashboardSetText('workerFailedCount', summary.failed ?? 0);
+    dashboardSetText('workerTotalCount', summary.total_items ?? dashboardWorkerResultRows.length ?? 0);
+    dashboardSetText('workerMismatchCount', summary.member_id_mismatch ?? 0);
+    dashboardSetText('workerMissingMemberCount', summary.missing_member_id ?? 0);
+  }
+
+  function workerResultCategory(row) {
+    const value = String(row.status || '').toUpperCase().replace(/[\s-]+/g, '_');
+    if (/MANUAL|REVIEW/.test(value)) return 'MANUAL_REVIEW';
+    if (/REJECT/.test(value)) return 'REJECTED';
+    if (/FAIL|ERROR/.test(value)) return 'FAILED';
+    if (/APPROV|SUCCESS|COMPLETED|DONE/.test(value)) return 'APPROVED';
+    return value || 'FAILED';
+  }
+
+  function workerRowsByFilter(filter = dashboardWorkerFilter) {
+    if (filter === 'ALL') return dashboardWorkerResultRows;
+    return dashboardWorkerResultRows.filter(row => workerResultCategory(row) === filter);
+  }
+
+  function dashboardRenderWorkerResult() {
+    const table = document.getElementById('dashboardWorkerResultTable');
+    const actions = document.getElementById('dashboardWorkerResultActions');
+    const note = document.getElementById('dashboardWorkerResultNote');
+    if (!table) return;
+    const rows = workerRowsByFilter();
+    if (actions) actions.style.display = dashboardWorkerResultRows.length ? '' : 'none';
+    if (note) {
+      note.style.display = '';
+      note.textContent = `${dashboardWorkerSelectedTask?.task_id || ''} - ${dashboardWorkerFilter}: ${rows.length} item.`;
+    }
+    document.querySelectorAll('.worker-result-filter').forEach(button => {
+      button.classList.toggle('active', button.dataset.workerFilter === dashboardWorkerFilter);
+    });
+    table.innerHTML = rows.map(row => `
+      <tr>
+        <td>${escapeHtml(row.login_id || '')}</td>
+        <td>${escapeHtml(row.member_id || '')}</td>
+        <td>${escapeHtml(row.member_name || '')}</td>
+        <td class="num">${escapeHtml(String(row.amount_bo ?? ''))}</td>
+        <td>${escapeHtml(row.remark || '')}</td>
+        <td><span class="status-badge ${workerTaskStatusClass(workerResultCategory(row) === 'APPROVED' ? 'COMPLETED' : workerResultCategory(row) === 'FAILED' ? 'FAILED' : 'PENDING')}">${escapeHtml(row.status || '')}</span></td>
+        <td>${escapeHtml(row.reason || row.message || '')}</td>
+        <td>${escapeHtml(row.ticket || row.trans_no || '')}</td>
+      </tr>
+    `).join('') || `<tr><td colspan="8" class="empty">Tidak ada item ${escapeHtml(dashboardWorkerFilter)}.</td></tr>`;
+  }
+
+  async function dashboardRefreshHermesWorker(options = {}) {
+    if (!isSuperadmin() || dashboardWorkerRefreshing) return;
+    const button = document.getElementById('dashboardRefreshWorkerBtn');
+    const note = document.getElementById('dashboardWorkerNote');
+    dashboardWorkerRefreshing = true;
+    if (!options.silent) setButtonLoading(button, true, 'Refresh...');
+    try {
+      const result = await bonusControlApi('hermes_worker_tasks');
+      dashboardRenderWorkerTasks(result.tasks || []);
+      if (note) note.textContent = result.message || 'Status Hermes Worker dimuat.';
+      if (!options.silent) showToast(result.message || 'Status Hermes Worker dimuat.', 'success');
+      scheduleHermesWorkerAutoRefresh(result.tasks || []);
+    } catch (error) {
+      if (note) note.textContent = 'Hermes tidak dapat dihubungi.';
+      if (!options.silent) showToast(error.message || 'Hermes tidak dapat dihubungi.', 'error');
+      scheduleHermesWorkerAutoRefresh([]);
+    } finally {
+      dashboardWorkerRefreshing = false;
+      if (!options.silent) setButtonLoading(button, false);
+    }
+  }
+
+  async function dashboardOpenHermesWorkerResult(taskId, resultFile = '') {
+    if (!dashboardRequireSuperadmin()) return;
+    dashboardWorkerSelectedTask = dashboardWorkerTasks.find(task => String(task.task_id || task.id || '') === String(taskId)) || { task_id: taskId, result_file: resultFile };
+    const note = document.getElementById('dashboardWorkerResultNote');
+    if (note) {
+      note.style.display = '';
+      note.textContent = 'Memuat result Hermes Worker...';
+    }
+    try {
+      const result = await bonusControlApi('hermes_worker_result', { task_id: taskId, result_file: resultFile });
+      dashboardWorkerResultRows = Array.isArray(result.rows) ? result.rows : [];
+      dashboardWorkerFilter = 'ALL';
+      dashboardRenderWorkerSummary(result.summary || dashboardWorkerSelectedTask.summary || {});
+      dashboardRenderWorkerResult();
+      showToast(`Result worker dimuat: ${dashboardWorkerResultRows.length} item.`, 'success');
+    } catch (error) {
+      dashboardWorkerResultRows = [];
+      dashboardRenderWorkerResult();
+      if (note) note.textContent = error.code === 'RESULT_ENDPOINT_NOT_AVAILABLE'
+        ? 'Endpoint detail result Hermes belum tersedia.'
+        : (error.message || 'Gagal memuat result Hermes Worker.');
+      showToast(note?.textContent || 'Gagal memuat result Hermes Worker.', 'error');
+    }
+  }
+
+  function workerRowsToTsv(rows) {
+    const columns = ['Login ID', 'Member ID', 'Member Name', 'Amount BO', 'Remark', 'Status', 'Reason / Message', 'Ticket / Trans No'];
+    const values = (rows || []).map(row => [
+      row.login_id || '', row.member_id || '', row.member_name || '', row.amount_bo ?? '',
+      row.remark || '', row.status || '', row.reason || row.message || '', row.ticket || row.trans_no || ''
+    ]);
+    return [columns, ...values].map(cells => cells.map(value => String(value ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\n');
+  }
+
+  async function dashboardCopyWorkerRows(filter) {
+    if (!dashboardRequireSuperadmin()) return;
+    const rows = filter === 'ALL' ? dashboardWorkerResultRows : dashboardWorkerResultRows.filter(row => workerResultCategory(row) === filter);
+    if (!rows.length) return showToast(`Tidak ada item ${filter} untuk dicopy.`, 'error');
+    await copyTextToClipboard(workerRowsToTsv(rows));
+    showToast(`${rows.length} item ${filter} dicopy ke Excel.`, 'success');
   }
 
   async function adminLogBonusClaimCopy(copiedCount) {
@@ -9520,22 +9665,14 @@
   document.getElementById('dashboardRefreshOutputBonusBtn').addEventListener('click', dashboardRefreshBonusOutput);
   document.getElementById('dashboardCopyBonusExcelBtn').addEventListener('click', dashboardCopyBonusExcel);
   document.getElementById('dashboardDownloadCsvBtn').addEventListener('click', dashboardDownloadCsv);
-  document.getElementById('dashboardRefreshHermesBtn').addEventListener('click', dashboardRefreshHermes);
-  document.getElementById('dashboardCopyHermesExcelBtn').addEventListener('click', dashboardCopyHermesExcel);
-  document.getElementById('dashboardReleaseHermesBtn').addEventListener('click', dashboardReleaseHermesPreview);
-  document.getElementById('dashboardCancelHermesBtn').addEventListener('click', dashboardCancelHermesPreview);
   document.getElementById('dashboardBonusDate').addEventListener('change', () => {
     dashboardBonusOutputTsv = '';
-    dashboardHermesSelectedBatch = null;
-    dashboardHermesPreviewTsv = '';
     const preview = document.getElementById('dashboardExcelPreview');
     const table = document.getElementById('dashboardOutputBonusTable');
     const note = document.getElementById('dashboardOutputBonusNote');
-    const hermesDetail = document.getElementById('dashboardHermesDetailTable');
     if (preview) preview.value = '';
     if (table) table.innerHTML = '<tr><td colspan="13" class="empty">Klik Refresh Output Bonus untuk memuat data.</td></tr>';
     if (note) note.style.display = 'none';
-    if (hermesDetail) hermesDetail.innerHTML = '<tr><td colspan="11" class="empty">Pilih preview lalu klik Lihat Detail.</td></tr>';
     dashboardRefreshStatus();
     dashboardRefreshPending();
   });
@@ -9641,15 +9778,6 @@
     const isMaintenance = await checkMaintenanceMode();
     if (!isMaintenance) await verifyOperatorSession();
   });
-  document.getElementById('hermesToggleBtn').addEventListener('click', () => {
-    const widget = document.getElementById('hermesWidget');
-    widget.classList.toggle('open');
-    if (widget.classList.contains('open')) document.getElementById('hermesInput').focus();
-  });
-  document.getElementById('hermesCloseBtn').addEventListener('click', () => {
-    document.getElementById('hermesWidget').classList.remove('open');
-  });
-  document.getElementById('hermesForm').addEventListener('submit', handleHermesSubmit);
   document.getElementById('operatorPassword').addEventListener('keydown', event => {
     if (event.key === 'Enter') loginOperator();
   });

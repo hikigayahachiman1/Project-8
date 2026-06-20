@@ -8,7 +8,18 @@ const sessionSecret = process.env.OPERATOR_SESSION_SECRET;
 const supabase = supabaseUrl && serviceRoleKey
   ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } })
   : null;
-const hermesReleaseEnabled = String(process.env.HERMES_RELEASE_ENABLED || 'true').toLowerCase() === 'true';
+const disabledHermesActions = new Set([
+  'hermes_preview_status',
+  'hermes_preview_list',
+  'hermes_preview_detail',
+  'hermes_preview_export',
+  'hermes_preview_release',
+  'hermes_preview_cancel',
+  'hermes_worker_tasks',
+  'hermes_worker_result',
+  'hermes_worker_batch',
+  'hermes_worker_apply_result'
+]);
 
 function json(res, status, body) {
   return res.status(status).json(body);
@@ -206,16 +217,11 @@ async function mapConcurrency(items, limit, mapper) {
 }
 
 function hermesTaskConfig() {
-  const baseUrl = String(process.env.HERMES_TASK_BASE_URL || '').trim().replace(/\/+$/, '');
-  const token = String(process.env.HERMES_TASK_API_TOKEN || '').trim();
-  if (!baseUrl || !token) {
-    throw errorWithCode(
-      'HERMES_TASK_NOT_CONFIGURED',
-      'ENV HERMES_TASK_BASE_URL dan HERMES_TASK_API_TOKEN wajib diisi.',
-      500
-    );
-  }
-  return { baseUrl, token };
+  throw errorWithCode(
+    'HERMES_DISABLED',
+    'Integrasi Hermes sudah dinonaktifkan.',
+    410
+  );
 }
 
 function rowToHermesTaskItem(row) {
@@ -980,32 +986,14 @@ async function health() {
     supabaseError = error ? (error.message || error.code || 'Supabase query gagal.') : '';
   }
 
-  const hermesBaseUrl = process.env.HERMES_BASE_URL || process.env.HERMES_API_BASE_URL || process.env.LOCAL_ADJUSTMENT_RUNNER_URL || '';
-  let hermesConnected = null;
-  let hermesError = '';
-  if (hermesBaseUrl && typeof fetch === 'function') {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3500);
-      const response = await fetch(hermesBaseUrl, { method: 'GET', signal: controller.signal });
-      clearTimeout(timer);
-      hermesConnected = response.ok;
-      if (!response.ok) hermesError = `HTTP ${response.status}`;
-    } catch (error) {
-      hermesConnected = false;
-      hermesError = error.message || 'Hermes tidak dapat dihubungi.';
-    }
-  }
-
   return {
     ok: hasSupabaseEnv && supabaseConnected,
     action: 'health',
     supabase_env_available: hasSupabaseEnv,
     supabase_connected: supabaseConnected,
-    hermes_connected: hermesConnected,
     parser_api_connected: true,
     server_time: serverTime,
-    error: supabaseError || hermesError || ''
+    error: supabaseError || ''
   };
 }
 
@@ -1581,14 +1569,13 @@ async function hermesPreviewExport(body) {
 
 async function hermesPreviewRelease(body, authContext) {
   requireSuperadmin(authContext);
-  if (!hermesReleaseEnabled) {
-    return {
-      ok: false,
-      action: 'hermes_preview_release',
-      error: 'HERMES_RELEASE_DISABLED',
-      message: 'Hermes release sementara dinonaktifkan.'
-    };
-  }
+  return {
+    ok: false,
+    action: 'hermes_preview_release',
+    error: 'HERMES_DISABLED',
+    message: 'Integrasi Hermes sudah dinonaktifkan.'
+  };
+  /* istanbul ignore next */
   const claimBatchId = String(body.claim_batch_id || body.batch_code || '').trim();
   const operatorName = String(body.operator_name || authContext?.operator?.display_name || authContext?.operator?.username || 'Superadmin').trim();
   consoleReleaseStep('HERMES_RELEASE_STARTED', {
@@ -1807,6 +1794,13 @@ export default async function handler(req, res) {
   try {
     const body = parseBody(req);
     const action = String(body.action || '').trim();
+    if (disabledHermesActions.has(action)) {
+      return json(res, 410, {
+        ok: false,
+        error: 'HERMES_DISABLED',
+        message: 'Integrasi Hermes sudah dinonaktifkan.'
+      });
+    }
     if (action === 'health') return json(res, 200, await health());
     if (!supabase) return json(res, 500, { ok: false, error: 'SUPABASE_NOT_CONFIGURED' });
     if (action === 'expire_pending') return json(res, 200, await expireOldPending());
@@ -1818,16 +1812,6 @@ export default async function handler(req, res) {
     if (action === 'expire_batch') return json(res, 200, await expireBatch(body, authContext));
     if (action === 'export_bonus') return json(res, 200, await exportBonus(body));
     if (action === 'export_claim_mahjong') return json(res, 200, await exportClaimMahjong(body));
-    if (action === 'hermes_preview_status') return json(res, 200, await hermesPreviewStatus());
-    if (action === 'hermes_preview_list') return json(res, 200, await hermesPreviewList(body));
-    if (action === 'hermes_preview_detail') return json(res, 200, await hermesPreviewDetail(body));
-    if (action === 'hermes_preview_export') return json(res, 200, await hermesPreviewExport(body));
-    if (action === 'hermes_preview_release') return json(res, 200, await hermesPreviewRelease(body, authContext));
-    if (action === 'hermes_preview_cancel') return json(res, 200, await hermesPreviewCancel(body, authContext));
-    if (action === 'hermes_worker_tasks') return json(res, 200, await hermesWorkerTasks(authContext));
-    if (action === 'hermes_worker_result') return json(res, 200, await hermesWorkerResult(body, authContext));
-    if (action === 'hermes_worker_batch') return json(res, 200, await hermesWorkerBatch(body, authContext));
-
     return json(res, 400, { ok: false, error: 'UNKNOWN_ACTION', message: 'Action tidak dikenal.' });
   } catch (error) {
     console.error('bonus-control error:', error);

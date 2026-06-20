@@ -2476,23 +2476,6 @@
       </div>
     </div>
   </div>
-  <div id="hermesWidget" class="hermes-widget" aria-live="polite">
-    <div class="hermes-panel">
-      <div class="hermes-head">
-        <div>
-          <div id="hermesTitle" class="hermes-title">Hermes Superadmin Debug</div>
-          <div id="hermesSubtitle" class="hermes-subtitle">Tanya panduan kerja Parser QRIS.</div>
-        </div>
-        <button id="hermesCloseBtn" class="hermes-close ghost" type="button" title="Tutup Hermes">×</button>
-      </div>
-      <div id="hermesMessages" class="hermes-messages"></div>
-      <form id="hermesForm" class="hermes-form">
-        <input id="hermesInput" type="text" maxlength="2000" placeholder="Tulis pertanyaan..." autocomplete="off">
-        <button id="hermesSendBtn" class="primary" type="submit">Kirim</button>
-      </form>
-    </div>
-    <button id="hermesToggleBtn" class="hermes-fab primary" type="button" title="Buka Hermes">Hermes</button>
-  </div>
   <div class="container">
     <header>
       <div class="dashboard-brand">
@@ -3091,10 +3074,6 @@
           <div class="card-desc">Status koneksi dashboard superadmin.</div>
           <div class="monitor-grid">
             <div class="stat">
-              <div class="stat-label">Hermes</div>
-              <div class="stat-value" id="dashboardHermesStatus">-</div>
-            </div>
-            <div class="stat">
               <div class="stat-label">Supabase</div>
               <div class="stat-value" id="dashboardSupabaseStatus">-</div>
             </div>
@@ -3215,7 +3194,7 @@
           <textarea id="dashboardExcelPreview" style="min-height:220px;" placeholder="TSV preview akan muncul di sini..." readonly></textarea>
         </section>
 
-        <section class="card">
+        <section class="card" hidden aria-hidden="true" style="display:none !important;">
           <div class="card-title">Hermes Upload Preview</div>
           <div class="card-desc">Preview batch Bonus Harian dari Hermes Telegram sebelum release manual ke worker.</div>
           <div class="bonus-actions">
@@ -3273,7 +3252,7 @@
           </div>
         </section>
 
-        <section class="card" id="dashboardHermesWorkerPanel">
+        <section class="card" id="dashboardHermesWorkerPanel" hidden aria-hidden="true" style="display:none !important;">
           <div class="card-title">Hermes Worker Status</div>
           <div class="card-desc">Monitoring task queue dan hasil Local Worker Hermes. BOT tetap berjalan di Local Worker, bukan di Vercel.</div>
           <div class="bonus-actions">
@@ -3515,7 +3494,6 @@
   const OPERATOR_PROFILE_KEY = 'qris_operator_profile_v1';
   const OPERATOR_IDLE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
   const OPERATOR_SESSION_TOUCH_THROTTLE_MS = 60 * 1000;
-  const HERMES_WEB_CHAT_ENABLED = false;
   const bonusRemoteDoneCache = {};
   const bonusRemotePendingCache = {};
   const bonusAdjustmentDoneCache = {};
@@ -3746,7 +3724,6 @@
     currentOperator = null;
     window.currentOperator = null;
     stopOperatorActivityTracking();
-    resetHermesWidget();
     const info = document.getElementById('operatorInfo');
     if (info) {
       info.style.display = 'none';
@@ -3957,92 +3934,6 @@
       await logoutOperator();
       window.location.reload();
     });
-    renderHermesWidget();
-  }
-
-  function hermesLabelForRole() {
-    return 'Hermes Superadmin Debug';
-  }
-
-  function resetHermesWidget() {
-    const widget = document.getElementById('hermesWidget');
-    const messages = document.getElementById('hermesMessages');
-    const input = document.getElementById('hermesInput');
-    if (widget) widget.classList.remove('show', 'open');
-    if (messages) messages.innerHTML = '';
-    if (input) input.value = '';
-  }
-
-  function renderHermesWidget() {
-    const widget = document.getElementById('hermesWidget');
-    const title = document.getElementById('hermesTitle');
-    const subtitle = document.getElementById('hermesSubtitle');
-    const messages = document.getElementById('hermesMessages');
-    if (!widget) return;
-    if (!HERMES_WEB_CHAT_ENABLED) {
-      resetHermesWidget();
-      widget.setAttribute('aria-hidden', 'true');
-      return;
-    }
-    if (!currentOperator || !isSuperAdmin()) {
-      resetHermesWidget();
-      return;
-    }
-    widget.classList.add('show');
-    if (title) title.textContent = hermesLabelForRole();
-    if (subtitle) {
-      subtitle.textContent = 'Akses tanya debug/log aman untuk superadmin.';
-    }
-    if (messages && !messages.children.length) {
-      addHermesMessage('Hermes siap membantu. Aksi penting tetap dilakukan lewat Telegram Hermes dengan preview/confirm.', 'bot');
-    }
-  }
-
-  function addHermesMessage(text, type = 'bot') {
-    const messages = document.getElementById('hermesMessages');
-    if (!messages) return;
-    const item = document.createElement('div');
-    item.className = `hermes-message ${type === 'user' ? 'user' : type === 'error' ? 'error' : ''}`;
-    item.textContent = text;
-    messages.appendChild(item);
-    messages.scrollTop = messages.scrollHeight;
-  }
-
-  async function sendHermesQuestion(question) {
-    const response = await fetch('/api/hermes-chat', {
-      method: 'POST',
-      headers: operatorAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ question })
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.ok !== true) {
-      throw new Error(result.message || 'Hermes belum dapat dihubungi.');
-    }
-    return result.answer || 'Hermes belum memberi jawaban.';
-  }
-
-  async function handleHermesSubmit(event) {
-    event.preventDefault();
-    if (!currentOperator || !isSuperAdmin()) {
-      resetHermesWidget();
-      return;
-    }
-    const input = document.getElementById('hermesInput');
-    const button = document.getElementById('hermesSendBtn');
-    const question = String(input?.value || '').trim();
-    if (!question) return;
-    addHermesMessage(question, 'user');
-    input.value = '';
-    setButtonLoading(button, true, '...');
-    try {
-      const answer = await sendHermesQuestion(question);
-      addHermesMessage(answer, 'bot');
-    } catch (error) {
-      addHermesMessage(error.message || 'Hermes belum dapat dihubungi.', 'error');
-    } finally {
-      setButtonLoading(button, false);
-      input.focus();
-    }
   }
 
   function featureKeyForPanel(panel) {
@@ -4183,7 +4074,6 @@
     const dashboardTab = document.getElementById('dashboardTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
-    if (!isSuperadmin()) stopHermesWorkerAutoRefresh();
     if (dashboardTab) dashboardTab.style.display = isSuperAdmin() ? 'inline-flex' : 'none';
     if (!isSuperAdmin() && document.getElementById('panel-dashboard')?.classList.contains('active')) {
       document.querySelector('[data-panel="parser"]').click();
@@ -4335,7 +4225,6 @@
         adminFetchOperators();
       }
       if (target === 'bonus-monitoring') adminFetchBonusMonitoring();
-      if (target === 'dashboard') dashboardRefreshHermesWorker({ silent: true });
     });
   });
 
@@ -6446,7 +6335,6 @@
     setButtonLoading(btn, true, 'Refresh...');
     try {
       const result = await bonusControlApi('health');
-      dashboardSetText('dashboardHermesStatus', result.hermes_connected === null ? 'N/A' : (result.hermes_connected ? 'Connected' : 'Error'));
       dashboardSetText('dashboardSupabaseStatus', result.supabase_connected ? 'Connected' : 'Error');
       dashboardSetText('dashboardParserStatus', result.parser_api_connected ? 'OK' : 'Error');
       dashboardSetText('dashboardServerTime', result.server_time || '-');
@@ -9777,34 +9665,14 @@
   document.getElementById('dashboardRefreshOutputBonusBtn').addEventListener('click', dashboardRefreshBonusOutput);
   document.getElementById('dashboardCopyBonusExcelBtn').addEventListener('click', dashboardCopyBonusExcel);
   document.getElementById('dashboardDownloadCsvBtn').addEventListener('click', dashboardDownloadCsv);
-  document.getElementById('dashboardRefreshHermesBtn').addEventListener('click', dashboardRefreshHermes);
-  document.getElementById('dashboardCopyHermesExcelBtn').addEventListener('click', dashboardCopyHermesExcel);
-  document.getElementById('dashboardReleaseHermesBtn').addEventListener('click', dashboardReleaseHermesPreview);
-  document.getElementById('dashboardCancelHermesBtn').addEventListener('click', dashboardCancelHermesPreview);
-  document.getElementById('dashboardRefreshWorkerBtn').addEventListener('click', () => dashboardRefreshHermesWorker());
-  document.getElementById('dashboardCopyWorkerApprovedBtn').addEventListener('click', () => dashboardCopyWorkerRows('APPROVED'));
-  document.getElementById('dashboardCopyWorkerManualBtn').addEventListener('click', () => dashboardCopyWorkerRows('MANUAL_REVIEW'));
-  document.getElementById('dashboardCopyWorkerRejectedBtn').addEventListener('click', () => dashboardCopyWorkerRows('REJECTED'));
-  document.getElementById('dashboardCopyWorkerFailedBtn').addEventListener('click', () => dashboardCopyWorkerRows('FAILED'));
-  document.getElementById('dashboardCopyWorkerFinalBtn').addEventListener('click', () => dashboardCopyWorkerRows('ALL'));
-  document.querySelectorAll('.worker-result-filter').forEach(button => {
-    button.addEventListener('click', () => {
-      dashboardWorkerFilter = button.dataset.workerFilter || 'ALL';
-      dashboardRenderWorkerResult();
-    });
-  });
   document.getElementById('dashboardBonusDate').addEventListener('change', () => {
     dashboardBonusOutputTsv = '';
-    dashboardHermesSelectedBatch = null;
-    dashboardHermesPreviewTsv = '';
     const preview = document.getElementById('dashboardExcelPreview');
     const table = document.getElementById('dashboardOutputBonusTable');
     const note = document.getElementById('dashboardOutputBonusNote');
-    const hermesDetail = document.getElementById('dashboardHermesDetailTable');
     if (preview) preview.value = '';
     if (table) table.innerHTML = '<tr><td colspan="13" class="empty">Klik Refresh Output Bonus untuk memuat data.</td></tr>';
     if (note) note.style.display = 'none';
-    if (hermesDetail) hermesDetail.innerHTML = '<tr><td colspan="11" class="empty">Pilih preview lalu klik Lihat Detail.</td></tr>';
     dashboardRefreshStatus();
     dashboardRefreshPending();
   });
@@ -9910,15 +9778,6 @@
     const isMaintenance = await checkMaintenanceMode();
     if (!isMaintenance) await verifyOperatorSession();
   });
-  document.getElementById('hermesToggleBtn').addEventListener('click', () => {
-    const widget = document.getElementById('hermesWidget');
-    widget.classList.toggle('open');
-    if (widget.classList.contains('open')) document.getElementById('hermesInput').focus();
-  });
-  document.getElementById('hermesCloseBtn').addEventListener('click', () => {
-    document.getElementById('hermesWidget').classList.remove('open');
-  });
-  document.getElementById('hermesForm').addEventListener('submit', handleHermesSubmit);
   document.getElementById('operatorPassword').addEventListener('keydown', event => {
     if (event.key === 'Enter') loginOperator();
   });
