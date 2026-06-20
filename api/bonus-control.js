@@ -165,6 +165,15 @@ function requireSuperadmin(authContext) {
   throw error;
 }
 
+function requireAdmin(authContext) {
+  if (['admin', 'superadmin'].includes(String(authContext?.role || '').toLowerCase())) return;
+  throw errorWithCode(
+    'ADMIN_REQUIRED',
+    'Reset Bonus hanya boleh dilakukan oleh Admin atau Superadmin.',
+    403
+  );
+}
+
 function errorWithCode(code, message, statusCode = 400, extra = {}) {
   const error = new Error(message);
   error.code = code;
@@ -1404,6 +1413,139 @@ async function exportBonus(body) {
   };
 }
 
+async function resetBonusPrepare(body, authContext) {
+  requireAdmin(authContext);
+  const bonusDate = String(body.bonus_date || '').trim();
+  if (!isValidDate(bonusDate)) {
+    throw errorWithCode('INVALID_BONUS_DATE', 'bonus_date wajib format YYYY-MM-DD.', 400);
+  }
+  if (!sessionSecret) {
+    throw errorWithCode('RESET_CHALLENGE_UNAVAILABLE', 'Konfigurasi challenge reset belum tersedia.', 500);
+  }
+
+  const { data: rows, error } = await supabase
+    .from('bonus_done_daily')
+    .select('id, claim_batch_id')
+    .eq('bonus_date', bonusDate)
+    .eq('bonus_type', 'BONUS_HARIAN');
+  if (error) throw error;
+
+  const claimBatchIds = [...new Set((rows || []).map(row => row.claim_batch_id).filter(Boolean))];
+  let lockCount = 0;
+  if (claimBatchIds.length) {
+    const { count, error: lockError } = await supabase
+      .from('bonus_process_locks')
+      .select('id', { count: 'exact', head: true })
+      .in('claim_batch_id', claimBatchIds);
+    if (lockError) throw lockError;
+    lockCount = Number(count || 0);
+  }
+
+  const left = Math.floor(Math.random() * 8) + 2;
+  const right = Math.floor(Math.random() * 8) + 2;
+  const challengeToken = jwt.sign({
+    scope: 'reset_bonus',
+    bonus_date: bonusDate,
+    answer: left + right,
+    operator_id: authContext.operator?.id || '',
+    role: authContext.role,
+    row_count: rows?.length || 0,
+    lock_count: lockCount
+  }, sessionSecret, { expiresIn: '2m' });
+
+  return {
+    ok: true,
+    action: 'reset_bonus_prepare',
+    bonus_date: bonusDate,
+    affected_bonus_rows: rows?.length || 0,
+    affected_lock_rows: lockCount,
+    challenge: `${left} + ${right} = ?`,
+    challenge_token: challengeToken,
+    expires_in_seconds: 120,
+    confirmation_phrase: 'RESET BONUS'
+  };
+}
+
+async function resetBonusExecute(body, authContext) {
+  requireAdmin(authContext);
+  const bonusDate = String(body.bonus_date || '').trim();
+  const challengeToken = String(body.challenge_token || '').trim();
+  const confirmationPhrase = String(body.confirmation_phrase || '').trim().toUpperCase();
+  const challengeAnswer = Number(String(body.challenge_answer || '').trim());
+  if (!isValidDate(bonusDate) || !challengeToken) {
+    throw errorWithCode('RESET_CONFIRMATION_INVALID', 'Konfirmasi reset tidak valid.', 400);
+  }
+  if (confirmationPhrase !== 'RESET BONUS') {
+    throw errorWithCode('RESET_PHRASE_INVALID', 'Ketik RESET BONUS untuk melanjutkan.', 400);
+  }
+
+  let challenge;
+  try {
+    challenge = jwt.verify(challengeToken, sessionSecret);
+  } catch (error) {
+    throw errorWithCode('RESET_CHALLENGE_EXPIRED', 'Challenge reset kedaluwarsa. Mulai ulang proses reset.', 400);
+  }
+  if (
+    challenge.scope !== 'reset_bonus'
+    || challenge.bonus_date !== bonusDate
+    || String(challenge.operator_id || '') !== String(authContext.operator?.id || '')
+    || Number(challenge.answer) !== challengeAnswer
+  ) {
+    throw errorWithCode('RESET_CHALLENGE_INVALID', 'Jawaban challenge atau sesi reset tidak valid.', 400);
+  }
+
+  const { data: targetRows, error: selectError } = await supabase
+    .from('bonus_done_daily')
+    .select('id, claim_batch_id')
+    .eq('bonus_date', bonusDate)
+    .eq('bonus_type', 'BONUS_HARIAN');
+  if (selectError) throw selectError;
+  if ((targetRows?.length || 0) !== Number(challenge.row_count || 0)) {
+    throw errorWithCode(
+      'RESET_DATA_CHANGED',
+      'Data Bonus berubah setelah challenge dibuat. Tutup dialog dan mulai ulang reset.',
+      409
+    );
+  }
+
+  const claimBatchIds = [...new Set((targetRows || []).map(row => row.claim_batch_id).filter(Boolean))];
+  let deletedLockRows = 0;
+  if (claimBatchIds.length) {
+    const { data: deletedLocks, error: lockError } = await supabase
+      .from('bonus_process_locks')
+      .delete()
+      .in('claim_batch_id', claimBatchIds)
+      .select('id');
+    if (lockError) throw lockError;
+    deletedLockRows = deletedLocks?.length || 0;
+  }
+
+  const { data: deletedRows, error: deleteError } = await supabase
+    .from('bonus_done_daily')
+    .delete()
+    .eq('bonus_date', bonusDate)
+    .eq('bonus_type', 'BONUS_HARIAN')
+    .select('id');
+  if (deleteError) throw deleteError;
+
+  console.warn('bonus-control reset bonus executed', {
+    bonus_date: bonusDate,
+    role: authContext.role,
+    operator_id: authContext.operator?.id || '',
+    operator_name: authContext.operator?.display_name || authContext.operator?.username || '',
+    deleted_bonus_rows: deletedRows?.length || 0,
+    deleted_lock_rows: deletedLockRows
+  });
+  return {
+    ok: true,
+    action: 'reset_bonus_execute',
+    bonus_date: bonusDate,
+    deleted_bonus_rows: deletedRows?.length || 0,
+    deleted_lock_rows: deletedLockRows,
+    message: `Data Bonus Harian tanggal ${bonusDate} berhasil direset.`
+  };
+}
+
 async function exportClaimMahjong(body) {
   const bonusDate = String(body.bonus_date || '').trim();
   if (bonusDate && !isValidDate(bonusDate)) {
@@ -1811,6 +1953,8 @@ export default async function handler(req, res) {
     if (action === 'mark_done') return json(res, 200, await markDone(body, authContext));
     if (action === 'expire_batch') return json(res, 200, await expireBatch(body, authContext));
     if (action === 'export_bonus') return json(res, 200, await exportBonus(body));
+    if (action === 'reset_bonus_prepare') return json(res, 200, await resetBonusPrepare(body, authContext));
+    if (action === 'reset_bonus_execute') return json(res, 200, await resetBonusExecute(body, authContext));
     if (action === 'export_claim_mahjong') return json(res, 200, await exportClaimMahjong(body));
     return json(res, 400, { ok: false, error: 'UNKNOWN_ACTION', message: 'Action tidak dikenal.' });
   } catch (error) {

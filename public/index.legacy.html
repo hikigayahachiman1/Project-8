@@ -1434,6 +1434,74 @@
     display: none;
   }
 
+  .admin-only {
+    display: none;
+  }
+
+  .reset-bonus-dialog {
+    width: min(520px, calc(100vw - 32px));
+    padding: 0;
+    border: 1px solid rgba(255, 77, 109, 0.55);
+    border-radius: 8px;
+    background: #15172d;
+    color: var(--ink);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.58);
+  }
+
+  .reset-bonus-dialog::backdrop {
+    background: rgba(4, 7, 18, 0.82);
+  }
+
+  .reset-dialog-body {
+    padding: 22px;
+  }
+
+  .reset-dialog-body h3 {
+    margin: 0 0 8px;
+    font-size: 1.05rem;
+  }
+
+  .reset-warning {
+    padding: 12px;
+    margin: 14px 0;
+    border-left: 3px solid var(--danger);
+    background: rgba(255, 77, 109, 0.09);
+    color: #ffd4dc;
+    font-size: 0.82rem;
+    line-height: 1.55;
+  }
+
+  .reset-challenge-grid {
+    display: grid;
+    gap: 12px;
+  }
+
+  .reset-challenge-grid label {
+    display: grid;
+    gap: 7px;
+    color: var(--ink-soft);
+    font-size: 0.78rem;
+  }
+
+  .reset-confirm-check {
+    display: flex !important;
+    grid-template-columns: none;
+    align-items: flex-start;
+    gap: 9px !important;
+  }
+
+  .reset-confirm-check input {
+    width: auto;
+    margin-top: 2px;
+  }
+
+  .reset-dialog-error {
+    min-height: 18px;
+    margin-top: 10px;
+    color: #ff9bab;
+    font-size: 0.76rem;
+  }
+
   .worker-result-filter.active {
     border-color: rgba(39,245,255,0.58);
     background: rgba(39,245,255,0.14);
@@ -2476,6 +2544,31 @@
       </div>
     </div>
   </div>
+  <dialog id="bonusResetDialog" class="reset-bonus-dialog">
+    <div class="reset-dialog-body">
+      <h3>Konfirmasi Reset Bonus Supabase</h3>
+      <div id="bonusResetImpact" class="reset-warning"></div>
+      <div class="reset-challenge-grid">
+        <label class="reset-confirm-check">
+          <input id="bonusResetAcknowledge" type="checkbox">
+          <span>Saya memahami data Bonus Harian pada tanggal ini akan dihapus dari Supabase dan tidak dapat dipulihkan dari tombol ini.</span>
+        </label>
+        <label>
+          Verifikasi angka: <strong id="bonusResetChallengeLabel">-</strong>
+          <input id="bonusResetChallengeAnswer" type="number" inputmode="numeric" autocomplete="off" placeholder="Jawaban">
+        </label>
+        <label>
+          Ketik <strong>RESET BONUS</strong>
+          <input id="bonusResetPhrase" type="text" autocomplete="off" placeholder="RESET BONUS">
+        </label>
+      </div>
+      <div id="bonusResetDialogError" class="reset-dialog-error"></div>
+      <div class="bonus-actions">
+        <button id="bonusResetCancelBtn" class="ghost" type="button">Batal</button>
+        <button id="bonusResetConfirmBtn" class="danger" type="button">Reset Data Supabase</button>
+      </div>
+    </div>
+  </dialog>
   <div class="container">
     <header>
       <div class="dashboard-brand">
@@ -2702,7 +2795,7 @@
             <button id="bonusBatchDoneBtn" class="success superadmin-only">Tandai Batch DONE</button>
             <button id="bonusBatchExpireBtn" class="danger superadmin-only">Batalkan / Expire Batch Saya</button>
             <button id="bonusCopyExcelBtn" class="primary superadmin-only">Copy Output Bonus Harian ke Excel</button>
-            <button id="bonusResetBtn" class="ghost">Reset Bonus</button>
+            <button id="bonusResetBtn" class="danger admin-only">Reset Bonus Supabase</button>
           </div>
           <div class="source-note" id="bonusStatusRefreshInfo" style="display:none;"></div>
           <div class="hint">
@@ -3501,6 +3594,7 @@
   let bonusPendingTimerInterval = null;
   let bonusPendingServerOffsetMs = 0;
   let bonusActiveLock = null;
+  let bonusResetChallenge = null;
   let currentOperator = null;
   let adminOperatorRows = [];
   let currentLoadingSteps = [];
@@ -3798,6 +3892,13 @@
     }
   }
 
+  function applyAdminVisibility() {
+    const allowed = isAdmin();
+    document.querySelectorAll('.admin-only').forEach(el => {
+      el.style.display = allowed ? 'inline-flex' : 'none';
+    });
+  }
+
   function requireOperator() {
     if (currentOperator) return true;
     showOperatorLogin();
@@ -4074,6 +4175,7 @@
     const dashboardTab = document.getElementById('dashboardTab');
     const adminModuleCard = document.getElementById('adminModuleCard');
     const superRoleOption = document.querySelector('#adminOperatorRole option[value="superadmin"]');
+    applyAdminVisibility();
     if (dashboardTab) dashboardTab.style.display = isSuperAdmin() ? 'inline-flex' : 'none';
     if (!isSuperAdmin() && document.getElementById('panel-dashboard')?.classList.contains('active')) {
       document.querySelector('[data-panel="parser"]').click();
@@ -8497,7 +8599,7 @@
     }
   }
 
-  function bonusReset() {
+  function resetBonusLocalState() {
     bonusRows = [];
     bonusRemark = '';
     document.getElementById('bonusAdjustRaw').value = '';
@@ -8512,7 +8614,97 @@
     stopBonusPendingTimer();
     updateBonusSourceNote();
     renderBonusDoneInfo();
-    showToast('Data bonus dibersihkan.');
+  }
+
+  async function bonusReset() {
+    if (!requireOperator()) return;
+    if (!isAdmin()) {
+      showToast('Reset Bonus hanya untuk Admin atau Superadmin.', 'error');
+      return;
+    }
+    const bonusDate = document.getElementById('bonusDate').value;
+    if (!bonusDate) {
+      showToast('Pilih tanggal bonus yang akan direset.', 'error');
+      return;
+    }
+
+    const button = document.getElementById('bonusResetBtn');
+    setButtonLoading(button, true, 'Memeriksa data...');
+    try {
+      const result = await bonusControlApi('reset_bonus_prepare', { bonus_date: bonusDate });
+      bonusResetChallenge = {
+        bonusDate,
+        token: result.challenge_token || ''
+      };
+      document.getElementById('bonusResetImpact').textContent =
+        `Tanggal ${bonusDate}: ${result.affected_bonus_rows || 0} data Bonus Harian dan ${result.affected_lock_rows || 0} lock terkait akan dihapus. Challenge berlaku ${result.expires_in_seconds || 120} detik.`;
+      document.getElementById('bonusResetChallengeLabel').textContent = result.challenge || '-';
+      document.getElementById('bonusResetChallengeAnswer').value = '';
+      document.getElementById('bonusResetPhrase').value = '';
+      document.getElementById('bonusResetAcknowledge').checked = false;
+      document.getElementById('bonusResetDialogError').textContent = '';
+      document.getElementById('bonusResetDialog').showModal();
+      document.getElementById('bonusResetChallengeAnswer').focus();
+    } catch (error) {
+      console.error('reset bonus prepare error:', error);
+      showToast(error.message || 'Gagal menyiapkan reset Bonus.', 'error');
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
+  function closeBonusResetDialog() {
+    const dialog = document.getElementById('bonusResetDialog');
+    if (dialog?.open) dialog.close();
+    bonusResetChallenge = null;
+  }
+
+  async function confirmBonusReset() {
+    const errorBox = document.getElementById('bonusResetDialogError');
+    const acknowledged = document.getElementById('bonusResetAcknowledge').checked;
+    const answer = document.getElementById('bonusResetChallengeAnswer').value.trim();
+    const phrase = document.getElementById('bonusResetPhrase').value.trim();
+    if (!bonusResetChallenge) {
+      errorBox.textContent = 'Challenge reset tidak tersedia. Tutup dialog lalu mulai ulang.';
+      return;
+    }
+    if (!acknowledged) {
+      errorBox.textContent = 'Centang pernyataan risiko terlebih dahulu.';
+      return;
+    }
+    if (!answer || phrase.toUpperCase() !== 'RESET BONUS') {
+      errorBox.textContent = 'Jawab verifikasi angka dan ketik RESET BONUS dengan benar.';
+      return;
+    }
+    if (!window.confirm(`Konfirmasi terakhir: hapus data Bonus Harian Supabase tanggal ${bonusResetChallenge.bonusDate}?`)) return;
+
+    const button = document.getElementById('bonusResetConfirmBtn');
+    setButtonLoading(button, true, 'Mereset...');
+    errorBox.textContent = '';
+    try {
+      const result = await bonusControlApi('reset_bonus_execute', {
+        bonus_date: bonusResetChallenge.bonusDate,
+        challenge_token: bonusResetChallenge.token,
+        challenge_answer: answer,
+        confirmation_phrase: phrase
+      });
+      const resetDate = bonusResetChallenge.bonusDate;
+      document.getElementById('bonusResetDialog').close();
+      bonusResetChallenge = null;
+      const localDoneStore = getBonusDoneStore();
+      delete localDoneStore[resetDate];
+      saveBonusDoneStore(localDoneStore);
+      delete bonusRemoteDoneCache[resetDate];
+      delete bonusRemotePendingCache[resetDate];
+      resetBonusLocalState();
+      showToast(`${result.message} ${result.deleted_bonus_rows || 0} data dan ${result.deleted_lock_rows || 0} lock dihapus.`, 'success');
+    } catch (error) {
+      console.error('reset bonus execute error:', error);
+      errorBox.textContent = error.message || 'Reset Bonus gagal.';
+      showToast(error.message || 'Reset Bonus gagal.', 'error');
+    } finally {
+      setButtonLoading(button, false);
+    }
   }
 
   function bonusRowText(row) {
@@ -9638,6 +9830,12 @@
   document.getElementById('bonusBatchExpireBtn').addEventListener('click', expireBatchFromUi);
   document.getElementById('bonusCopyExcelBtn').addEventListener('click', copyBonusOutputExcelFromUi);
   document.getElementById('bonusResetBtn').addEventListener('click', bonusReset);
+  document.getElementById('bonusResetCancelBtn').addEventListener('click', closeBonusResetDialog);
+  document.getElementById('bonusResetConfirmBtn').addEventListener('click', confirmBonusReset);
+  document.getElementById('bonusResetDialog').addEventListener('cancel', event => {
+    event.preventDefault();
+    closeBonusResetDialog();
+  });
   document.getElementById('bonusCopyAllBtn').addEventListener('click', bonusCopyAll);
   document.getElementById('bonusExportAdjustmentJsonBtn').addEventListener('click', previewAdjustmentBatchJson);
   document.getElementById('adjustmentBatchDownloadBtn').addEventListener('click', downloadAdjustmentBatchJson);
