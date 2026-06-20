@@ -247,7 +247,7 @@ async function handleBatches(req, res) {
   if (req.method !== 'GET') return methodNotAllowed(res, 'GET');
   try {
     requireSupabase();
-    await requireOperator(req);
+    await requireIngestActor(req);
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
     let query = telegramParserSupabase.from('telegram_parser_batches').select('*')
       .eq('source', TELEGRAM_PARSER_SOURCE).order('created_at', { ascending: false }).limit(limit);
@@ -265,7 +265,7 @@ async function handleBatchDetail(req, res) {
   if (req.method !== 'GET') return methodNotAllowed(res, 'GET');
   try {
     requireSupabase();
-    await requireOperator(req);
+    await requireIngestActor(req);
     const identifier = String(req.query.id || req.query.batch_code || '').trim();
     if (!identifier) return res.status(400).json({ success: false, error: 'BATCH_ID_REQUIRED', message: 'id atau batch_code wajib diisi.' });
     const detail = await fetchBatchDetail(identifier);
