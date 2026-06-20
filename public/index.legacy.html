@@ -2732,7 +2732,6 @@
       <button class="tool-tab active" data-panel="parser">Parser QRIS</button>
       <button class="tool-tab" data-panel="bonus">Bonus Harian</button>
       <button class="tool-tab" data-panel="claim-mahjong">Klaim Mahjong</button>
-      <button class="tool-tab superadmin-only-tab" id="dashboardTab" data-panel="dashboard" style="display:none;">Dashboard</button>
       <button class="tool-tab" id="unlockAuditBtn">Unlock Audit</button>
       <button class="tool-tab" id="auditTab" data-panel="audit" style="display:none;">Audit Bonus</button>
       <button class="tool-tab" id="adminOperatorsTab" data-panel="admin-operators" style="display:none;">Admin Operator</button>
@@ -2929,13 +2928,14 @@
           <div class="source-note" id="bonusSourceNote">Belum ada data dari Parser QRIS.</div>
           <div class="bonus-actions">
             <button id="bonusProcessBtn" class="primary">Proses Bonus Harian</button>
-            <button id="bonusExpirePendingBtn" class="ghost superadmin-only">Bersihkan Pending Expired</button>
-            <button id="bonusRefreshStatusBtn" class="ghost superadmin-only">Refresh Status Bonus</button>
-            <button id="bonusPendingActiveBtn" class="ghost superadmin-only">Lihat Pending Aktif</button>
-            <button id="bonusBatchDoneBtn" class="success superadmin-only">Tandai Batch DONE</button>
-            <button id="bonusBatchExpireBtn" class="danger superadmin-only">Batalkan / Expire Batch Saya</button>
-            <button id="bonusCopyExcelBtn" class="primary superadmin-only">Copy Output Bonus Harian ke Excel</button>
-            <button id="bonusResetBtn" class="danger admin-only">Reset Bonus Supabase</button>
+            <button id="bonusLocalResetBtn" class="ghost">Reset Bonus</button>
+            <button id="bonusResetBtn" class="danger admin-only">Reset Supabase</button>
+            <button id="bonusExpirePendingBtn" hidden aria-hidden="true" style="display:none !important;">Bersihkan Pending Expired</button>
+            <button id="bonusRefreshStatusBtn" hidden aria-hidden="true" style="display:none !important;">Refresh Status Bonus</button>
+            <button id="bonusPendingActiveBtn" hidden aria-hidden="true" style="display:none !important;">Lihat Pending Aktif</button>
+            <button id="bonusBatchDoneBtn" hidden aria-hidden="true" style="display:none !important;">Tandai Batch DONE</button>
+            <button id="bonusBatchExpireBtn" hidden aria-hidden="true" style="display:none !important;">Batalkan / Expire Batch Saya</button>
+            <button id="bonusCopyExcelBtn" hidden aria-hidden="true" style="display:none !important;">Copy Output Bonus Harian ke Excel</button>
           </div>
           <div class="source-note" id="bonusStatusRefreshInfo" style="display:none;"></div>
           <div class="hint">
@@ -3300,7 +3300,7 @@
       </div>
     </section>
 
-    <section class="tool-panel" id="panel-dashboard">
+    <section class="tool-panel" id="panel-dashboard" hidden aria-hidden="true" style="display:none !important;">
       <div class="bonus-grid">
         <section class="card">
           <div class="card-title">Connection</div>
@@ -8756,6 +8756,11 @@
     renderBonusDoneInfo();
   }
 
+  function resetBonusLocalFromUi() {
+    resetBonusLocalState();
+    showToast('Data tampilan Bonus Harian dibersihkan.', 'success');
+  }
+
   async function bonusReset() {
     if (!requireOperator()) return;
     if (!isAdmin()) {
@@ -9970,6 +9975,7 @@
     showToast('Data audit dibersihkan.');
   }
   document.getElementById('bonusProcessBtn').addEventListener('click', bonusProcess);
+  document.getElementById('bonusLocalResetBtn').addEventListener('click', resetBonusLocalFromUi);
   document.getElementById('bonusExpirePendingBtn').addEventListener('click', expirePendingBonusFromUi);
   document.getElementById('bonusRefreshStatusBtn').addEventListener('click', refreshBonusStatusFromUi);
   document.getElementById('bonusPendingActiveBtn').addEventListener('click', showPendingActiveFromUi);
