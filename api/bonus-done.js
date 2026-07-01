@@ -780,7 +780,7 @@ async function handleAdminListBonusBatches(req, body, res) {
 
   if (date && isValidDate(date)) query = query.eq('bonus_date', date);
   if (operatorInput) query = query.or(`operator_name.ilike.%${operatorInput}%,claim_owner.ilike.%${operatorInput}%`);
-  if (statusFilter === 'EXPIRED') query = query.eq('lock_status', 'PENDING');
+  if (statusFilter === 'EXPIRED') query = query.in('lock_status', ['PENDING', 'EXPIRED']);
   if (statusFilter && !['EXPIRED', 'ALL'].includes(statusFilter)) query = query.eq('lock_status', statusFilter);
 
   const { data: locks, error: lockError, count } = await query;
@@ -922,6 +922,14 @@ async function handleAdminFinalizePendingBatch(req, body, res) {
       success: false,
       status: 'not_pending',
       message: 'Batch ini sudah tidak berstatus PENDING.'
+    });
+  }
+
+  if (!lock.pending_expires_at || new Date(lock.pending_expires_at).getTime() <= Date.now()) {
+    return res.status(409).json({
+      success: false,
+      status: 'pending_expired',
+      message: 'Batch sudah expired dan tidak bisa ditandai DONE. Batalkan lock secara manual.'
     });
   }
 

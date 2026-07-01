@@ -2790,7 +2790,7 @@
       </section>
     </div>
 
-    <section class="card" style="margin-top:24px;" id="telegramParserInputSection">
+    <section class="card" style="display:none !important; margin-top:24px;" id="telegramParserInputSection" hidden aria-hidden="true">
       <div class="card-title">Input dari Telegram</div>
       <div class="card-desc">Batch deposit dari Telegram Parser QRIS. Bagian ini hanya menampilkan hasil ingest dan tidak mengubah input Parser QRIS manual.</div>
       <div class="bonus-actions">
@@ -2837,7 +2837,7 @@
             <button id="bonusRefreshStatusBtn" hidden aria-hidden="true" style="display:none !important;">Refresh Status Bonus</button>
             <button id="bonusPendingActiveBtn" hidden aria-hidden="true" style="display:none !important;">Lihat Pending Aktif</button>
             <button id="bonusBatchDoneBtn" hidden aria-hidden="true" style="display:none !important;">Tandai Batch DONE</button>
-            <button id="bonusBatchExpireBtn" hidden aria-hidden="true" style="display:none !important;">Batalkan / Expire Batch Saya</button>
+            <button id="bonusBatchExpireBtn" class="ghost">Batalkan Batch Saya</button>
             <button id="bonusCopyExcelBtn" hidden aria-hidden="true" style="display:none !important;">Copy Output Bonus Harian ke Excel</button>
           </div>
           <div class="source-note" id="bonusStatusRefreshInfo" style="display:none;"></div>
@@ -2917,7 +2917,7 @@
         </section>
       </div>
 
-      <section class="card" style="margin-top:24px;" id="telegramBonusPreviewSection">
+      <section class="card" style="display:none !important; margin-top:24px;" id="telegramBonusPreviewSection" hidden aria-hidden="true">
         <div class="card-title">Preview Batch Telegram Parser QRIS</div>
         <div class="card-desc">Preview ini terpisah dari flow Bonus Harian manual. Tidak ada approval atau release worker pada tahap ini.</div>
         <div class="bonus-actions"><button type="button" id="telegramBonusRefreshBtn" class="ghost">Refresh Preview Telegram</button></div>
@@ -3388,6 +3388,7 @@
               <option value="PENDING">PENDING Aktif</option>
               <option value="EXPIRED">PENDING Expired</option>
               <option value="DONE">DONE</option>
+              <option value="CANCELLED">CANCELLED</option>
               <option value="EMPTY">EMPTY</option>
             </select>
             <button id="monitorRefreshBtn" class="primary">Refresh Monitoring</button>
@@ -3425,6 +3426,7 @@
               <div class="row-actions">
                 <button id="monitorCopyClaimBtn" class="success" style="display:none;">Copy ID + Bonus</button>
                 <button id="monitorFinalizeBtn" class="danger" style="display:none;">Bantu Tandai Sudah Dibonuskan</button>
+                <button id="monitorCancelBtn" class="ghost" style="display:none;">Batalkan / Release Lock</button>
                 <button id="monitorCloseDetailBtn" class="ghost">Tutup Detail</button>
               </div>
             </div>
@@ -5784,14 +5786,16 @@
 
   async function expireBatchFromUi() {
     if (!requireOperator()) return;
-    const claimBatchId = resolveBonusBatchIdForAction('Masukkan Claim Batch ID yang akan di-expire:');
+    const claimBatchId = bonusActiveLock?.claim_batch_id
+      ? String(bonusActiveLock.claim_batch_id).trim()
+      : promptBonusBatchId('Masukkan Claim Batch ID milik Anda yang akan dibatalkan:');
     if (!claimBatchId) return;
-    if (!window.confirm(`${isSuperAdmin() ? 'Superadmin akan expire' : 'Expire'} batch ${claimBatchId}? Data PENDING dalam batch ini akan menjadi EXPIRED.`)) return;
+    if (!window.confirm(`Batalkan batch ${claimBatchId}? Data PENDING/EXPIRED yang belum DONE akan menjadi CANCELLED.`)) return;
     const btn = document.getElementById('bonusBatchExpireBtn');
-    setButtonLoading(btn, true, 'Expire...');
+    setButtonLoading(btn, true, 'Membatalkan...');
     try {
-      console.info('bonus expire_batch submit', bonusDebugContext(claimBatchId));
-      const result = await bonusControlApi('expire_batch', {
+      console.info('bonus cancel_batch submit', bonusDebugContext(claimBatchId));
+      const result = await bonusControlApi('cancel_batch', {
         claim_batch_id: claimBatchId,
         operator_name: currentOperatorName(),
         role: currentOperator?.role || ''
@@ -5801,12 +5805,12 @@
         delete bonusRemoteDoneCache[dateValue];
         delete bonusRemotePendingCache[dateValue];
       }
-      clearBonusActiveLock('expire_batch_success');
-      renderBonusStatusRefreshInfo({ summary: { done: 0, pending_active: 0, expired: result.expired_count } });
+      clearBonusActiveLock('cancel_batch_success');
+      renderBonusStatusRefreshInfo({ summary: { done: 0, pending_active: 0, expired: 0 } });
       renderBonusDoneInfo();
-      showToast(`Batch di-expire. Rows: ${result.expired_count || 0}, locks: ${result.lock_expired_count || 0}.`, 'success');
+      showToast(`Batch dibatalkan. Rows: ${result.cancelled_count || 0}.`, 'success');
     } catch (error) {
-      handleBonusControlError('expire_batch', error);
+      handleBonusControlError('cancel_batch', error);
     } finally {
       setButtonLoading(btn, false);
     }
@@ -6198,18 +6202,20 @@
     const title = document.getElementById('monitorDetailTitle');
     const meta = document.getElementById('monitorDetailMeta');
     const finalizeBtn = document.getElementById('monitorFinalizeBtn');
+    const cancelBtn = document.getElementById('monitorCancelBtn');
     const copyClaimBtn = document.getElementById('monitorCopyClaimBtn');
-    if (!panel || !table || !title || !meta || !finalizeBtn || !copyClaimBtn) return;
+    if (!panel || !table || !title || !meta || !finalizeBtn || !cancelBtn || !copyClaimBtn) return;
 
     bonusMonitorSelectedBatch = batch || null;
     bonusMonitorSelectedRows = rows || [];
     panel.style.display = 'block';
     title.textContent = `Detail Batch ${batch ? batch.bonus_date : ''}`;
     meta.textContent = batch
-      ? `${batch.operator_name || 'Operator'} - ${batch.claim_owner || '-'} - ${monitorStatusLabel(batch)}`
+      ? `${batch.operator_name || 'Operator'} - ${batch.claim_owner || '-'} - Batch: ${batch.claim_batch_id || '-'} - ${monitorStatusLabel(batch)} - Expire: ${formatAdminDate(batch.pending_expires_at)}`
       : 'Pilih batch untuk melihat detail.';
 
-    finalizeBtn.style.display = batch && batch.lock_status === 'PENDING' ? '' : 'none';
+    finalizeBtn.style.display = batch && batch.display_status === 'PENDING' ? '' : 'none';
+    cancelBtn.style.display = batch && ['PENDING', 'EXPIRED'].includes(String(batch.lock_status || '').toUpperCase()) ? '' : 'none';
     copyClaimBtn.style.display = batch && getBonusMonitorClaimRows(bonusMonitorSelectedRows).length ? '' : 'none';
 
     if (!rows || !rows.length) {
@@ -6290,6 +6296,27 @@
     } finally {
       hideLoading();
       setButtonLoading(finalizeBtn, false);
+    }
+  }
+
+  async function adminCancelSelectedBonusBatch() {
+    if (!isAdmin() || !bonusMonitorSelectedBatch) return;
+    if (!window.confirm(`Batalkan/release lock batch ${bonusMonitorSelectedBatch.claim_batch_id || '-'}? Status belum DONE akan menjadi CANCELLED.`)) return;
+
+    const cancelBtn = document.getElementById('monitorCancelBtn');
+    setButtonLoading(cancelBtn, true, 'Membatalkan...');
+    try {
+      const result = await bonusControlApi('cancel_batch', {
+        claim_batch_id: bonusMonitorSelectedBatch.claim_batch_id
+      });
+      showToast(`Lock dibatalkan. ${result.cancelled_count || 0} row diperbarui.`, 'success');
+      bonusMonitoringCache.loadedAt = 0;
+      await adminFetchBonusMonitoring({ force: true, resetPage: true });
+      await adminOpenBonusBatchDetail(bonusMonitorSelectedBatch.id);
+    } catch (error) {
+      showToast(error.message || 'Gagal membatalkan lock.', 'error');
+    } finally {
+      setButtonLoading(cancelBtn, false);
     }
   }
 
@@ -9491,6 +9518,7 @@
     monitorOperatorFilterTimer = setTimeout(() => adminFetchBonusMonitoring({ resetPage: true }), 400);
   });
   document.getElementById('monitorFinalizeBtn').addEventListener('click', adminFinalizeSelectedBonusBatch);
+  document.getElementById('monitorCancelBtn').addEventListener('click', adminCancelSelectedBonusBatch);
   document.getElementById('monitorCloseDetailBtn').addEventListener('click', adminCloseBonusBatchDetail);
   document.getElementById('monitorCopyClaimBtn').addEventListener('click', adminCopyBonusClaim);
   document.getElementById('claimImageDropzone').addEventListener('click', () => {
@@ -10688,6 +10716,5 @@
   });
 })();
 </script>
-<script src="/telegram-parser-preview.js"></script>
 </body>
 </html>

@@ -318,6 +318,14 @@ function methodNotAllowed(res, allow) {
 }
 
 export default async function handler(req, res) {
+  const enabled = String(process.env.TELEGRAM_PARSER_QRIS_ENABLED || '').trim().toLowerCase() === 'true';
+  if (!enabled) {
+    return res.status(410).json({
+      success: false,
+      error: 'TELEGRAM_DISABLED',
+      message: 'Integrasi Telegram Parser QRIS dinonaktifkan.'
+    });
+  }
   const action = String(req.query.action || '').trim().toLowerCase();
   if (action === 'ingest') return handleIngest(req, res);
   if (action === 'batches') return handleBatches(req, res);
